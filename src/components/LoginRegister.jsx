@@ -1,0 +1,200 @@
+// src/components/LoginRegister.jsx
+import { useState } from 'react'
+import { useAuth } from '../context/AuthContext'
+
+export default function LoginRegister() {
+  const { login, register } = useAuth()
+  const [tab, setTab] = useState('login')
+
+  return (
+    <div style={{ minHeight:'100vh', background:'linear-gradient(135deg,#e8f4fd 0%,#bdd9f0 100%)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+      <div style={{ background:'#fff', borderRadius:24, boxShadow:'0 16px 48px rgba(0,0,0,.12)', maxWidth:460, width:'100%', overflow:'hidden' }}>
+        {/* Header */}
+        <div style={{ background:'linear-gradient(135deg,#0a2342,#1a4a7a)', padding:'32px 40px 24px', textAlign:'center', color:'#fff' }}>
+          <img src="/vatm-logo.png" alt="VATM" style={{ width:72, height:72, borderRadius:'50%', objectFit:'cover', marginBottom:12, border:'3px solid rgba(255,255,255,.3)' }}/>
+          <div style={{ fontSize:20, fontWeight:700, marginBottom:4 }}>VATM-PMU</div>
+          <div style={{ fontSize:13, opacity:.8 }}>Hệ thống Quản lý Dự án Hạ tầng</div>
+        </div>
+
+        {/* Tabs */}
+        <div style={{ display:'flex', borderBottom:'0.5px solid #e5e7eb' }}>
+          {[['login','🔑 Đăng nhập'],['register','📝 Đăng ký']].map(([v,l]) => (
+            <button key={v} onClick={() => setTab(v)}
+              style={{ flex:1, padding:'14px', border:'none', cursor:'pointer', fontSize:14, fontWeight:600,
+                background: tab===v ? '#fff' : '#f9fafb',
+                color:      tab===v ? '#0a2342' : '#9ca3af',
+                borderBottom: tab===v ? '2.5px solid #0a2342' : '2.5px solid transparent' }}>
+              {l}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ padding:'32px 40px 36px' }}>
+          {tab === 'login'    && <LoginForm    onSwitch={() => setTab('register')} login={login}/>}
+          {tab === 'register' && <RegisterForm onSwitch={() => setTab('login')}   register={register}/>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function LoginForm({ onSwitch, login }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [err,      setErr]      = useState('')
+  const [loading,  setLoading]  = useState(false)
+  const [showPw,   setShowPw]   = useState(false)
+
+  const handleSubmit = async () => {
+    if (!username.trim() || !password) { setErr('Vui lòng nhập đầy đủ thông tin.'); return }
+    setLoading(true); setErr('')
+    try {
+      await login(username, password)
+    } catch(e) {
+      setErr(e.message)
+    } finally { setLoading(false) }
+  }
+
+  return (
+    <div>
+      <h3 style={{ fontSize:18, fontWeight:700, color:'#0a2342', marginBottom:20, textAlign:'center' }}>Chào mừng trở lại!</h3>
+
+      <label style={lSt}>Tên đăng nhập</label>
+      <input value={username} onChange={e => setUsername(e.target.value)}
+        onKeyDown={e => e.key==='Enter' && handleSubmit()}
+        placeholder="Nhập tên đăng nhập" autoFocus style={iSt}/>
+
+      <label style={lSt}>Mật khẩu</label>
+      <div style={{ position:'relative', marginBottom:err?8:20 }}>
+        <input value={password} onChange={e => setPassword(e.target.value)}
+          onKeyDown={e => e.key==='Enter' && handleSubmit()}
+          type={showPw?'text':'password'} placeholder="Nhập mật khẩu"
+          style={{ ...iSt, marginBottom:0, paddingRight:44 }}/>
+        <button onClick={() => setShowPw(v=>!v)}
+          style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', fontSize:16, color:'#888' }}>
+          {showPw ? '🙈' : '👁️'}
+        </button>
+      </div>
+
+      {err && <ErrBox msg={err}/>}
+
+      <button onClick={handleSubmit} disabled={loading}
+        style={{ ...btnSt, background: loading?'#6b7280':'#0a2342' }}>
+        {loading ? '⏳ Đang đăng nhập...' : '🔑 Đăng nhập'}
+      </button>
+
+      <p style={{ textAlign:'center', fontSize:13, color:'#888', marginTop:16 }}>
+        Chưa có tài khoản?{' '}
+        <span onClick={onSwitch} style={{ color:'#0a2342', fontWeight:600, cursor:'pointer', textDecoration:'underline' }}>Đăng ký ngay</span>
+      </p>
+    </div>
+  )
+}
+
+function RegisterForm({ onSwitch, register }) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirm,  setConfirm]  = useState('')
+  const [name,     setName]     = useState('')
+  const [unit,     setUnit]     = useState('')
+  const [err,      setErr]      = useState('')
+  const [loading,  setLoading]  = useState(false)
+  const [done,     setDone]     = useState(false)
+  const [showPw,   setShowPw]   = useState(false)
+
+  const handleSubmit = async () => {
+    setErr('')
+    if (!username.trim()) { setErr('Vui lòng nhập tên đăng nhập.'); return }
+    if (!/^[a-z0-9_]{3,30}$/.test(username.trim().toLowerCase())) {
+      setErr('Tên đăng nhập chỉ gồm chữ thường, số, dấu gạch dưới (3–30 ký tự).'); return }
+    if (password.length < 6)  { setErr('Mật khẩu phải có ít nhất 6 ký tự.'); return }
+    if (password !== confirm)  { setErr('Mật khẩu xác nhận không khớp.'); return }
+    if (!name.trim())          { setErr('Vui lòng nhập họ tên.'); return }
+    if (!unit.trim())          { setErr('Vui lòng nhập đơn vị công tác.'); return }
+    setLoading(true)
+    try {
+      await register({ username: username.trim().toLowerCase(), password, name, unit })
+      setDone(true)
+    } catch(e) {
+      setErr(e.message)
+    } finally { setLoading(false) }
+  }
+
+  if (done) return (
+    <div style={{ textAlign:'center' }}>
+      <div style={{ fontSize:56, marginBottom:12 }}>🎉</div>
+      <h3 style={{ fontSize:17, fontWeight:700, color:'#15803d', marginBottom:8 }}>Đăng ký thành công!</h3>
+      <p style={{ fontSize:13, color:'#555', lineHeight:1.8, marginBottom:16 }}>
+        Tài khoản <strong>"{username}"</strong> đã được tạo.<br/>
+        Quản trị viên sẽ xét duyệt và thông báo sớm nhất.
+      </p>
+      <div style={{ background:'#fef9c3', borderRadius:10, padding:'12px', border:'0.5px solid #fde047', fontSize:12, color:'#854d0e', marginBottom:20 }}>
+        📧 Liên hệ: <strong>hoangductudhbk@gmail.com</strong>
+      </div>
+      <button onClick={onSwitch} style={{ ...btnSt, background:'#0a2342' }}>← Quay lại đăng nhập</button>
+    </div>
+  )
+
+  return (
+    <div>
+      <h3 style={{ fontSize:17, fontWeight:700, color:'#0a2342', marginBottom:4, textAlign:'center' }}>Tạo tài khoản mới</h3>
+      <p style={{ fontSize:12, color:'#888', textAlign:'center', marginBottom:20 }}>Quản trị viên sẽ phê duyệt trước khi bạn đăng nhập được</p>
+
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:0 }}>
+        <div>
+          <label style={lSt}>Tên đăng nhập <span style={{color:'#e53e3e'}}>*</span></label>
+          <input value={username} onChange={e=>setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,''))}
+            placeholder="vd: nguyenvana" style={iSt}/>
+        </div>
+        <div>
+          <label style={lSt}>Họ và tên <span style={{color:'#e53e3e'}}>*</span></label>
+          <input value={name} onChange={e=>setName(e.target.value)} placeholder="Nguyễn Văn A" style={iSt}/>
+        </div>
+      </div>
+
+      <label style={lSt}>Mật khẩu <span style={{color:'#e53e3e'}}>*</span></label>
+      <div style={{ position:'relative' }}>
+        <input value={password} onChange={e=>setPassword(e.target.value)}
+          type={showPw?'text':'password'} placeholder="Tối thiểu 6 ký tự"
+          style={{ ...iSt, paddingRight:44 }}/>
+        <button onClick={()=>setShowPw(v=>!v)}
+          style={{ position:'absolute', right:12, top:14, background:'none', border:'none', cursor:'pointer', fontSize:16, color:'#888' }}>
+          {showPw?'🙈':'👁️'}
+        </button>
+      </div>
+
+      <label style={lSt}>Xác nhận mật khẩu <span style={{color:'#e53e3e'}}>*</span></label>
+      <input value={confirm} onChange={e=>setConfirm(e.target.value)}
+        type="password" placeholder="Nhập lại mật khẩu" style={iSt}/>
+
+      <label style={lSt}>Đơn vị công tác <span style={{color:'#e53e3e'}}>*</span></label>
+      <input value={unit} onChange={e=>setUnit(e.target.value)}
+        placeholder="Ban QLDA chuyên ngành Quản lý bay"
+        style={{ ...iSt, marginBottom: err?8:20 }}/>
+
+      {err && <ErrBox msg={err}/>}
+
+      <button onClick={handleSubmit} disabled={loading}
+        style={{ ...btnSt, background: loading?'#6b7280':'#0a2342' }}>
+        {loading ? '⏳ Đang xử lý...' : '📨 Gửi đăng ký'}
+      </button>
+
+      <p style={{ textAlign:'center', fontSize:13, color:'#888', marginTop:16 }}>
+        Đã có tài khoản?{' '}
+        <span onClick={onSwitch} style={{ color:'#0a2342', fontWeight:600, cursor:'pointer', textDecoration:'underline' }}>Đăng nhập</span>
+      </p>
+    </div>
+  )
+}
+
+function ErrBox({ msg }) {
+  return (
+    <div style={{ fontSize:12, color:'#dc2626', marginBottom:14, padding:'9px 12px', background:'#fef2f2', borderRadius:8, border:'0.5px solid #fecaca', display:'flex', alignItems:'center', gap:6 }}>
+      ⚠️ {msg}
+    </div>
+  )
+}
+
+const iSt = { width:'100%', padding:'11px 14px', border:'0.5px solid #ddd', borderRadius:10, fontSize:13, outline:'none', boxSizing:'border-box', marginBottom:14, fontFamily:'inherit', transition:'border .2s' }
+const lSt = { fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:5 }
+const btnSt = { width:'100%', padding:'13px', color:'#fff', border:'none', borderRadius:12, cursor:'pointer', fontSize:14, fontWeight:600, transition:'opacity .2s' }
