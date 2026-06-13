@@ -1,0 +1,150 @@
+import { useState, useEffect } from 'react'
+import { useActivityLog } from '../hooks/useActivityLog'
+
+const ACTION_MAP = {
+  login:          { icon:'🔑', label:'Đăng nhập',       color:'#15803d', bg:'#f0fdf4' },
+  logout:         { icon:'🚪', label:'Đăng xuất',       color:'#555',    bg:'#f5f5f5' },
+  view_doc:       { icon:'👁️', label:'Đọc văn bản',     color:'#0891b2', bg:'#ecfeff' },
+  add_doc:        { icon:'📄', label:'Thêm văn bản',    color:'#1d4ed8', bg:'#eff6ff' },
+  edit_doc:       { icon:'✏️',  label:'Sửa văn bản',    color:'#b45309', bg:'#fffbeb' },
+  delete_doc:     { icon:'🗑️', label:'Xóa văn bản',    color:'#b91c1c', bg:'#fef2f2' },
+  status:         { icon:'🔄', label:'Đổi trạng thái', color:'#7c3aed', bg:'#f5f3ff' },
+  upload_file:    { icon:'📎', label:'Upload file',     color:'#0891b2', bg:'#ecfeff' },
+  add_project:    { icon:'📁', label:'Thêm dự án',      color:'#15803d', bg:'#f0fdf4' },
+  delete_project: { icon:'❌', label:'Xóa dự án',      color:'#b91c1c', bg:'#fef2f2' },
+  export_report:  { icon:'📊', label:'Xuất báo cáo',   color:'#854d0e', bg:'#fefce8' },
+}
+
+const fmt = (ts) => {
+  if (!ts?.seconds) return '—'
+  return new Date(ts.seconds * 1000).toLocaleString('vi-VN', {
+    day:'2-digit', month:'2-digit', year:'numeric',
+    hour:'2-digit', minute:'2-digit', second:'2-digit'
+  })
+}
+
+const calcDuration = (logs, loginLog) => {
+  const loginTime = loginLog.timestamp?.seconds
+  if (!loginTime) return null
+  const idx = logs.indexOf(loginLog)
+  const logoutLog = logs.slice(0, idx).find(l =>
+    l.action === 'logout' && l.userId === loginLog.userId &&
+    (l.timestamp?.seconds || 0) > loginTime
+  )
+  if (!logoutLog) return null
+  const mins = Math.round((logoutLog.timestamp.seconds - loginTime) / 60)
+  return mins > 0 ? `${mins} phút` : 'dưới 1 phút'
+}
+
+export default function HistoryView({ user }) {
+  const { loadLogs }          = useActivityLog(user)
+  const [logs, setLogs]       = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filterUser, setFU]   = useState('all')
+  const [filterAct,  setFA]   = useState('all')
+
+  useEffect(() => {
+    const unsub = loadLogs(list => { setLogs(list); setLoading(false) })
+    return unsub
+  }, [])
+
+  const users   = [...new Set(logs.map(l => l.userEmail))].filter(Boolean)
+  const actions = [...new Set(logs.map(l => l.action))].filter(Boolean)
+  const filtered = logs.filter(l =>
+    (filterUser === 'all' || l.userEmail === filterUser) &&
+    (filterAct  === 'all' || l.action   === filterAct)
+  )
+
+  const stats = {
+    logins:  logs.filter(l => l.action === 'login').length,
+    views:   logs.filter(l => l.action === 'view_doc').length,
+    adds:    logs.filter(l => l.action === 'add_doc').length,
+    deletes: logs.filter(l => l.action === 'delete_doc').length,
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
+
+      {/* ── Header cố định ── */}
+      <div style={{ flexShrink:0, padding:'16px 24px 12px', borderBottom:'0.5px solid #e5e4e0', background:'#fff' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:10, marginBottom:12 }}>
+          <div>
+            <h3 style={{ fontSize:15, fontWeight:600, margin:'0 0 4px' }}>📋 Lịch sử truy cập</h3>
+            <p style={{ fontSize:12, color:'#888', margin:0 }}>
+              {filtered.length} bản ghi &nbsp;·&nbsp;
+              <span style={{ color:'#b91c1c' }}>Chỉ đọc — không thể xóa</span>
+            </p>
+          </div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            <select value={filterUser} onChange={e => setFU(e.target.value)}
+              style={{ padding:'7px 10px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none', background:'#fff', maxWidth:200 }}>
+              <option value="all">Tất cả người dùng</option>
+              {users.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+            <select value={filterAct} onChange={e => setFA(e.target.value)}
+              style={{ padding:'7px 10px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none', background:'#fff' }}>
+              <option value="all">Tất cả hành động</option>
+              {actions.map(a => <option key={a} value={a}>{ACTION_MAP[a]?.label || a}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Thống kê cố định */}
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
+          {[
+            ['🔑 Lần đăng nhập',  stats.logins,  '#15803d', '#f0fdf4'],
+            ['👁️ Lần đọc văn bản', stats.views,   '#0891b2', '#ecfeff'],
+            ['📄 Văn bản đã thêm', stats.adds,    '#1d4ed8', '#eff6ff'],
+            ['🗑️ Văn bản đã xóa',  stats.deletes, '#b91c1c', '#fef2f2'],
+          ].map(([l,v,c,bg]) => (
+            <div key={l} style={{ padding:'10px 14px', background:bg, borderRadius:10, border:'0.5px solid '+c+'33' }}>
+              <div style={{ fontSize:11, color:'#888', marginBottom:2 }}>{l}</div>
+              <div style={{ fontSize:20, fontWeight:700, color:c }}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Danh sách cuộn ── */}
+      <div style={{ flex:1, overflowY:'auto', padding:'12px 24px' }}>
+        {loading ? (
+          <div style={{ padding:40, textAlign:'center', color:'#888' }}>⏳ Đang tải...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding:40, textAlign:'center', color:'#888', background:'#fff', borderRadius:12, border:'0.5px solid #e5e4e0' }}>
+            Chưa có lịch sử nào
+          </div>
+        ) : (
+          <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+            {filtered.map(l => {
+              const a = ACTION_MAP[l.action] || { icon:'•', label:l.action, color:'#555', bg:'#f5f5f5' }
+              const duration = l.action === 'login' ? calcDuration(logs, l) : null
+              return (
+                <div key={l.id} style={{ display:'flex', alignItems:'flex-start', gap:12, padding:'10px 14px', background:'#fff', border:'0.5px solid #e5e4e0', borderRadius:10 }}>
+                  <span style={{ fontSize:18, flexShrink:0, marginTop:2 }}>{a.icon}</span>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4, flexWrap:'wrap' }}>
+                      <span style={{ fontSize:11, padding:'2px 9px', borderRadius:20, background:a.bg, color:a.color, fontWeight:700, border:'0.5px solid '+a.color+'44' }}>
+                        {a.label}
+                      </span>
+                      <span style={{ fontSize:12, fontWeight:600, color:'#1a1a1a' }}>{l.userName}</span>
+                      <span style={{ fontSize:11, color:'#aaa' }}>({l.userEmail})</span>
+                      {duration && (
+                        <span style={{ fontSize:11, color:'#15803d', background:'#f0fdf4', padding:'1px 8px', borderRadius:20 }}>
+                          ⏱️ Dùng {duration}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize:13, color:'#444', lineHeight:1.6 }}>{l.details}</div>
+                  </div>
+                  <div style={{ fontSize:11, color:'#aaa', whiteSpace:'nowrap', flexShrink:0, marginTop:2, textAlign:'right' }}>
+                    {fmt(l.timestamp)}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
