@@ -5,6 +5,10 @@ import {
   createUserWithEmailAndPassword, signOut, sendPasswordResetEmail
 } from 'firebase/auth'
 import { doc, getDoc, setDoc, collection, query, where, getDocs, serverTimestamp, addDoc } from 'firebase/firestore'
+import emailjs from '@emailjs/browser'
+
+// Khởi tạo EmailJS
+emailjs.init(import.meta.env.VITE_EMAILJS_PUBLIC_KEY)
 import { auth, db } from '../firebase'
 
 const Ctx = createContext(null)
@@ -77,6 +81,8 @@ export function AuthProvider({ children }) {
     if (snap.empty) throw new Error('Tên đăng nhập không tồn tại.')
 
     const userData = snap.docs[0].data()
+
+    // Lưu vào Firestore
     await addDoc(collection(db, 'resetRequests'), {
       uid:          userData.uid,
       username:     uname,
@@ -88,6 +94,24 @@ export function AuthProvider({ children }) {
       status:       'pending',
       requestAt:    serverTimestamp(),
     })
+
+    // Gửi email thông báo cho admin qua EmailJS
+    try {
+      await emailjs.send(
+        import.meta.env.VITE_EMAILJS_SERVICE_ID,
+        import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
+        {
+          username:      uname,
+          name:          userData.name || '—',
+          unit:          userData.unit || '—',
+          contact_email: contactEmail,
+          time:          new Date().toLocaleString('vi-VN'),
+        },
+      )
+    } catch(e) {
+      console.warn('EmailJS error:', e)
+      // Không throw — Firestore đã lưu rồi, email fail không sao
+    }
   }
 
   const logout = () => { signOut(auth); setUserDoc(null) }
