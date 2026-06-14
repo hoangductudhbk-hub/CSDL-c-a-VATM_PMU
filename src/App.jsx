@@ -330,7 +330,7 @@ function AppInner() {
         </div>
 
         <div style={{ padding:'0 8px', flex:'none' }}>
-          {[['home','🏠','Trang chủ','docs'],['home','ℹ️','Giới thiệu','about'],['home','📖','Hướng dẫn sử dụng','guide'],['home','📋','Lịch sử truy cập','history']].map(([p_,icon,label,t]) => (
+          {[['home','🏠','Trang chủ','docs'],['home','📖','Hướng dẫn sử dụng','guide'],['home','📋','Lịch sử truy cập','history']].map(([p_,icon,label,t]) => (
             <button key={label} onClick={() => { setSelProj(p_); setTab(t) }}
               style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer',
                 background:tab===t&&selProj==='home'?'#f0f0ec':'transparent', color:'#1a1a1a', fontSize:13,
@@ -409,10 +409,11 @@ function AppInner() {
         {tab === 'admin' && isAdmin && <div style={{ flex:1, overflowY:'auto' }}><AdminUsers /></div>}
 
         {!proj && tab !== 'history' && tab !== 'about' && tab !== 'guide' && tab !== 'admin' && (
-          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:48, background:'linear-gradient(135deg, #e8f4fd 0%, #bdd9f0 100%)' }}>
+          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:48, background:'linear-gradient(135deg, #e8f4fd 0%, #bdd9f0 100%)', position:'relative' }}>
             <img src="/vatm-logo.png" alt="VATM" style={{ width:200, height:200, borderRadius:'50%', objectFit:'cover', marginBottom:24 }}/>
             <h2 style={{ fontSize:36, fontWeight:700, color:'#0a2342', marginBottom:12 }}>Chào mừng đến VATM-PMU</h2>
             <p style={{ fontSize:18, color:'#1a5490', textAlign:'center', maxWidth:500 }}>Chọn dự án ở thanh công cụ bên trái để xem và quản lý.</p>
+            <p style={{ position:'absolute', bottom:16, right:24, fontSize:11, color:'#aaa' }}>Mọi ý kiến đóng góp xin gửi về: <a href="mailto:hoangductudhbk@gmail.com" style={{ color:'#1a5490', textDecoration:'none' }}>hoangductudhbk@gmail.com</a></p>
           </div>
         )}
 
