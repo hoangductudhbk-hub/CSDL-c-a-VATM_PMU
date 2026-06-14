@@ -203,7 +203,7 @@ function AppInner() {
 
   const { projects, loading: pLoad, addProject, deleteProject } = useProjects(user?.uid)
   const { logLogin, logLogout, logViewDoc, logAddDoc, logEditDoc, logDeleteDoc,
-          logAddProj, logDeleteProj, logExportReport } = useActivityLog(user)
+          logAddProj, logDeleteProj, logExportReport } = useActivityLog(user, userDoc)
   const { draft } = useUploadCtx()
   const [selProj, setSelProj] = useState('home')
   const proj = selProj === 'home' ? null : (projects.find(p => p.id === selProj) || null)
@@ -517,7 +517,7 @@ function AppInner() {
                         </td>
                         <td style={{ padding:'10px 8px', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
                           <button onClick={() => { setEditDoc(d); setModal('edit') }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#888' }}>✏️</button>
-                          {isAdmin && <button onClick={() => { if(confirm('Xóa văn bản này?')) { deleteFile(d); deleteDocument(d.id); logDeleteDoc(d.code, d.subject, proj?.name) } }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#e53e3e' }}>🗑️</button>}
+                          <button onClick={() => { if(confirm('Xóa văn bản này?')) { deleteFile(d); deleteDocument(d.id); logDeleteDoc(d.code, d.subject, proj?.name) } }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#e53e3e' }}>🗑️</button>
                         </td>
                       </tr>
                     ))}
