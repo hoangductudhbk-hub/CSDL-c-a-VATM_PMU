@@ -96,7 +96,7 @@ export default function AdminUsers() {
                     <tr key={u.id} style={{ borderBottom:'1px solid #f3f4f6' }}
                       onMouseEnter={e=>e.currentTarget.style.background='#f9fafb'}
                       onMouseLeave={e=>e.currentTarget.style.background=''}>
-                      <td style={{ padding:'12px 14px', fontWeight:600, color:'#0a2342' }}>@{u.username||'—'}</td>
+                      <td style={{ padding:'12px 14px', fontWeight:600, color:'#0a2342' }}>{u.username ? '@'+u.username : <span style={{color:'#aaa',fontWeight:400,fontSize:11}}>Tài khoản cũ</span>}</td>
                       <td style={{ padding:'12px 14px' }}>{u.name||'—'}</td>
                       <td style={{ padding:'12px 14px', color:'#555', fontSize:12 }}>{u.unit||'—'}</td>
                       <td style={{ padding:'12px 14px', color:'#2563eb', fontSize:12 }}>
