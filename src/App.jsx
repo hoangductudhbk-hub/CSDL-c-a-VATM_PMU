@@ -413,7 +413,7 @@ function AppInner() {
             <img src="/vatm-logo.png" alt="VATM" style={{ width:200, height:200, borderRadius:'50%', objectFit:'cover', marginBottom:24 }}/>
             <h2 style={{ fontSize:36, fontWeight:700, color:'#0a2342', marginBottom:12 }}>Chào mừng đến VATM-PMU</h2>
             <p style={{ fontSize:18, color:'#1a5490', textAlign:'center', maxWidth:500 }}>Chọn dự án ở thanh công cụ bên trái để xem và quản lý.</p>
-            <p style={{ position:'absolute', bottom:16, right:24, fontSize:11, color:'#aaa' }}>Mọi ý kiến đóng góp xin gửi về: <a href="mailto:hoangductudhbk@gmail.com" style={{ color:'#1a5490', textDecoration:'none' }}>hoangductudhbk@gmail.com</a></p>
+            <p style={{ position:'absolute', bottom:16, right:24, fontSize:11, color:'#333' }}>Mọi ý kiến đóng góp xin gửi về: <a href="mailto:hoangductudhbk@gmail.com" style={{ color:'#0a2342', textDecoration:'none', fontWeight:600 }}>hoangductudhbk@gmail.com</a></p>
           </div>
         )}
 
@@ -467,11 +467,12 @@ function AppInner() {
                 </div>
               ))}
               </div>
+              <div style={{ textAlign:'center', marginTop:14, padding:'10px 16px', background:'#fef9c3', borderRadius:10, border:'0.5px solid #fde047', fontSize:12, color:'#854d0e' }}>
+                ⚠️ <b>Lưu ý:</b> Trợ lý AI miễn phí nên hạn chế về tính năng và số lượt sử dụng, mong quý vị thông cảm.
+              </div>
             </div>
           </div>
-        )}
-
-        {proj && tab !== 'history' && <>
+        )} && <>
           <div style={{ padding:'16px 24px 12px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div style={{ fontSize:17, fontWeight:700 }}>{proj?.name}</div>
             <button onClick={() => { setEditDoc(null); setModal('add') }}
