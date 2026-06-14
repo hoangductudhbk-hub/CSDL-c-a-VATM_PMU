@@ -273,7 +273,7 @@ function AppInner() {
       logEditDoc(data.code||editDoc.code, data.subject||editDoc.subject, proj?.name)
     } else {
       await addDocument(data, silent)
-      if (!silent) logAddDoc(data.code, data.subject, proj?.name)
+      logAddDoc(data.code, data.subject, proj?.name)
     }
     if (!silent) { setModal(null); setEditDoc(null) }
   }
