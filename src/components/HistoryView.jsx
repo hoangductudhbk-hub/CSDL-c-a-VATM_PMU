@@ -56,6 +56,7 @@ export default function HistoryView({ user }) {
   const [loading, setLoading] = useState(true)
   const [filterUser, setFU]   = useState('all')
   const [filterAct,  setFA]   = useState('all')
+  const [deleting,   setDeleting] = useState(false)
 
   useEffect(() => {
     const unsub = loadLogs(list => { setLogs(list); setLoading(false) }, user?.uid, isAdmin)
@@ -84,8 +85,6 @@ export default function HistoryView({ user }) {
     deletes: logs.filter(l => l.action === 'delete_doc').length,
   }
 
-  const [deleting, setDeleting] = useState(false)
-
   const deleteAllLogs = async () => {
     if (!confirm('Xóa toàn bộ lịch sử truy cập? Hành động này không thể hoàn tác!')) return
     setDeleting(true)
@@ -99,7 +98,7 @@ export default function HistoryView({ user }) {
     }
   }
 
-  return (
+  const exportWord = () => {
     const now   = new Date()
     const ngay  = now.toLocaleDateString('vi-VN')
     const s2    = (n) => String(n).padStart(2,'0')
