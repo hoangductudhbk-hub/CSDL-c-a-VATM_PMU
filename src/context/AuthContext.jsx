@@ -77,6 +77,7 @@ export function AuthProvider({ children }) {
 
     const userData = snap.docs[0].data()
 
+    // Lưu vào Firestore
     await addDoc(collection(db, 'resetRequests'), {
       uid:          userData.uid,
       username:     uname,
@@ -91,9 +92,15 @@ export function AuthProvider({ children }) {
 
     // Gửi email qua EmailJS
     try {
-      await emailjs.send(
-        import.meta.env.VITE_EMAILJS_SERVICE_ID,
-        import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
+      const serviceId  = import.meta.env.VITE_EMAILJS_SERVICE_ID
+      const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID
+      const publicKey  = import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+
+      console.log('EmailJS debug:', { serviceId, templateId, publicKey })
+
+      const result = await emailjs.send(
+        serviceId,
+        templateId,
         {
           username:      uname,
           name:          userData.name || '—',
@@ -101,8 +108,9 @@ export function AuthProvider({ children }) {
           contact_email: contactEmail,
           time:          new Date().toLocaleString('vi-VN'),
         },
-        import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+        publicKey
       )
+      console.log('EmailJS success:', result)
     } catch(e) {
       console.warn('EmailJS error:', e)
     }
