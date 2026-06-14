@@ -82,6 +82,60 @@ export default function HistoryView({ user }) {
     deletes: logs.filter(l => l.action === 'delete_doc').length,
   }
 
+  const exportWord = () => {
+    const now   = new Date()
+    const ngay  = now.toLocaleDateString('vi-VN')
+    const s2    = (n) => String(n).padStart(2,'0')
+    const dd=s2(now.getDate()), mm=s2(now.getMonth()+1), hh=s2(now.getHours()), min=s2(now.getMinutes())
+
+    const rows = filtered.map((l, i) => {
+      const a    = ACTION_MAP[l.action] || { label: l.action }
+      const name = getDisplayName(l)
+      const time = fmt(l.timestamp)
+      return `<tr>
+        <td style="padding:5pt 8pt;border:1px solid #ccc;text-align:center">${i+1}</td>
+        <td style="padding:5pt 8pt;border:1px solid #ccc;font-weight:bold">${name}</td>
+        <td style="padding:5pt 8pt;border:1px solid #ccc">${l.userEmail||'—'}</td>
+        <td style="padding:5pt 8pt;border:1px solid #ccc">${a.label}</td>
+        <td style="padding:5pt 8pt;border:1px solid #ccc">${l.details||'—'}</td>
+        <td style="padding:5pt 8pt;border:1px solid #ccc;white-space:nowrap">${time}</td>
+      </tr>`
+    }).join('')
+
+    const html = `<html><head><meta charset='utf-8'>
+    <style>
+      body{font-family:'Times New Roman',serif;font-size:13pt}
+      h1{font-size:16pt;font-weight:bold;text-align:center;margin-bottom:4pt}
+      p{text-align:center;font-size:12pt;margin:4pt 0 12pt}
+      table{border-collapse:collapse;width:100%}
+      th{background:#0a2342;color:#fff;padding:6pt 8pt;border:1px solid #333;font-size:12pt}
+      td{font-size:11pt}
+    </style></head><body>
+    <h1>BÁO CÁO LỊCH SỬ TRUY CẬP HỆ THỐNG</h1>
+    <h1>VATM-PMU — Quản lý Dự án</h1>
+    <p>Ngày xuất: ${ngay} ${hh}:${min} &nbsp;|&nbsp; Tổng: ${filtered.length} bản ghi</p>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:40pt">STT</th>
+          <th>Họ tên</th>
+          <th>Email</th>
+          <th>Hành động</th>
+          <th>Chi tiết</th>
+          <th style="width:100pt">Thời gian</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </body></html>`
+
+    const blob = new Blob(['\uFEFF' + html], { type:'application/msword;charset=utf-8' })
+    const a    = document.createElement('a')
+    a.href     = URL.createObjectURL(blob)
+    a.download = `LichSuTruyCap_${dd}-${mm}-${now.getFullYear()}_${hh}h${min}.doc`
+    a.click()
+  }
+
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
 
@@ -95,7 +149,10 @@ export default function HistoryView({ user }) {
               <span style={{ color:'#b91c1c' }}>Chỉ đọc — không thể xóa</span>
             </p>
           </div>
-          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+            <button onClick={exportWord} style={{ padding:'7px 14px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:12, fontWeight:600 }}>
+              📥 Xuất báo cáo Word
+            </button>
             {/* Tất cả đều thấy filter theo người dùng */}
             <select value={filterUser} onChange={e => setFU(e.target.value)}
               style={{ padding:'7px 10px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none', background:'#fff', maxWidth:200 }}>
