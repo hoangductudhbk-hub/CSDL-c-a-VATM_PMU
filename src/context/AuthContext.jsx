@@ -2,14 +2,11 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import {
   onAuthStateChanged, signInWithEmailAndPassword,
-  createUserWithEmailAndPassword, signOut, sendPasswordResetEmail
+  createUserWithEmailAndPassword, signOut
 } from 'firebase/auth'
 import { doc, getDoc, setDoc, collection, query, where, getDocs, serverTimestamp, addDoc } from 'firebase/firestore'
-import emailjs from '@emailjs/browser'
-
-// Khởi tạo EmailJS
-emailjs.init(import.meta.env.VITE_EMAILJS_PUBLIC_KEY)
 import { auth, db } from '../firebase'
+import emailjs from '@emailjs/browser'
 
 const Ctx = createContext(null)
 const ADMIN_USERNAMES = ['hoangductu']
@@ -47,12 +44,10 @@ export function AuthProvider({ children }) {
   // ── Đăng ký ──
   const register = async ({ username, password, name, unit, email }) => {
     const uname = username.trim().toLowerCase()
-    // Kiểm tra username đã tồn tại chưa
     const q    = query(collection(db, 'users'), where('username', '==', uname))
     const snap = await getDocs(q)
     if (!snap.empty) throw new Error('Tên đăng nhập đã được sử dụng. Vui lòng chọn tên khác.')
 
-    // Kiểm tra email đã đăng ký chưa
     const emailLower = email.trim().toLowerCase()
     const qEmail = query(collection(db, 'users'), where('email', '==', emailLower))
     const snapEmail = await getDocs(qEmail)
@@ -73,7 +68,7 @@ export function AuthProvider({ children }) {
     await loadUserDoc(cred.user.uid)
   }
 
-  // ── Quên mật khẩu — gửi yêu cầu ──
+  // ── Quên mật khẩu ──
   const requestReset = async (username, contactEmail) => {
     const uname = username.trim().toLowerCase()
     const q    = query(collection(db, 'users'), where('username', '==', uname))
@@ -82,7 +77,6 @@ export function AuthProvider({ children }) {
 
     const userData = snap.docs[0].data()
 
-    // Lưu vào Firestore
     await addDoc(collection(db, 'resetRequests'), {
       uid:          userData.uid,
       username:     uname,
@@ -95,7 +89,7 @@ export function AuthProvider({ children }) {
       requestAt:    serverTimestamp(),
     })
 
-    // Gửi email thông báo cho admin qua EmailJS
+    // Gửi email qua EmailJS
     try {
       await emailjs.send(
         import.meta.env.VITE_EMAILJS_SERVICE_ID,
@@ -107,10 +101,10 @@ export function AuthProvider({ children }) {
           contact_email: contactEmail,
           time:          new Date().toLocaleString('vi-VN'),
         },
+        import.meta.env.VITE_EMAILJS_PUBLIC_KEY
       )
     } catch(e) {
       console.warn('EmailJS error:', e)
-      // Không throw — Firestore đã lưu rồi, email fail không sao
     }
   }
 
