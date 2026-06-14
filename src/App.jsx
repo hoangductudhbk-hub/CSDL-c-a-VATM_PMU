@@ -431,11 +431,11 @@ function AppInner() {
 
         {tab === 'guide' && (
           <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-            <div style={{ padding:'12px 24px 8px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', flexShrink:0 }}>
-              <h2 style={{ fontSize:18, fontWeight:700, margin:0 }}>📖 Hướng dẫn sử dụng</h2>
+            <div style={{ padding:'8px 20px 6px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', flexShrink:0 }}>
+              <h2 style={{ fontSize:16, fontWeight:700, margin:0 }}>📖 Hướng dẫn sử dụng</h2>
             </div>
-            <div style={{ flex:1, padding:'16px 24px', overflowY:'auto' }}>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+            <div style={{ flex:1, padding:'10px 20px', overflow:'hidden', display:'flex', flexDirection:'column' }}>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, flex:1 }}>
               {[
                 { num:'1', title:'Đăng ký tài khoản', icon:'📝',
                   content:'Nhấn tab <b>Đăng ký</b> → điền Tên đăng nhập, Mật khẩu, Họ tên, Đơn vị, Email → nhấn <b>Gửi đăng ký</b>. Tài khoản chờ admin phê duyệt trước khi đăng nhập được.' },
@@ -458,16 +458,16 @@ function AppInner() {
                 { num:'10', title:'Lịch sử truy cập', icon:'📋',
                   content:'Nhấn <b>📋 Lịch sử truy cập</b> ở menu trái để xem hoạt động của tất cả người dùng: đăng nhập/xuất, thêm/sửa/xóa văn bản. Lọc theo <b>người dùng</b> hoặc <b>loại hành động</b>.' },
               ].map(item => (
-                <div key={item.num} style={{ display:'flex', gap:12, padding:'12px 14px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
-                  <div style={{ flexShrink:0, width:30, height:30, borderRadius:8, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:13 }}>{item.num}</div>
+                <div key={item.num} style={{ display:'flex', gap:10, padding:'8px 12px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
+                  <div style={{ flexShrink:0, width:26, height:26, borderRadius:7, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:12 }}>{item.num}</div>
                   <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontWeight:700, fontSize:13, color:'#0a2342', marginBottom:3 }}>{item.icon} {item.title}</div>
-                    <div style={{ fontSize:12, color:'#555', lineHeight:1.7 }} dangerouslySetInnerHTML={{ __html: item.content }}/>
+                    <div style={{ fontWeight:700, fontSize:12, color:'#0a2342', marginBottom:2 }}>{item.icon} {item.title}</div>
+                    <div style={{ fontSize:11, color:'#555', lineHeight:1.5 }} dangerouslySetInnerHTML={{ __html: item.content }}/>
                   </div>
                 </div>
               ))}
               </div>
-              <div style={{ textAlign:'center', marginTop:14, padding:'10px 16px', background:'#fef9c3', borderRadius:10, border:'0.5px solid #fde047', fontSize:12, color:'#854d0e' }}>
+              <div style={{ textAlign:'center', marginTop:8, padding:'7px 16px', background:'#fef9c3', borderRadius:10, border:'0.5px solid #fde047', fontSize:11, color:'#854d0e', flexShrink:0 }}>
                 ⚠️ <b>Lưu ý:</b> Trợ lý AI miễn phí nên hạn chế về tính năng và số lượt sử dụng, mong quý vị thông cảm.
               </div>
             </div>
