@@ -228,8 +228,8 @@ function AppInner() {
   const chatEndRef = useRef(null)
 
   useEffect(() => {
-    if (user && !loggedIn) { logLogin(); setLoggedIn(true) }
-  }, [user])
+    if (user && userDoc && !loggedIn) { logLogin(); setLoggedIn(true) }
+  }, [user, userDoc])
 
   const openFromDraft = (projectId) => {
     if (projectId) setSelProj(projectId)
