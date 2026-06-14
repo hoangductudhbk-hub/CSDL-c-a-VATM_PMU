@@ -187,7 +187,7 @@ function RegisterForm({ onSwitch, register }) {
       <label style={lSt}>Mật khẩu <Req/></label>
       <div style={{ position:'relative' }}>
         <input value={password} onChange={e=>setPassword(e.target.value)}
-          type={showPw?'text':'password'} placeholder="Tối thiểu 8 ký tự, có HOA, số, ký tự đặc biệt"
+          type={showPw?'text':'password'} placeholder="Ví dụ: Vatm@2026"
           autoComplete="new-password" readOnly={!ready} onFocus={e=>e.target.removeAttribute('readOnly')}
           style={{ ...iSt, paddingRight:44 }}/>
         <button onClick={()=>setShowPw(v=>!v)}
