@@ -472,7 +472,9 @@ function AppInner() {
               </div>
             </div>
           </div>
-        )} && <>
+        )}
+
+        {proj && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && <>
           <div style={{ padding:'16px 24px 12px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
             <div style={{ fontSize:17, fontWeight:700 }}>{proj?.name}</div>
             <button onClick={() => { setEditDoc(null); setModal('add') }}
