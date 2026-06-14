@@ -136,7 +136,11 @@ function RegisterForm({ onSwitch, register }) {
     setErr('')
     if (!username.trim()) { setErr('Vui lòng nhập tên đăng nhập.'); return }
     if (!/^[a-z0-9_]{3,30}$/.test(username.trim().toLowerCase())) { setErr('Tên đăng nhập chỉ gồm chữ thường, số, dấu _ (3–30 ký tự).'); return }
-    if (password.length < 6) { setErr('Mật khẩu phải có ít nhất 6 ký tự.'); return }
+    if (password.length < 8) { setErr('Mật khẩu phải có ít nhất 8 ký tự.'); return }
+    if (!/[A-Z]/.test(password)) { setErr('Mật khẩu phải có ít nhất 1 chữ HOA (A-Z).'); return }
+    if (!/[a-z]/.test(password)) { setErr('Mật khẩu phải có ít nhất 1 chữ thường (a-z).'); return }
+    if (!/[0-9]/.test(password)) { setErr('Mật khẩu phải có ít nhất 1 chữ số (0-9).'); return }
+    if (!/[!@#$%^&*()_+\-=\[\]{};:\'",.<>?/|`~]/.test(password)) { setErr('Mật khẩu phải có ít nhất 1 ký tự đặc biệt (!@#$%...).'); return }
     if (password !== confirm) { setErr('Mật khẩu xác nhận không khớp.'); return }
     if (!name.trim()) { setErr('Vui lòng nhập họ tên.'); return }
     if (!unit.trim()) { setErr('Vui lòng nhập đơn vị công tác.'); return }
@@ -183,7 +187,7 @@ function RegisterForm({ onSwitch, register }) {
       <label style={lSt}>Mật khẩu <Req/></label>
       <div style={{ position:'relative' }}>
         <input value={password} onChange={e=>setPassword(e.target.value)}
-          type={showPw?'text':'password'} placeholder="Tối thiểu 6 ký tự"
+          type={showPw?'text':'password'} placeholder="Tối thiểu 8 ký tự, có HOA, số, ký tự đặc biệt"
           autoComplete="new-password" readOnly={!ready} onFocus={e=>e.target.removeAttribute('readOnly')}
           style={{ ...iSt, paddingRight:44 }}/>
         <button onClick={()=>setShowPw(v=>!v)}
