@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useActivityLog } from '../hooks/useActivityLog'
 import { useAuth } from '../context/AuthContext'
+import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore'
+import { db } from '../firebase'
 
 const ACTION_MAP = {
   login:          { icon:'🔑', label:'Đăng nhập',       color:'#15803d', bg:'#f0fdf4' },
@@ -82,7 +84,22 @@ export default function HistoryView({ user }) {
     deletes: logs.filter(l => l.action === 'delete_doc').length,
   }
 
-  const exportWord = () => {
+  const [deleting, setDeleting] = useState(false)
+
+  const deleteAllLogs = async () => {
+    if (!confirm('Xóa toàn bộ lịch sử truy cập? Hành động này không thể hoàn tác!')) return
+    setDeleting(true)
+    try {
+      const snap = await getDocs(collection(db, 'activityLogs'))
+      await Promise.all(snap.docs.map(d => deleteDoc(doc(db, 'activityLogs', d.id))))
+    } catch(e) {
+      alert('Lỗi khi xóa: ' + e.message)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  return (
     const now   = new Date()
     const ngay  = now.toLocaleDateString('vi-VN')
     const s2    = (n) => String(n).padStart(2,'0')
@@ -153,6 +170,11 @@ export default function HistoryView({ user }) {
             <button onClick={exportWord} style={{ padding:'7px 14px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:12, fontWeight:600 }}>
               📥 Xuất báo cáo Word
             </button>
+            {isAdmin && (
+              <button onClick={deleteAllLogs} disabled={deleting} style={{ padding:'7px 14px', background:deleting?'#9ca3af':'#dc2626', color:'#fff', border:'none', borderRadius:8, cursor:deleting?'not-allowed':'pointer', fontSize:12, fontWeight:600 }}>
+                {deleting ? '⏳ Đang xóa...' : '🗑️ Xóa tất cả lịch sử'}
+              </button>
+            )}
             {/* Tất cả đều thấy filter theo người dùng */}
             <select value={filterUser} onChange={e => setFU(e.target.value)}
               style={{ padding:'7px 10px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none', background:'#fff', maxWidth:200 }}>
