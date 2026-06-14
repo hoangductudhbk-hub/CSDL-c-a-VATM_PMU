@@ -433,12 +433,37 @@ function AppInner() {
             <div style={{ padding:'12px 24px 8px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', flexShrink:0 }}>
               <h2 style={{ fontSize:18, fontWeight:700, margin:0 }}>📖 Hướng dẫn sử dụng</h2>
             </div>
-            <div style={{ flex:1, padding:'16px 24px', overflowY:'auto', fontSize:13, color:'#555', lineHeight:1.8 }}>
-              <p>1. Đăng ký tài khoản → chờ admin phê duyệt → đăng nhập.</p>
-              <p>2. Chọn dự án bên trái → nhấn "+ Thêm văn bản".</p>
-              <p>3. Dùng AI tự điền hoặc nhập thủ công.</p>
-              <p>4. Xuất báo cáo Word khi cần.</p>
-              <p>5. Đổi mật khẩu: nhấn <strong>"🔑 Đổi mật khẩu"</strong> ở góc dưới trái sidebar.</p>
+            <div style={{ flex:1, padding:'20px 32px', overflowY:'auto', fontSize:13, color:'#444', lineHeight:2 }}>
+              {[
+                { num:'1', title:'Đăng ký tài khoản', icon:'📝',
+                  content:'Nhấn tab <b>Đăng ký</b> trên màn hình đăng nhập → điền đầy đủ: Tên đăng nhập, Mật khẩu, Họ tên, Đơn vị công tác, Email liên hệ → nhấn <b>Gửi đăng ký</b>. Tài khoản sẽ ở trạng thái <b>chờ duyệt</b> cho đến khi admin phê duyệt.' },
+                { num:'2', title:'Đăng nhập hệ thống', icon:'🔑',
+                  content:'Nhập <b>Tên đăng nhập hoặc Email</b> và <b>Mật khẩu</b> → nhấn <b>Đăng nhập</b>. Nếu quên mật khẩu, nhấn <b>Quên mật khẩu?</b> → điền username và email liên hệ → admin sẽ gửi mật khẩu tạm về email.' },
+                { num:'3', title:'Chọn dự án và xem văn bản', icon:'📋',
+                  content:'Danh sách dự án hiển thị ở <b>thanh bên trái</b>. Nhấn vào tên dự án để xem danh sách văn bản. Có thể <b>tìm kiếm</b> theo số hiệu, nội dung hoặc <b>lọc</b> theo trạng thái (Hoàn thành / Đang thực hiện / Chưa thực hiện).' },
+                { num:'4', title:'Thêm văn bản bằng AI', icon:'✨',
+                  content:'Nhấn <b>+ Thêm văn bản</b> → chọn tab <b>✨ AI tự điền</b> → nhấn <b>📎 File</b> → chọn file PDF, Word hoặc Excel → AI sẽ tự động đọc và điền thông tin. Có thể upload <b>nhiều file cùng lúc</b> (Ctrl+Click) để thêm hàng loạt.' },
+                { num:'5', title:'Thêm văn bản thủ công', icon:'✏️',
+                  content:'Nhấn <b>+ Thêm văn bản</b> → chọn tab <b>✏️ Nhập thủ công</b> → điền: Số ký hiệu, Ngày ban hành, Cơ quan ban hành, Loại văn bản, Nội dung/Về việc, Trích yếu, Ghi chú, Trạng thái → có thể đính kèm file → nhấn <b>Thêm văn bản</b>.' },
+                { num:'6', title:'Xem, sửa và xóa văn bản', icon:'📄',
+                  content:'<b>Nhấn vào dòng văn bản</b> để xem chi tiết và tải file gốc. Nhấn <b>✏️</b> để chỉnh sửa thông tin. Nhấn <b>🗑️</b> để xóa văn bản (file đính kèm cũng bị xóa khỏi hệ thống). Nhấn vào <b>trạng thái</b> để đổi nhanh tiến độ.' },
+                { num:'7', title:'Trợ lý AI (Chat)', icon:'🤖',
+                  content:'Khi đang xem dự án, phần <b>✨ Trợ lý AI</b> ở dưới cùng cho phép hỏi về dự án. Có thể dùng các nút gợi ý: <b>📋 Tóm tắt</b>, <b>🔴 Việc gấp</b>, <b>📊 Báo cáo</b>, <b>⚠️ Rủi ro</b> — hoặc tự gõ câu hỏi và nhấn Enter.' },
+                { num:'8', title:'Xuất báo cáo Word', icon:'📊',
+                  content:'Chọn dự án → nhấn tab <b>Xuất báo cáo</b> → nhấn <b>📥 Tải báo cáo Word (.doc)</b>. File báo cáo tổng hợp toàn bộ văn bản của dự án sẽ được tải về máy, bao gồm số hiệu, ngày, loại, nội dung và trạng thái.' },
+                { num:'9', title:'Đổi mật khẩu', icon:'🔐',
+                  content:'Nhấn nút <b>🔑 Đổi mật khẩu</b> ở góc dưới trái sidebar → nhập mật khẩu hiện tại → nhập mật khẩu mới (ít nhất 6 ký tự) → xác nhận lại → nhấn <b>Đổi mật khẩu</b>. Khuyến nghị đổi ngay sau lần đăng nhập đầu tiên bằng mật khẩu tạm.' },
+                { num:'10', title:'Lịch sử truy cập', icon:'📋',
+                  content:'Nhấn <b>📋 Lịch sử truy cập</b> ở menu trái để xem toàn bộ hoạt động của tất cả người dùng: đăng nhập/xuất, thêm/sửa/xóa văn bản, xuất báo cáo. Có thể lọc theo <b>người dùng</b> hoặc <b>loại hành động</b>.' },
+              ].map(item => (
+                <div key={item.num} style={{ display:'flex', gap:16, marginBottom:20, padding:'16px 20px', background:'#fafaf8', borderRadius:12, border:'0.5px solid #e5e4e0' }}>
+                  <div style={{ flexShrink:0, width:36, height:36, borderRadius:10, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>{item.num}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:700, fontSize:14, color:'#0a2342', marginBottom:4 }}>{item.icon} {item.title}</div>
+                    <div style={{ fontSize:13, color:'#555', lineHeight:1.8 }} dangerouslySetInnerHTML={{ __html: item.content }}/>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         )}
