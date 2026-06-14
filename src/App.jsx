@@ -388,7 +388,8 @@ function AppInner() {
         {/* User info + đổi mật khẩu + đăng xuất */}
         <div style={{ padding:'12px 16px', borderTop:'0.5px solid #e5e4e0', flexShrink:0, background:'#fff' }}>
           <div style={{ fontSize:12, fontWeight:700, color:'#0a2342' }}>{userDoc?.name || 'Người dùng'}</div>
-          <div style={{ fontSize:11, color:'#888', marginBottom:4 }}>@{userDoc?.username}</div>
+          <div style={{ fontSize:11, color:'#888' }}>@{userDoc?.username}</div>
+          {userDoc?.email && <div style={{ fontSize:10, color:'#aaa', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{userDoc.email}</div>}
           {isAdmin && <div style={{ fontSize:10, color:'#92400e', background:'#fef3c7', padding:'2px 8px', borderRadius:10, display:'inline-block', marginBottom:6 }}>👑 Admin</div>}
           <br/>
           <button onClick={() => setShowChangePw(true)}
