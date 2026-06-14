@@ -131,6 +131,8 @@ export function AuthProvider({ children }) {
     } catch(e) {
       console.warn('EmailJS error:', e)
     }
+
+    return userData.email || ''
   }
 
   const logout = () => { signOut(auth); setUserDoc(null) }

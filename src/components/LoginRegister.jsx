@@ -217,16 +217,21 @@ function RegisterForm({ onSwitch, register }) {
 
 // ── Quên mật khẩu — chỉ cần nhập username HOẶC email ──
 function ForgotForm({ onBack, requestReset }) {
-  const [input,   setInput]   = useState('')
-  const [err,     setErr]     = useState('')
-  const [loading, setLoading] = useState(false)
-  const [done,    setDone]    = useState(false)
+  const [input,      setInput]      = useState('')
+  const [foundEmail, setFoundEmail] = useState('')
+  const [err,        setErr]        = useState('')
+  const [loading,    setLoading]    = useState(false)
+  const [done,       setDone]       = useState(false)
 
   const handleSubmit = async () => {
     setErr('')
     if (!input.trim()) { setErr('Vui lòng nhập tên đăng nhập hoặc email.'); return }
     setLoading(true)
-    try { await requestReset(input.trim()); setDone(true) }
+    try {
+      const email = await requestReset(input.trim())
+      setFoundEmail(email || '')
+      setDone(true)
+    }
     catch(e) { setErr(e.message) }
     finally { setLoading(false) }
   }
@@ -236,7 +241,9 @@ function ForgotForm({ onBack, requestReset }) {
       <div style={{ fontSize:56, marginBottom:12 }}>📨</div>
       <h3 style={{ fontSize:17, fontWeight:700, color:'#15803d', marginBottom:8 }}>Yêu cầu đã được gửi!</h3>
       <p style={{ fontSize:13, color:'#555', lineHeight:1.8, marginBottom:12 }}>
-        Quản trị viên sẽ xem xét và liên hệ lại với bạn<br/>qua email đã đăng ký trong thời gian sớm nhất.
+        Quản trị viên sẽ xem xét và liên hệ lại với bạn<br/>
+        qua email <strong style={{ color:'#0a2342' }}>{foundEmail || '(email đã đăng ký)'}</strong><br/>
+        trong thời gian sớm nhất.
       </p>
       <div style={{ background:'#f0fdf4', borderRadius:10, padding:'12px', border:'0.5px solid #bbf7d0', fontSize:12, color:'#15803d', marginBottom:20 }}>
         Hoặc liên hệ trực tiếp: <strong>hoangductudhbk@gmail.com</strong>
