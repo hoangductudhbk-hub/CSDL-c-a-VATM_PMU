@@ -1,6 +1,6 @@
 // src/components/AdminUsers.jsx
 import { useEffect, useState } from 'react'
-import { collection, onSnapshot, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore'
+import { collection, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore'
 import { db } from '../firebase'
 import emailjs from '@emailjs/browser'
 
@@ -15,7 +15,6 @@ const btn = (c) => ({
   color:'#fff', marginRight:6,
 })
 
-// Tạo mật khẩu tạm ngẫu nhiên
 const genTempPassword = () => {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
   const special = '!@#$'
@@ -26,12 +25,74 @@ const genTempPassword = () => {
   return pw
 }
 
+const exportUsersWord = (users) => {
+  const now  = new Date()
+  const ngay = now.toLocaleDateString('vi-VN')
+  const s2   = (n) => String(n).padStart(2,'0')
+  const dd=s2(now.getDate()), mm=s2(now.getMonth()+1), hh=s2(now.getHours()), min=s2(now.getMinutes())
+
+  const allUsers = users.filter(u => u.status !== 'admin')
+  const rows = allUsers.map((u, i) => {
+    const status = u.status==='approved'?'Đã duyệt': u.status==='rejected'?'Từ chối':'Chờ duyệt'
+    const ngayDK = u.createdAt?.toDate ? u.createdAt.toDate().toLocaleDateString('vi-VN') : '—'
+    return `<tr>
+      <td style="padding:5pt 8pt;border:1px solid #ccc;text-align:center">${i+1}</td>
+      <td style="padding:5pt 8pt;border:1px solid #ccc;font-weight:bold">@${u.username||'—'}</td>
+      <td style="padding:5pt 8pt;border:1px solid #ccc">${u.name||'—'}</td>
+      <td style="padding:5pt 8pt;border:1px solid #ccc">${u.unit||'—'}</td>
+      <td style="padding:5pt 8pt;border:1px solid #ccc">${u.email||'—'}</td>
+      <td style="padding:5pt 8pt;border:1px solid #ccc">${ngayDK}</td>
+      <td style="padding:5pt 8pt;border:1px solid #ccc;font-weight:bold;color:${u.status==='approved'?'#065f46':u.status==='rejected'?'#991b1b':'#92400e'}">${status}</td>
+    </tr>`
+  }).join('')
+
+  const approved = allUsers.filter(u=>u.status==='approved').length
+  const pending  = allUsers.filter(u=>u.status==='pending').length
+  const rejected = allUsers.filter(u=>u.status==='rejected').length
+
+  const html = `<html><head><meta charset='utf-8'>
+  <style>
+    body{font-family:'Times New Roman',serif;font-size:13pt}
+    h1{font-size:16pt;font-weight:bold;text-align:center;margin-bottom:4pt}
+    p{text-align:center;font-size:12pt;margin:4pt 0 12pt}
+    table{border-collapse:collapse;width:100%}
+    th{background:#0a2342;color:#fff;padding:6pt 8pt;border:1px solid #333;font-size:12pt}
+    td{font-size:11pt}
+    .sum{margin:8pt 0;font-size:12pt}
+  </style></head><body>
+  <h1>THỐNG KÊ NGƯỜI DÙNG HỆ THỐNG</h1>
+  <h1>VATM-PMU — Quản lý Dự án</h1>
+  <p>Ngày xuất: ${ngay} ${hh}:${min} &nbsp;|&nbsp; Tổng người dùng: ${allUsers.length}</p>
+  <p class="sum">✅ Đã duyệt: <b>${approved}</b> &nbsp;|&nbsp; ⏳ Chờ duyệt: <b>${pending}</b> &nbsp;|&nbsp; ❌ Từ chối: <b>${rejected}</b></p>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:30pt">STT</th>
+        <th>Tên đăng nhập</th>
+        <th>Họ tên</th>
+        <th>Đơn vị</th>
+        <th>Email</th>
+        <th style="width:80pt">Ngày đăng ký</th>
+        <th style="width:70pt">Trạng thái</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  </body></html>`
+
+  const blob = new Blob(['\uFEFF' + html], { type:'application/msword;charset=utf-8' })
+  const a    = document.createElement('a')
+  a.href     = URL.createObjectURL(blob)
+  a.download = `ThongKeNguoiDung_${dd}-${mm}-${now.getFullYear()}_${hh}h${min}.doc`
+  a.click()
+}
+
 export default function AdminUsers() {
-  const [users,    setUsers]    = useState([])
-  const [resets,   setResets]   = useState([])
-  const [filter,   setFilter]   = useState('pending')
-  const [mainTab,  setMainTab]  = useState('users')
-  const [sending,  setSending]  = useState(null) // id đang xử lý
+  const [users,   setUsers]   = useState([])
+  const [resets,  setResets]  = useState([])
+  const [filter,  setFilter]  = useState('pending')
+  const [mainTab, setMainTab] = useState('users')
+  const [sending, setSending] = useState(null)
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, 'users'), snap =>
@@ -47,14 +108,11 @@ export default function AdminUsers() {
   const setStatus  = (uid, status) => updateDoc(doc(db,'users',uid),{status})
   const deleteUser = (id, name)    => { if(confirm('Xóa hoàn toàn tài khoản '+name+'? Không thể hoàn tác!')) deleteDoc(doc(db,'users',id)) }
 
-  // Đồng ý reset → tạo mật khẩu tạm → đổi Firebase Auth + gửi email cho user
   const approveReset = async (r) => {
     if (!confirm('Đồng ý và gửi mật khẩu tạm cho @'+r.username+'?')) return
     setSending(r.id)
     try {
       const tempPw = genTempPassword()
-
-      // 1. Gọi API Vercel để đổi mật khẩu Firebase Auth
       const apiRes = await fetch('/api/reset-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -64,37 +122,19 @@ export default function AdminUsers() {
         const err = await apiRes.json()
         throw new Error(err.error || 'Lỗi đổi mật khẩu')
       }
-
-      // 2. Gửi email mật khẩu tạm cho user
       await emailjs.send(
         import.meta.env.VITE_EMAILJS_SERVICE_ID,
         import.meta.env.VITE_EMAILJS_USER_TEMPLATE_ID,
-        {
-          name:          r.name || r.username,
-          username:      r.username,
-          temp_password: tempPw,
-          user_email:    r.contactEmail,
-        },
+        { name: r.name||r.username, username: r.username, temp_password: tempPw, user_email: r.contactEmail },
         import.meta.env.VITE_EMAILJS_PUBLIC_KEY
       )
-
-      // 3. Đánh dấu đã xử lý trong Firestore
-      await updateDoc(doc(db,'resetRequests',r.id), {
-        status:       'done',
-        tempPassword: tempPw,
-        resolvedAt:   new Date(),
-      })
-
+      await updateDoc(doc(db,'resetRequests',r.id), { status:'done', tempPassword:tempPw, resolvedAt:new Date() })
       alert('✅ Đã đổi mật khẩu và gửi email cho: ' + r.contactEmail)
     } catch(e) {
-      console.error(e)
-      alert('❌ Lỗi: ' + e.message)
-    } finally {
-      setSending(null)
-    }
+      console.error(e); alert('❌ Lỗi: ' + e.message)
+    } finally { setSending(null) }
   }
 
-  // Từ chối reset
   const rejectReset = async (r) => {
     if (!confirm('Từ chối yêu cầu của @'+r.username+'?')) return
     await updateDoc(doc(db,'resetRequests',r.id), { status: 'rejected' })
@@ -111,7 +151,14 @@ export default function AdminUsers() {
 
   return (
     <div style={{ padding:24, maxWidth:960, margin:'0 auto' }}>
-      <div style={{ fontSize:20, fontWeight:700, color:'#0a2342', marginBottom:6 }}>👥 Quản lý người dùng</div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+        <div style={{ fontSize:20, fontWeight:700, color:'#0a2342' }}>👥 Quản lý người dùng</div>
+        <button
+          onClick={() => exportUsersWord(users)}
+          style={{ padding:'8px 18px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
+          📊 Thống kê người dùng
+        </button>
+      </div>
       <p style={{ fontSize:13, color:'#888', marginBottom:20 }}>Duyệt tài khoản và xử lý yêu cầu đặt lại mật khẩu</p>
 
       {/* Main tabs */}
@@ -208,14 +255,11 @@ export default function AdminUsers() {
                       </div>
                     </div>
                     <div style={{ display:'flex', gap:8, flexShrink:0 }}>
-                      <button
-                        disabled={sending===r.id}
-                        onClick={()=>approveReset(r)}
-                        style={{ padding:'8px 16px', background: sending===r.id?'#9ca3af':'#10b981', color:'#fff', border:'none', borderRadius:8, cursor:sending===r.id?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>
+                      <button disabled={sending===r.id} onClick={()=>approveReset(r)}
+                        style={{ padding:'8px 16px', background:sending===r.id?'#9ca3af':'#10b981', color:'#fff', border:'none', borderRadius:8, cursor:sending===r.id?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>
                         {sending===r.id ? '⏳ Đang gửi...' : '✅ Đồng ý'}
                       </button>
-                      <button
-                        onClick={()=>rejectReset(r)}
+                      <button onClick={()=>rejectReset(r)}
                         style={{ padding:'8px 16px', background:'#ef4444', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
                         ❌ Từ chối
                       </button>
