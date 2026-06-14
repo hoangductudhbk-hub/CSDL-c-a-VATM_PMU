@@ -5,7 +5,6 @@ import { useAuth } from '../context/AuthContext'
 export default function LoginRegister() {
   const { login, register } = useAuth()
   const [tab, setTab] = useState('login')
-
   return (
     <div style={{ minHeight:'100vh', background:'linear-gradient(135deg,#e8f4fd 0%,#bdd9f0 100%)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
       <div style={{ background:'#fff', borderRadius:24, boxShadow:'0 16px 48px rgba(0,0,0,.12)', maxWidth:460, width:'100%', overflow:'hidden' }}>
@@ -18,16 +17,13 @@ export default function LoginRegister() {
           {[['login','🔑 Đăng nhập'],['register','📝 Đăng ký']].map(([v,l]) => (
             <button key={v} onClick={() => setTab(v)}
               style={{ flex:1, padding:'14px', border:'none', cursor:'pointer', fontSize:14, fontWeight:600,
-                background: tab===v ? '#fff' : '#f9fafb',
-                color:      tab===v ? '#0a2342' : '#9ca3af',
-                borderBottom: tab===v ? '2.5px solid #0a2342' : '2.5px solid transparent' }}>
-              {l}
-            </button>
+                background: tab===v?'#fff':'#f9fafb', color: tab===v?'#0a2342':'#9ca3af',
+                borderBottom: tab===v?'2.5px solid #0a2342':'2.5px solid transparent' }}>{l}</button>
           ))}
         </div>
         <div style={{ padding:'32px 40px 36px' }}>
-          {tab === 'login'    && <LoginForm    onSwitch={() => setTab('register')} login={login}/>}
-          {tab === 'register' && <RegisterForm onSwitch={() => setTab('login')}   register={register}/>}
+          {tab==='login'    && <LoginForm    onSwitch={()=>setTab('register')} login={login}/>}
+          {tab==='register' && <RegisterForm onSwitch={()=>setTab('login')}   register={register}/>}
         </div>
       </div>
     </div>
@@ -40,42 +36,53 @@ function LoginForm({ onSwitch, login }) {
   const [err,      setErr]      = useState('')
   const [loading,  setLoading]  = useState(false)
   const [showPw,   setShowPw]   = useState(false)
-  const pwRef = useRef(null)
+  const [ready,    setReady]    = useState(false)
+  const pwRef  = useRef(null)
+  const unRef  = useRef(null)
 
-  // Xóa mật khẩu khi vào trang — chặn browser autofill
   useEffect(() => {
-    setPassword('')
-    setUsername('')
-    // Delay nhỏ để chặn autofill điền sau render
-    const t = setTimeout(() => {
-      if (pwRef.current) pwRef.current.value = ''
+    // Đánh lừa trình duyệt: ẩn input thật, dùng div giả
+    // Xóa nhiều lần ở các mốc thời gian khác nhau
+    const clear = () => {
       setPassword('')
-    }, 100)
-    return () => clearTimeout(t)
+      setUsername('')
+      if (pwRef.current) pwRef.current.value = ''
+      if (unRef.current) unRef.current.value = ''
+    }
+    clear()
+    const t1 = setTimeout(clear, 100)
+    const t2 = setTimeout(clear, 300)
+    const t3 = setTimeout(() => { clear(); setReady(true) }, 600)
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
   }, [])
 
   const handleSubmit = async () => {
     if (!username.trim() || !password) { setErr('Vui lòng nhập đầy đủ thông tin.'); return }
     setLoading(true); setErr('')
-    try {
-      await login(username, password)
-    } catch(e) {
-      setErr(e.message)
-    } finally { setLoading(false) }
+    try { await login(username, password) }
+    catch(e) { setErr(e.message) }
+    finally { setLoading(false) }
   }
 
   return (
     <div>
+      {/* Input ẩn đánh lừa trình duyệt autofill vào đây thay vì input thật */}
+      <input type="text"     style={{ display:'none' }} autoComplete="username"/>
+      <input type="password" style={{ display:'none' }} autoComplete="current-password"/>
+
       <h3 style={{ fontSize:18, fontWeight:700, color:'#0a2342', marginBottom:20, textAlign:'center' }}>Chào mừng trở lại!</h3>
 
       <label style={lSt}>Tên đăng nhập</label>
       <input
+        ref={unRef}
         value={username}
         onChange={e => setUsername(e.target.value)}
         onKeyDown={e => e.key==='Enter' && handleSubmit()}
         placeholder="Nhập tên đăng nhập"
-        autoComplete="username"
-        autoFocus
+        autoComplete="off"
+        name="vatm_username"
+        readOnly={!ready}
+        onFocus={e => e.target.removeAttribute('readOnly')}
         style={iSt}
       />
 
@@ -86,22 +93,25 @@ function LoginForm({ onSwitch, login }) {
           value={password}
           onChange={e => setPassword(e.target.value)}
           onKeyDown={e => e.key==='Enter' && handleSubmit()}
-          type={showPw ? 'text' : 'password'}
+          type={showPw?'text':'password'}
           placeholder="Nhập mật khẩu"
           autoComplete="off"
+          name="vatm_password"
+          readOnly={!ready}
+          onFocus={e => e.target.removeAttribute('readOnly')}
           style={{ ...iSt, marginBottom:0, paddingRight:44 }}
         />
-        <button onClick={() => setShowPw(v=>!v)}
+        <button onClick={()=>setShowPw(v=>!v)}
           style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', fontSize:16, color:'#888' }}>
-          {showPw ? '🙈' : '👁️'}
+          {showPw?'🙈':'👁️'}
         </button>
       </div>
 
       {err && <ErrBox msg={err}/>}
 
       <button onClick={handleSubmit} disabled={loading}
-        style={{ ...btnSt, background: loading?'#6b7280':'#0a2342' }}>
-        {loading ? '⏳ Đang đăng nhập...' : '🔑 Đăng nhập'}
+        style={{ ...btnSt, background:loading?'#6b7280':'#0a2342' }}>
+        {loading?'⏳ Đang đăng nhập...':'🔑 Đăng nhập'}
       </button>
 
       <p style={{ textAlign:'center', fontSize:13, color:'#888', marginTop:16 }}>
@@ -122,39 +132,35 @@ function RegisterForm({ onSwitch, register }) {
   const [loading,  setLoading]  = useState(false)
   const [done,     setDone]     = useState(false)
   const [showPw,   setShowPw]   = useState(false)
+  const [ready,    setReady]    = useState(false)
 
-  // Xóa mật khẩu khi vào trang
   useEffect(() => {
-    setPassword('')
-    setConfirm('')
+    const clear = () => { setPassword(''); setConfirm('') }
+    clear()
+    const t1 = setTimeout(clear, 100)
+    const t2 = setTimeout(() => { clear(); setReady(true) }, 500)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
   }, [])
 
   const handleSubmit = async () => {
     setErr('')
     if (!username.trim()) { setErr('Vui lòng nhập tên đăng nhập.'); return }
-    if (!/^[a-z0-9_]{3,30}$/.test(username.trim().toLowerCase())) {
-      setErr('Tên đăng nhập chỉ gồm chữ thường, số, dấu gạch dưới (3–30 ký tự).'); return }
-    if (password.length < 6)  { setErr('Mật khẩu phải có ít nhất 6 ký tự.'); return }
-    if (password !== confirm)  { setErr('Mật khẩu xác nhận không khớp.'); return }
-    if (!name.trim())          { setErr('Vui lòng nhập họ tên.'); return }
-    if (!unit.trim())          { setErr('Vui lòng nhập đơn vị công tác.'); return }
+    if (!/^[a-z0-9_]{3,30}$/.test(username.trim().toLowerCase())) { setErr('Tên đăng nhập chỉ gồm chữ thường, số, dấu _ (3–30 ký tự).'); return }
+    if (password.length < 6) { setErr('Mật khẩu phải có ít nhất 6 ký tự.'); return }
+    if (password !== confirm) { setErr('Mật khẩu xác nhận không khớp.'); return }
+    if (!name.trim()) { setErr('Vui lòng nhập họ tên.'); return }
+    if (!unit.trim()) { setErr('Vui lòng nhập đơn vị công tác.'); return }
     setLoading(true)
-    try {
-      await register({ username: username.trim().toLowerCase(), password, name, unit })
-      setDone(true)
-    } catch(e) {
-      setErr(e.message)
-    } finally { setLoading(false) }
+    try { await register({ username:username.trim().toLowerCase(), password, name, unit }); setDone(true) }
+    catch(e) { setErr(e.message) }
+    finally { setLoading(false) }
   }
 
   if (done) return (
     <div style={{ textAlign:'center' }}>
       <div style={{ fontSize:56, marginBottom:12 }}>🎉</div>
       <h3 style={{ fontSize:17, fontWeight:700, color:'#15803d', marginBottom:8 }}>Đăng ký thành công!</h3>
-      <p style={{ fontSize:13, color:'#555', lineHeight:1.8, marginBottom:16 }}>
-        Tài khoản <strong>"{username}"</strong> đã được tạo.<br/>
-        Vui lòng chờ quản trị viên xét duyệt.
-      </p>
+      <p style={{ fontSize:13, color:'#555', lineHeight:1.8, marginBottom:16 }}>Tài khoản <strong>"{username}"</strong> đã được tạo.<br/>Vui lòng chờ quản trị viên xét duyệt.</p>
       <div style={{ background:'#fef9c3', borderRadius:10, padding:'12px', border:'0.5px solid #fde047', fontSize:12, color:'#854d0e', marginBottom:20 }}>
         📧 Liên hệ: <strong>hoangductudhbk@gmail.com</strong>
       </div>
@@ -164,6 +170,9 @@ function RegisterForm({ onSwitch, register }) {
 
   return (
     <div>
+      <input type="text" style={{ display:'none' }} autoComplete="username"/>
+      <input type="password" style={{ display:'none' }} autoComplete="new-password"/>
+
       <h3 style={{ fontSize:17, fontWeight:700, color:'#0a2342', marginBottom:4, textAlign:'center' }}>Tạo tài khoản mới</h3>
       <p style={{ fontSize:12, color:'#888', textAlign:'center', marginBottom:20 }}>Quản trị viên sẽ phê duyệt trước khi bạn đăng nhập được</p>
 
@@ -171,7 +180,7 @@ function RegisterForm({ onSwitch, register }) {
         <div>
           <label style={lSt}>Tên đăng nhập <span style={{color:'#e53e3e'}}>*</span></label>
           <input value={username} onChange={e=>setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g,''))}
-            placeholder="vd: nguyenvana" autoComplete="off" style={iSt}/>
+            placeholder="vd: nguyenvana" autoComplete="off" name="reg_username" style={iSt}/>
         </div>
         <div>
           <label style={lSt}>Họ và tên <span style={{color:'#e53e3e'}}>*</span></label>
@@ -183,7 +192,8 @@ function RegisterForm({ onSwitch, register }) {
       <div style={{ position:'relative' }}>
         <input value={password} onChange={e=>setPassword(e.target.value)}
           type={showPw?'text':'password'} placeholder="Tối thiểu 6 ký tự"
-          autoComplete="new-password"
+          autoComplete="new-password" name="reg_password"
+          readOnly={!ready} onFocus={e=>e.target.removeAttribute('readOnly')}
           style={{ ...iSt, paddingRight:44 }}/>
         <button onClick={()=>setShowPw(v=>!v)}
           style={{ position:'absolute', right:12, top:14, background:'none', border:'none', cursor:'pointer', fontSize:16, color:'#888' }}>
@@ -194,19 +204,20 @@ function RegisterForm({ onSwitch, register }) {
       <label style={lSt}>Xác nhận mật khẩu <span style={{color:'#e53e3e'}}>*</span></label>
       <input value={confirm} onChange={e=>setConfirm(e.target.value)}
         type="password" placeholder="Nhập lại mật khẩu"
-        autoComplete="new-password" style={iSt}/>
+        autoComplete="new-password" name="reg_confirm"
+        readOnly={!ready} onFocus={e=>e.target.removeAttribute('readOnly')}
+        style={iSt}/>
 
       <label style={lSt}>Đơn vị công tác <span style={{color:'#e53e3e'}}>*</span></label>
       <input value={unit} onChange={e=>setUnit(e.target.value)}
         placeholder="Ban QLDA chuyên ngành Quản lý bay"
-        autoComplete="off"
-        style={{ ...iSt, marginBottom: err?8:20 }}/>
+        autoComplete="off" style={{ ...iSt, marginBottom:err?8:20 }}/>
 
       {err && <ErrBox msg={err}/>}
 
       <button onClick={handleSubmit} disabled={loading}
-        style={{ ...btnSt, background: loading?'#6b7280':'#0a2342' }}>
-        {loading ? '⏳ Đang xử lý...' : '📨 Gửi đăng ký'}
+        style={{ ...btnSt, background:loading?'#6b7280':'#0a2342' }}>
+        {loading?'⏳ Đang xử lý...':'📨 Gửi đăng ký'}
       </button>
 
       <p style={{ textAlign:'center', fontSize:13, color:'#888', marginTop:16 }}>
@@ -225,6 +236,6 @@ function ErrBox({ msg }) {
   )
 }
 
-const iSt = { width:'100%', padding:'11px 14px', border:'0.5px solid #ddd', borderRadius:10, fontSize:13, outline:'none', boxSizing:'border-box', marginBottom:14, fontFamily:'inherit' }
-const lSt = { fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:5 }
+const iSt  = { width:'100%', padding:'11px 14px', border:'0.5px solid #ddd', borderRadius:10, fontSize:13, outline:'none', boxSizing:'border-box', marginBottom:14, fontFamily:'inherit' }
+const lSt  = { fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:5 }
 const btnSt = { width:'100%', padding:'13px', color:'#fff', border:'none', borderRadius:12, cursor:'pointer', fontSize:14, fontWeight:600 }
