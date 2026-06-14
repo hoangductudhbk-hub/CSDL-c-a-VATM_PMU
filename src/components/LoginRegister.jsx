@@ -245,11 +245,14 @@ function ForgotForm({ onBack, requestReset }) {
     <div style={{ textAlign:'center' }}>
       <div style={{ fontSize:56, marginBottom:12 }}>📨</div>
       <h3 style={{ fontSize:17, fontWeight:700, color:'#15803d', marginBottom:8 }}>Yêu cầu đã được gửi!</h3>
-      <p style={{ fontSize:13, color:'#555', lineHeight:1.8, marginBottom:16 }}>
-        Quản trị viên sẽ xem xét và liên hệ lại với bạn<br/>qua email hoặc điện thoại trong thời gian sớm nhất.
+      <p style={{ fontSize:13, color:'#555', lineHeight:1.8, marginBottom:12 }}>
+        Quản trị viên sẽ xem xét và liên hệ lại với bạn<br/>qua email trong thời gian sớm nhất.
       </p>
+      <div style={{ background:'#f0f9ff', borderRadius:10, padding:'12px 16px', border:'0.5px solid #bae6fd', fontSize:13, color:'#0369a1', marginBottom:12, textAlign:'left' }}>
+        📧 Phản hồi sẽ được gửi đến: <strong>{contactEmail}</strong>
+      </div>
       <div style={{ background:'#f0fdf4', borderRadius:10, padding:'12px', border:'0.5px solid #bbf7d0', fontSize:12, color:'#15803d', marginBottom:20 }}>
-        📧 Hoặc liên hệ trực tiếp: <strong>hoangductudhbk@gmail.com</strong>
+        Hoặc liên hệ trực tiếp: <strong>hoangductudhbk@gmail.com</strong>
       </div>
       <button onClick={onBack} style={{ ...btnSt, background:'#0a2342' }}>← Quay lại đăng nhập</button>
     </div>
