@@ -1,6 +1,6 @@
 // src/components/AdminUsers.jsx
 import { useEffect, useState } from 'react'
-import { collection, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore'
 import { db } from '../firebase'
 
 const badge = (s) => ({
@@ -156,10 +156,16 @@ export default function AdminUsers() {
                           Yêu cầu lúc: {r.requestAt?.toDate?r.requestAt.toDate().toLocaleString('vi-VN'):'—'}
                         </div>
                       </div>
-                      <button onClick={()=>closeReset(r.id)}
-                        style={{ padding:'8px 16px', background:'#10b981', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600, whiteSpace:'nowrap' }}>
-                        ✅ Đã xử lý
-                      </button>
+                      <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+                        <button onClick={()=>{ if(confirm('Xác nhận đã xử lý và đặt lại mật khẩu cho @'+r.username+'?')) closeReset(r.id) }}
+                          style={{ padding:'8px 14px', background:'#10b981', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
+                          ✅ Đồng ý
+                        </button>
+                        <button onClick={()=>{ if(confirm('Từ chối yêu cầu của @'+r.username+'?')) updateDoc(doc(db,'resetRequests',r.id),{status:'rejected'}) }}
+                          style={{ padding:'8px 14px', background:'#ef4444', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
+                          ❌ Từ chối
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
