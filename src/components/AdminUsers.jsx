@@ -47,14 +47,25 @@ export default function AdminUsers() {
   const setStatus  = (uid, status) => updateDoc(doc(db,'users',uid),{status})
   const deleteUser = (id, name)    => { if(confirm('Xóa hoàn toàn tài khoản '+name+'? Không thể hoàn tác!')) deleteDoc(doc(db,'users',id)) }
 
-  // Đồng ý reset → tạo mật khẩu tạm → gửi email cho user
+  // Đồng ý reset → tạo mật khẩu tạm → đổi Firebase Auth + gửi email cho user
   const approveReset = async (r) => {
     if (!confirm('Đồng ý và gửi mật khẩu tạm cho @'+r.username+'?')) return
     setSending(r.id)
     try {
       const tempPw = genTempPassword()
 
-      // Gửi email cho user
+      // 1. Gọi API Vercel để đổi mật khẩu Firebase Auth
+      const apiRes = await fetch('/api/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: r.uid, newPassword: tempPw }),
+      })
+      if (!apiRes.ok) {
+        const err = await apiRes.json()
+        throw new Error(err.error || 'Lỗi đổi mật khẩu')
+      }
+
+      // 2. Gửi email mật khẩu tạm cho user
       await emailjs.send(
         import.meta.env.VITE_EMAILJS_SERVICE_ID,
         import.meta.env.VITE_EMAILJS_USER_TEMPLATE_ID,
@@ -67,17 +78,17 @@ export default function AdminUsers() {
         import.meta.env.VITE_EMAILJS_PUBLIC_KEY
       )
 
-      // Lưu mật khẩu tạm vào Firestore để admin tham khảo
+      // 3. Đánh dấu đã xử lý trong Firestore
       await updateDoc(doc(db,'resetRequests',r.id), {
         status:       'done',
         tempPassword: tempPw,
         resolvedAt:   new Date(),
       })
 
-      alert('✅ Đã gửi mật khẩu tạm "' + tempPw + '" đến email: ' + r.contactEmail)
+      alert('✅ Đã đổi mật khẩu và gửi email cho: ' + r.contactEmail)
     } catch(e) {
       console.error(e)
-      alert('❌ Lỗi gửi email: ' + e.message)
+      alert('❌ Lỗi: ' + e.message)
     } finally {
       setSending(null)
     }
