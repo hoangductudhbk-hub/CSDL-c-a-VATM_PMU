@@ -24,26 +24,55 @@ const fmt = (ts) => {
   })
 }
 
+// Kiểm tra chuỗi có phải UID Firebase không (dài, không có khoảng trắng)
+const isUID = (str) => str && str.length > 20 && !str.includes(' ')
+
+// Tính thời gian sử dụng: tìm logout gần nhất sau login của cùng userId
+const getSessionDuration = (logs, loginLog) => {
+  const loginTime = loginLog.timestamp?.seconds
+  if (!loginTime) return null
+  // Logs đã sắp xếp desc, nên logout sẽ ở index nhỏ hơn (trước) login trong mảng
+  const idx = logs.indexOf(loginLog)
+  // Tìm logout trước loginLog trong mảng (timestamp lớn hơn = thời gian sau)
+  const logoutLog = logs.slice(0, idx).find(l =>
+    l.action === 'logout' &&
+    l.userId === loginLog.userId &&
+    (l.timestamp?.seconds || 0) > loginTime
+  )
+  if (!logoutLog) return null
+  const mins = Math.round((logoutLog.timestamp.seconds - loginTime) / 60)
+  if (mins <= 0) return 'dưới 1 phút'
+  if (mins < 60) return `${mins} phút`
+  const h = Math.floor(mins / 60), m = mins % 60
+  return m > 0 ? `${h} giờ ${m} phút` : `${h} giờ`
+}
+
 export default function HistoryView({ user }) {
-  const { userDoc, isAdmin }      = useAuth()
-  const { loadLogs }              = useActivityLog(user, userDoc)
-  const [logs, setLogs]           = useState([])
-  const [loading, setLoading]     = useState(true)
-  const [filterUser, setFU]       = useState('all')
-  const [filterAct,  setFA]       = useState('all')
+  const { userDoc, isAdmin }  = useAuth()
+  const { loadLogs }          = useActivityLog(user, userDoc)
+  const [logs, setLogs]       = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filterUser, setFU]   = useState('all')
+  const [filterAct,  setFA]   = useState('all')
 
   useEffect(() => {
     const unsub = loadLogs(list => { setLogs(list); setLoading(false) }, user?.uid, isAdmin)
     return unsub
   }, [user?.uid, isAdmin])
 
-  // Filter options — admin dùng userName, user thường không cần filter theo người
-  const userNames = [...new Set(logs.map(l => l.userName))].filter(Boolean)
+  // Lấy tên hiển thị — bỏ qua UID
+  const getDisplayName = (l) => {
+    if (l.userName && !isUID(l.userName)) return l.userName
+    if (l.username) return l.username
+    return '—'
+  }
+
+  const userNames = [...new Set(logs.map(l => getDisplayName(l)))].filter(n => n !== '—')
   const actions   = [...new Set(logs.map(l => l.action))].filter(Boolean)
 
   const filtered = logs.filter(l =>
-    (filterUser === 'all' || l.userName === filterUser) &&
-    (filterAct  === 'all' || l.action   === filterAct)
+    (filterUser === 'all' || getDisplayName(l) === filterUser) &&
+    (filterAct  === 'all' || l.action === filterAct)
   )
 
   const stats = {
@@ -56,7 +85,7 @@ export default function HistoryView({ user }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%', overflow:'hidden' }}>
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div style={{ flexShrink:0, padding:'16px 24px 12px', borderBottom:'0.5px solid #e5e4e0', background:'#fff' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:10, marginBottom:12 }}>
           <div>
@@ -67,7 +96,6 @@ export default function HistoryView({ user }) {
             </p>
           </div>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-            {/* Chỉ admin mới thấy filter theo người dùng */}
             {isAdmin && (
               <select value={filterUser} onChange={e => setFU(e.target.value)}
                 style={{ padding:'7px 10px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none', background:'#fff', maxWidth:200 }}>
@@ -99,7 +127,7 @@ export default function HistoryView({ user }) {
         </div>
       </div>
 
-      {/* ── Danh sách ── */}
+      {/* Danh sách */}
       <div style={{ flex:1, overflowY:'auto', padding:'12px 24px' }}>
         {loading ? (
           <div style={{ padding:40, textAlign:'center', color:'#888' }}>⏳ Đang tải...</div>
@@ -110,7 +138,9 @@ export default function HistoryView({ user }) {
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             {filtered.map(l => {
-              const a = ACTION_MAP[l.action] || { icon:'•', label:l.action, color:'#555', bg:'#f5f5f5' }
+              const a        = ACTION_MAP[l.action] || { icon:'•', label:l.action, color:'#555', bg:'#f5f5f5' }
+              const name     = getDisplayName(l)
+              const duration = l.action === 'login' ? getSessionDuration(logs, l) : null
               return (
                 <div key={l.id} style={{ display:'flex', alignItems:'flex-start', gap:12, padding:'10px 14px', background:'#fff', border:'0.5px solid #e5e4e0', borderRadius:10 }}>
                   <span style={{ fontSize:18, flexShrink:0, marginTop:2 }}>{a.icon}</span>
@@ -119,11 +149,14 @@ export default function HistoryView({ user }) {
                       <span style={{ fontSize:11, padding:'2px 9px', borderRadius:20, background:a.bg, color:a.color, fontWeight:700, border:'0.5px solid '+a.color+'44' }}>
                         {a.label}
                       </span>
-                      <span style={{ fontSize:12, fontWeight:600, color:'#1a1a1a' }}>
-                        {l.userName || l.username || '—'}
-                      </span>
+                      <span style={{ fontSize:12, fontWeight:600, color:'#1a1a1a' }}>{name}</span>
                       {isAdmin && l.userEmail && (
                         <span style={{ fontSize:11, color:'#aaa' }}>({l.userEmail})</span>
+                      )}
+                      {duration && (
+                        <span style={{ fontSize:11, color:'#15803d', background:'#f0fdf4', padding:'2px 8px', borderRadius:20, border:'0.5px solid #bbf7d0' }}>
+                          ⏱️ Phiên: {duration}
+                        </span>
                       )}
                     </div>
                     <div style={{ fontSize:13, color:'#444', lineHeight:1.6 }}>{l.details}</div>
