@@ -61,8 +61,7 @@ export function useActivityLog(user, userDoc) {
     const q = query(collection(db, 'activityLogs'), orderBy('timestamp', 'desc'), limit(500))
     return onSnapshot(q, snap => {
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() }))
-      const filtered = isAdmin ? all : all.filter(l => l.userId === currentUserId)
-      callback(filtered)
+      callback(all)
     })
   }
 

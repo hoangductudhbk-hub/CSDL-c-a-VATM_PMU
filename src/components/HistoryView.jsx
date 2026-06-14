@@ -96,13 +96,12 @@ export default function HistoryView({ user }) {
             </p>
           </div>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-            {isAdmin && (
-              <select value={filterUser} onChange={e => setFU(e.target.value)}
-                style={{ padding:'7px 10px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none', background:'#fff', maxWidth:200 }}>
-                <option value="all">Tất cả người dùng</option>
-                {userNames.map(u => <option key={u} value={u}>{u}</option>)}
-              </select>
-            )}
+            {/* Tất cả đều thấy filter theo người dùng */}
+            <select value={filterUser} onChange={e => setFU(e.target.value)}
+              style={{ padding:'7px 10px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none', background:'#fff', maxWidth:200 }}>
+              <option value="all">Tất cả người dùng</option>
+              {userNames.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
             <select value={filterAct} onChange={e => setFA(e.target.value)}
               style={{ padding:'7px 10px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none', background:'#fff' }}>
               <option value="all">Tất cả hành động</option>
