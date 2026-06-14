@@ -11,7 +11,7 @@ export default function LoginRegister() {
         <div style={{ background:'linear-gradient(135deg,#0a2342,#1a4a7a)', padding:'32px 40px 24px', textAlign:'center', color:'#fff' }}>
           <img src="/vatm-logo.png" alt="VATM" style={{ width:72, height:72, borderRadius:'50%', objectFit:'cover', marginBottom:12, border:'3px solid rgba(255,255,255,.3)' }}/>
           <div style={{ fontSize:20, fontWeight:700, marginBottom:4 }}>VATM-PMU</div>
-          <div style={{ fontSize:13, opacity:.8 }}>Hệ thống Quản lý Dự án Hạ tầng</div>
+          <div style={{ fontSize:13, opacity:.8 }}>Hệ thống Quản lý Dự án</div>
         </div>
         <div style={{ display:'flex', borderBottom:'0.5px solid #e5e7eb' }}>
           {[['login','🔑 Đăng nhập'],['register','📝 Đăng ký']].map(([v,l]) => (
@@ -35,7 +35,8 @@ function LoginForm({ onSwitch, login }) {
   const [password, setPassword] = useState('')
   const [err,      setErr]      = useState('')
   const [loading,  setLoading]  = useState(false)
-  const [showPw,   setShowPw]   = useState(false)
+  const [showPw, setShowPw] = useState(false)
+  const [focused, setFocused] = useState(false)
   const [ready,    setReady]    = useState(false)
   const pwRef  = useRef(null)
   const unRef  = useRef(null)
@@ -93,18 +94,21 @@ function LoginForm({ onSwitch, login }) {
           value={password}
           onChange={e => setPassword(e.target.value)}
           onKeyDown={e => e.key==='Enter' && handleSubmit()}
-          type={showPw?'text':'password'}
+          type={showPw?'text':(focused?'password':'text')}
           placeholder="Nhập mật khẩu"
-          autoComplete="off"
+          autoComplete="new-password"
           name="vatm_password"
-          readOnly={!ready}
-          onFocus={e => e.target.removeAttribute('readOnly')}
+          onFocus={() => setFocused(true)}
           style={{ ...iSt, marginBottom:0, paddingRight:44 }}
         />
         <button onClick={()=>setShowPw(v=>!v)}
           style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', fontSize:16, color:'#888' }}>
           {showPw?'🙈':'👁️'}
         </button>
+      </div>
+
+      <div style={{ fontSize:11, color:'#888', marginBottom:14, display:'flex', alignItems:'center', gap:6 }}>
+        🔒 Nếu trình duyệt hiển thị mật khẩu đã lưu, vui lòng xóa và nhập lại để bảo mật tài khoản.
       </div>
 
       {err && <ErrBox msg={err}/>}
@@ -131,7 +135,8 @@ function RegisterForm({ onSwitch, register }) {
   const [err,      setErr]      = useState('')
   const [loading,  setLoading]  = useState(false)
   const [done,     setDone]     = useState(false)
-  const [showPw,   setShowPw]   = useState(false)
+  const [showPw, setShowPw] = useState(false)
+  const [focused, setFocused] = useState(false)
   const [ready,    setReady]    = useState(false)
 
   useEffect(() => {
