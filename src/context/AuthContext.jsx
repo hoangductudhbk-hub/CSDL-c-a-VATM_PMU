@@ -30,13 +30,27 @@ export function AuthProvider({ children }) {
     })
   }, [])
 
-  // ── Đăng nhập ──
-  const login = async (username, password) => {
+  // ── Đăng nhập (username hoặc email) ──
+  const login = async (usernameOrEmail, password) => {
     try {
-      await signInWithEmailAndPassword(auth, toFakeEmail(username), password)
+      const input = usernameOrEmail.trim().toLowerCase()
+
+      // Nếu có @ và domain thật → đăng nhập bằng email thật
+      if (input.includes('@') && !input.endsWith(FAKE_DOMAIN)) {
+        // Tìm username tương ứng với email này trong Firestore
+        const q    = query(collection(db, 'users'), where('email', '==', input))
+        const snap = await getDocs(q)
+        if (snap.empty) throw new Error('Email không tồn tại trong hệ thống.')
+        const userData = snap.docs[0].data()
+        await signInWithEmailAndPassword(auth, toFakeEmail(userData.username), password)
+      } else {
+        // Đăng nhập bằng username
+        await signInWithEmailAndPassword(auth, toFakeEmail(input), password)
+      }
     } catch (e) {
       if (['auth/user-not-found','auth/wrong-password','auth/invalid-credential'].includes(e.code))
-        throw new Error('Tên đăng nhập hoặc mật khẩu không đúng.')
+        throw new Error('Tên đăng nhập/email hoặc mật khẩu không đúng.')
+      if (e.message.includes('không tồn tại')) throw e
       throw new Error('Đăng nhập thất bại. Vui lòng thử lại.')
     }
   }
@@ -77,7 +91,6 @@ export function AuthProvider({ children }) {
 
     const userData = snap.docs[0].data()
 
-    // Lưu vào Firestore
     await addDoc(collection(db, 'resetRequests'), {
       uid:          userData.uid,
       username:     uname,
@@ -90,7 +103,6 @@ export function AuthProvider({ children }) {
       requestAt:    serverTimestamp(),
     })
 
-    // Gửi email qua EmailJS
     try {
       await emailjs.send(
         import.meta.env.VITE_EMAILJS_SERVICE_ID,

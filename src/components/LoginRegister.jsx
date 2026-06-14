@@ -74,7 +74,7 @@ function LoginForm({ onSwitch, onForgot, login }) {
       <label style={lSt}>Tên đăng nhập</label>
       <input ref={unRef} value={username} onChange={e=>setUsername(e.target.value)}
         onKeyDown={e=>e.key==='Enter'&&handleSubmit()}
-        placeholder="Nhập tên đăng nhập" autoComplete="off" name="vatm_un"
+        placeholder="Tên đăng nhập hoặc email" autoComplete="off" name="vatm_un"
         readOnly={!ready} onFocus={e=>e.target.removeAttribute('readOnly')} style={iSt}/>
 
       <label style={lSt}>Mật khẩu</label>
