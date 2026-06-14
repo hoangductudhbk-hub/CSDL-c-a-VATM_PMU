@@ -43,9 +43,16 @@ export function AuthProvider({ children }) {
   // ── Đăng ký ──
   const register = async ({ username, password, name, unit, email }) => {
     const uname = username.trim().toLowerCase()
+    // Kiểm tra username đã tồn tại chưa
     const q    = query(collection(db, 'users'), where('username', '==', uname))
     const snap = await getDocs(q)
     if (!snap.empty) throw new Error('Tên đăng nhập đã được sử dụng. Vui lòng chọn tên khác.')
+
+    // Kiểm tra email đã đăng ký chưa
+    const emailLower = email.trim().toLowerCase()
+    const qEmail = query(collection(db, 'users'), where('email', '==', emailLower))
+    const snapEmail = await getDocs(qEmail)
+    if (!snapEmail.empty) throw new Error('Email này đã được dùng để đăng ký tài khoản khác.')
 
     const cred = await createUserWithEmailAndPassword(auth, toFakeEmail(uname), password)
     const isAdmin = ADMIN_USERNAMES.includes(uname)
