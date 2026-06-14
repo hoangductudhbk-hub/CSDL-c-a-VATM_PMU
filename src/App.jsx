@@ -408,7 +408,7 @@ function AppInner() {
 
         {tab === 'admin' && isAdmin && <div style={{ flex:1, overflowY:'auto' }}><AdminUsers /></div>}
 
-        {!proj && tab !== 'history' && tab !== 'about' && tab !== 'guide' && tab !== 'admin' && (
+        {!proj && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && (
           <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:48, background:'linear-gradient(135deg, #e8f4fd 0%, #bdd9f0 100%)', position:'relative' }}>
             <img src="/vatm-logo.png" alt="VATM" style={{ width:200, height:200, borderRadius:'50%', objectFit:'cover', marginBottom:24 }}/>
             <h2 style={{ fontSize:36, fontWeight:700, color:'#0a2342', marginBottom:12 }}>Chào mừng đến VATM-PMU</h2>
@@ -567,8 +567,7 @@ function AppInner() {
           </div>
         </>}
 
-        {/* AI Chat */}
-        {proj && (
+        {proj && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && (
           <div style={{ borderTop:'0.5px solid #e5e4e0', background:'#fff', flexShrink:0, display:'flex', flexDirection:'column', maxHeight:'40vh' }}>
             <div style={{ padding:'8px 24px 0', flexShrink:0 }}>
               <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
