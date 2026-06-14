@@ -110,6 +110,7 @@ export default function AdminUsers() {
                         {u.status==='pending'&&<><button style={btn('green')} onClick={()=>setStatus(u.id,'approved')}>✓ Duyệt</button><button style={btn('red')} onClick={()=>setStatus(u.id,'rejected')}>✗ Từ chối</button></>}
                         {u.status==='approved'&&<button style={btn('red')} onClick={()=>setStatus(u.id,'rejected')}>✗ Thu hồi</button>}
                         {u.status==='rejected'&&<button style={btn('green')} onClick={()=>setStatus(u.id,'approved')}>✓ Duyệt lại</button>}
+                        <button style={{...btn('gray'), marginRight:0, marginTop:4}} onClick={()=>{ if(confirm('Xóa hoàn toàn tài khoản '+( u.username||u.name||u.id)+'? Không thể hoàn tác!')) deleteDoc(doc(db,'users',u.id)) }}>🗑️ Xóa</button>
                       </td>
                     </tr>
                   ))}
