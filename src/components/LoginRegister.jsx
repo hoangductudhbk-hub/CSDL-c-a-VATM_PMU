@@ -33,7 +33,6 @@ export default function LoginRegister() {
   )
 }
 
-// ── Đăng nhập ──────────────────────────────────────────────────
 function LoginForm({ onSwitch, onForgot, login }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -45,11 +44,7 @@ function LoginForm({ onSwitch, onForgot, login }) {
   const unRef = useRef(null)
 
   useEffect(() => {
-    const clear = () => {
-      setPassword(''); setUsername('')
-      if (pwRef.current) pwRef.current.value = ''
-      if (unRef.current) unRef.current.value = ''
-    }
+    const clear = () => { setPassword(''); setUsername(''); if (pwRef.current) pwRef.current.value = ''; if (unRef.current) unRef.current.value = '' }
     clear()
     const t1 = setTimeout(clear, 100)
     const t2 = setTimeout(clear, 300)
@@ -92,9 +87,7 @@ function LoginForm({ onSwitch, onForgot, login }) {
       </div>
 
       <div style={{ textAlign:'right', marginBottom:16 }}>
-        <span onClick={onForgot} style={{ fontSize:12, color:'#2563eb', cursor:'pointer', textDecoration:'underline' }}>
-          Quên mật khẩu?
-        </span>
+        <span onClick={onForgot} style={{ fontSize:12, color:'#2563eb', cursor:'pointer', textDecoration:'underline' }}>Quên mật khẩu?</span>
       </div>
 
       {err && <ErrBox msg={err}/>}
@@ -110,7 +103,6 @@ function LoginForm({ onSwitch, onForgot, login }) {
   )
 }
 
-// ── Đăng ký ────────────────────────────────────────────────────
 function RegisterForm({ onSwitch, register }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -187,7 +179,7 @@ function RegisterForm({ onSwitch, register }) {
       <label style={lSt}>Mật khẩu <Req/></label>
       <div style={{ position:'relative' }}>
         <input value={password} onChange={e=>setPassword(e.target.value)}
-          type={showPw?'text':'password'} placeholder="Mật khẩu bao gồm chữ viết Hoa, viết thường, số, ký tự đặc biệt"
+          type={showPw?'text':'password'} placeholder="Chữ Hoa, thường, số, ký tự đặc biệt"
           autoComplete="new-password" readOnly={!ready} onFocus={e=>e.target.removeAttribute('readOnly')}
           style={{ ...iSt, paddingRight:44 }}/>
         <button onClick={()=>setShowPw(v=>!v)}
@@ -223,20 +215,18 @@ function RegisterForm({ onSwitch, register }) {
   )
 }
 
-// ── Quên mật khẩu ──────────────────────────────────────────────
+// ── Quên mật khẩu — chỉ cần nhập username HOẶC email ──
 function ForgotForm({ onBack, requestReset }) {
-  const [username,     setUsername]     = useState('')
-  const [contactEmail, setContactEmail] = useState('')
-  const [err,          setErr]          = useState('')
-  const [loading,      setLoading]      = useState(false)
-  const [done,         setDone]         = useState(false)
+  const [input,   setInput]   = useState('')
+  const [err,     setErr]     = useState('')
+  const [loading, setLoading] = useState(false)
+  const [done,    setDone]    = useState(false)
 
   const handleSubmit = async () => {
     setErr('')
-    if (!username.trim()) { setErr('Vui lòng nhập tên đăng nhập.'); return }
-    if (!contactEmail.trim() || !contactEmail.includes('@')) { setErr('Vui lòng nhập email hợp lệ.'); return }
+    if (!input.trim()) { setErr('Vui lòng nhập tên đăng nhập hoặc email.'); return }
     setLoading(true)
-    try { await requestReset(username.trim().toLowerCase(), contactEmail.trim()); setDone(true) }
+    try { await requestReset(input.trim()); setDone(true) }
     catch(e) { setErr(e.message) }
     finally { setLoading(false) }
   }
@@ -246,11 +236,8 @@ function ForgotForm({ onBack, requestReset }) {
       <div style={{ fontSize:56, marginBottom:12 }}>📨</div>
       <h3 style={{ fontSize:17, fontWeight:700, color:'#15803d', marginBottom:8 }}>Yêu cầu đã được gửi!</h3>
       <p style={{ fontSize:13, color:'#555', lineHeight:1.8, marginBottom:12 }}>
-        Quản trị viên sẽ xem xét và liên hệ lại với bạn<br/>qua email trong thời gian sớm nhất.
+        Quản trị viên sẽ xem xét và liên hệ lại với bạn<br/>qua email đã đăng ký trong thời gian sớm nhất.
       </p>
-      <div style={{ background:'#f0f9ff', borderRadius:10, padding:'12px 16px', border:'0.5px solid #bae6fd', fontSize:13, color:'#0369a1', marginBottom:12, textAlign:'left' }}>
-        📧 Phản hồi sẽ được gửi đến: <strong>{contactEmail}</strong>
-      </div>
       <div style={{ background:'#f0fdf4', borderRadius:10, padding:'12px', border:'0.5px solid #bbf7d0', fontSize:12, color:'#15803d', marginBottom:20 }}>
         Hoặc liên hệ trực tiếp: <strong>hoangductudhbk@gmail.com</strong>
       </div>
@@ -267,17 +254,15 @@ function ForgotForm({ onBack, requestReset }) {
         <div style={{ fontSize:40, marginBottom:8 }}>🔐</div>
         <h3 style={{ fontSize:18, fontWeight:700, color:'#0a2342', marginBottom:6 }}>Quên mật khẩu</h3>
         <p style={{ fontSize:13, color:'#888', lineHeight:1.6 }}>
-          Điền thông tin bên dưới, quản trị viên sẽ<br/>liên hệ và đặt lại mật khẩu cho bạn.
+          Nhập tên đăng nhập hoặc email của bạn,<br/>quản trị viên sẽ liên hệ và đặt lại mật khẩu.
         </p>
       </div>
 
-      <label style={lSt}>Tên đăng nhập <Req/></label>
-      <input value={username} onChange={e=>setUsername(e.target.value.toLowerCase().replace(/\s/g,''))}
-        placeholder="Nhập tên đăng nhập của bạn" autoComplete="off" style={iSt}/>
-
-      <label style={lSt}>Email liên hệ <Req/></label>
-      <input value={contactEmail} onChange={e=>setContactEmail(e.target.value)}
-        placeholder="Email để admin liên hệ lại" type="email"
+      <label style={lSt}>Tên đăng nhập hoặc Email <span style={{ color:'#e53e3e' }}>*</span></label>
+      <input value={input} onChange={e=>setInput(e.target.value)}
+        placeholder="Nhập tên đăng nhập hoặc email của bạn"
+        autoComplete="off"
+        onKeyDown={e=>e.key==='Enter'&&handleSubmit()}
         style={{ ...iSt, marginBottom:err?8:20 }}/>
 
       {err && <ErrBox msg={err}/>}

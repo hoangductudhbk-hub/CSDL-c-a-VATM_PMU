@@ -82,36 +82,48 @@ export function AuthProvider({ children }) {
     await loadUserDoc(cred.user.uid)
   }
 
-  // ── Quên mật khẩu ──
-  const requestReset = async (username, contactEmail) => {
-    const uname = username.trim().toLowerCase()
-    const q    = query(collection(db, 'users'), where('username', '==', uname))
-    const snap = await getDocs(q)
-    if (snap.empty) throw new Error('Tên đăng nhập không tồn tại.')
+  // ── Quên mật khẩu (username hoặc email) ──
+  const requestReset = async (input) => {
+    const val = input.trim().toLowerCase()
+    let userData = null
 
-    const userData = snap.docs[0].data()
+    // Tìm theo username trước
+    const q1   = query(collection(db, 'users'), where('username', '==', val))
+    const snap1 = await getDocs(q1)
+    if (!snap1.empty) userData = snap1.docs[0].data()
 
+    // Nếu không tìm được thì tìm theo email
+    if (!userData) {
+      const q2    = query(collection(db, 'users'), where('email', '==', val))
+      const snap2 = await getDocs(q2)
+      if (!snap2.empty) userData = snap2.docs[0].data()
+    }
+
+    if (!userData) throw new Error('Không tìm thấy tài khoản với thông tin này.')
+
+    // Lưu vào Firestore
     await addDoc(collection(db, 'resetRequests'), {
       uid:          userData.uid,
-      username:     uname,
+      username:     userData.username,
       name:         userData.name,
       unit:         userData.unit,
-      email:        userData.email || contactEmail,
-      contactEmail: contactEmail,
-      fakeEmail:    toFakeEmail(uname),
+      email:        userData.email || '',
+      contactEmail: userData.email || '',
+      fakeEmail:    toFakeEmail(userData.username),
       status:       'pending',
       requestAt:    serverTimestamp(),
     })
 
+    // Gửi email thông báo cho admin
     try {
       await emailjs.send(
         import.meta.env.VITE_EMAILJS_SERVICE_ID,
         import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
         {
-          username:      uname,
+          username:      userData.username,
           name:          userData.name || '—',
           unit:          userData.unit || '—',
-          contact_email: contactEmail,
+          contact_email: userData.email || '—',
           time:          new Date().toLocaleString('vi-VN'),
         },
         import.meta.env.VITE_EMAILJS_PUBLIC_KEY
