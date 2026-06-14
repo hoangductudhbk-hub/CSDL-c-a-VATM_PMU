@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import { collection, onSnapshot, doc, updateDoc, deleteDoc, query, where } from 'firebase/firestore'
 import { db } from '../firebase'
+import emailjs from '@emailjs/browser'
 
 const badge = (s) => ({
   display:'inline-block', padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:600,
@@ -14,12 +15,23 @@ const btn = (c) => ({
   color:'#fff', marginRight:6,
 })
 
+// Tạo mật khẩu tạm ngẫu nhiên
+const genTempPassword = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+  const special = '!@#$'
+  let pw = ''
+  for (let i = 0; i < 6; i++) pw += chars[Math.floor(Math.random() * chars.length)]
+  pw += special[Math.floor(Math.random() * special.length)]
+  pw += Math.floor(Math.random() * 90 + 10)
+  return pw
+}
+
 export default function AdminUsers() {
   const [users,    setUsers]    = useState([])
   const [resets,   setResets]   = useState([])
   const [filter,   setFilter]   = useState('pending')
   const [mainTab,  setMainTab]  = useState('users')
-  const [showInfo, setShowInfo] = useState(null)
+  const [sending,  setSending]  = useState(null) // id đang xử lý
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, 'users'), snap =>
@@ -32,8 +44,50 @@ export default function AdminUsers() {
     return () => { u1(); u2() }
   }, [])
 
-  const setStatus   = (uid, status) => updateDoc(doc(db,'users',uid),{status})
-  const closeReset  = (id) => updateDoc(doc(db,'resetRequests',id),{status:'done'})
+  const setStatus  = (uid, status) => updateDoc(doc(db,'users',uid),{status})
+  const deleteUser = (id, name)    => { if(confirm('Xóa hoàn toàn tài khoản '+name+'? Không thể hoàn tác!')) deleteDoc(doc(db,'users',id)) }
+
+  // Đồng ý reset → tạo mật khẩu tạm → gửi email cho user
+  const approveReset = async (r) => {
+    if (!confirm('Đồng ý và gửi mật khẩu tạm cho @'+r.username+'?')) return
+    setSending(r.id)
+    try {
+      const tempPw = genTempPassword()
+
+      // Gửi email cho user
+      await emailjs.send(
+        import.meta.env.VITE_EMAILJS_SERVICE_ID,
+        import.meta.env.VITE_EMAILJS_USER_TEMPLATE_ID,
+        {
+          name:          r.name || r.username,
+          username:      r.username,
+          temp_password: tempPw,
+          user_email:    r.contactEmail,
+        },
+        import.meta.env.VITE_EMAILJS_PUBLIC_KEY
+      )
+
+      // Lưu mật khẩu tạm vào Firestore để admin tham khảo
+      await updateDoc(doc(db,'resetRequests',r.id), {
+        status:       'done',
+        tempPassword: tempPw,
+        resolvedAt:   new Date(),
+      })
+
+      alert('✅ Đã gửi mật khẩu tạm "' + tempPw + '" đến email: ' + r.contactEmail)
+    } catch(e) {
+      console.error(e)
+      alert('❌ Lỗi gửi email: ' + e.message)
+    } finally {
+      setSending(null)
+    }
+  }
+
+  // Từ chối reset
+  const rejectReset = async (r) => {
+    if (!confirm('Từ chối yêu cầu của @'+r.username+'?')) return
+    await updateDoc(doc(db,'resetRequests',r.id), { status: 'rejected' })
+  }
 
   const counts = {
     pending:  users.filter(u=>u.status==='pending').length,
@@ -71,7 +125,7 @@ export default function AdminUsers() {
             ['rejected','❌',counts.rejected,'#fee2e2','#991b1b']].map(([v,icon,n,bg,c])=>(
             <div key={v} onClick={()=>setFilter(v)}
               style={{ flex:1, background:filter===v?bg:'#f9fafb', borderRadius:12, padding:'12px 16px', textAlign:'center', cursor:'pointer',
-                border:`1.5px solid ${filter===v?c:'#e5e7eb'}`, transition:'all .15s' }}>
+                border:`1.5px solid ${filter===v?c:'#e5e7eb'}` }}>
               <div style={{ fontSize:22, fontWeight:700, color:c }}>{n}</div>
               <div style={{ fontSize:12, color:c, fontWeight:500 }}>{icon} {v==='pending'?'Chờ duyệt':v==='approved'?'Đã duyệt':'Từ chối'}</div>
             </div>
@@ -96,10 +150,12 @@ export default function AdminUsers() {
                     <tr key={u.id} style={{ borderBottom:'1px solid #f3f4f6' }}
                       onMouseEnter={e=>e.currentTarget.style.background='#f9fafb'}
                       onMouseLeave={e=>e.currentTarget.style.background=''}>
-                      <td style={{ padding:'12px 14px', fontWeight:600, color:'#0a2342' }}>{u.username ? '@'+u.username : <span style={{color:'#aaa',fontWeight:400,fontSize:11}}>Tài khoản cũ</span>}</td>
+                      <td style={{ padding:'12px 14px', fontWeight:600, color:'#0a2342' }}>
+                        {u.username ? '@'+u.username : <span style={{color:'#aaa',fontWeight:400,fontSize:11}}>Tài khoản cũ</span>}
+                      </td>
                       <td style={{ padding:'12px 14px' }}>{u.name||'—'}</td>
                       <td style={{ padding:'12px 14px', color:'#555', fontSize:12 }}>{u.unit||'—'}</td>
-                      <td style={{ padding:'12px 14px', color:'#2563eb', fontSize:12 }}>
+                      <td style={{ padding:'12px 14px', fontSize:12 }}>
                         {u.email ? <a href={`mailto:${u.email}`} style={{ color:'#2563eb', textDecoration:'none' }}>{u.email}</a> : '—'}
                       </td>
                       <td style={{ padding:'12px 14px', color:'#888', fontSize:11 }}>
@@ -110,7 +166,7 @@ export default function AdminUsers() {
                         {u.status==='pending'&&<><button style={btn('green')} onClick={()=>setStatus(u.id,'approved')}>✓ Duyệt</button><button style={btn('red')} onClick={()=>setStatus(u.id,'rejected')}>✗ Từ chối</button></>}
                         {u.status==='approved'&&<button style={btn('red')} onClick={()=>setStatus(u.id,'rejected')}>✗ Thu hồi</button>}
                         {u.status==='rejected'&&<button style={btn('green')} onClick={()=>setStatus(u.id,'approved')}>✓ Duyệt lại</button>}
-                        <button style={{...btn('gray'), marginRight:0, marginTop:4}} onClick={()=>{ if(confirm('Xóa hoàn toàn tài khoản '+( u.username||u.name||u.id)+'? Không thể hoàn tác!')) deleteDoc(doc(db,'users',u.id)) }}>🗑️ Xóa</button>
+                        <button style={{...btn('gray'), marginLeft:4}} onClick={()=>deleteUser(u.id, u.username||u.name||u.id)}>🗑️</button>
                       </td>
                     </tr>
                   ))}
@@ -126,51 +182,37 @@ export default function AdminUsers() {
           ? <div style={{ padding:'48px', textAlign:'center', color:'#9ca3af', fontSize:14, background:'#f9fafb', borderRadius:12 }}>
               ✅ Không có yêu cầu đặt lại mật khẩu nào
             </div>
-          : <>
-              {/* Hướng dẫn admin */}
-              <div style={{ background:'#eff6ff', border:'0.5px solid #bfdbfe', borderRadius:12, padding:'16px 20px', marginBottom:20, fontSize:13, color:'#1e40af' }}>
-                <div style={{ fontWeight:700, marginBottom:8 }}>📋 Hướng dẫn xử lý yêu cầu:</div>
-                <ol style={{ margin:0, paddingLeft:20, lineHeight:2 }}>
-                  <li>Liên hệ người dùng qua email/Zalo để xác nhận danh tính</li>
-                  <li>Vào <strong>Firebase Console → Authentication → Users</strong></li>
-                  <li>Tìm theo email dạng <strong>username@vatm-pmu.local</strong> → nhấn <strong>Reset password</strong></li>
-                  <li>Copy link reset → gửi cho người dùng qua email liên hệ của họ</li>
-                  <li>Sau khi xử lý xong → nhấn <strong>"Đánh dấu đã xử lý"</strong> bên dưới</li>
-                </ol>
-              </div>
-
-              <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-                {resets.map(r=>(
-                  <div key={r.id} style={{ background:'#fff', borderRadius:12, border:'1px solid #fde68a', padding:'16px 20px', boxShadow:'0 2px 8px rgba(0,0,0,.06)' }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:12 }}>
-                      <div>
-                        <div style={{ fontSize:15, fontWeight:700, color:'#0a2342', marginBottom:4 }}>@{r.username} — {r.name}</div>
-                        <div style={{ fontSize:12, color:'#555', marginBottom:2 }}>🏢 {r.unit||'—'}</div>
-                        <div style={{ fontSize:12, color:'#2563eb', marginBottom:2 }}>
-                          📧 Email liên hệ: <strong><a href={`mailto:${r.contactEmail}`} style={{ color:'#2563eb' }}>{r.contactEmail}</a></strong>
-                        </div>
-                        <div style={{ fontSize:12, color:'#888', marginBottom:2 }}>
-                          🔑 Firebase email: <span style={{ fontFamily:'monospace', background:'#f3f4f6', padding:'1px 6px', borderRadius:4 }}>{r.fakeEmail}</span>
-                        </div>
-                        <div style={{ fontSize:11, color:'#aaa', marginTop:4 }}>
-                          Yêu cầu lúc: {r.requestAt?.toDate?r.requestAt.toDate().toLocaleString('vi-VN'):'—'}
-                        </div>
+          : <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+              {resets.map(r=>(
+                <div key={r.id} style={{ background:'#fff', borderRadius:12, border:'1px solid #fde68a', padding:'16px 20px', boxShadow:'0 2px 8px rgba(0,0,0,.06)' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:12 }}>
+                    <div>
+                      <div style={{ fontSize:15, fontWeight:700, color:'#0a2342', marginBottom:4 }}>@{r.username} — {r.name}</div>
+                      <div style={{ fontSize:12, color:'#555', marginBottom:2 }}>🏢 {r.unit||'—'}</div>
+                      <div style={{ fontSize:12, color:'#2563eb', marginBottom:2 }}>
+                        📧 Email: <strong><a href={`mailto:${r.contactEmail}`} style={{ color:'#2563eb' }}>{r.contactEmail}</a></strong>
                       </div>
-                      <div style={{ display:'flex', gap:8, flexShrink:0 }}>
-                        <button onClick={()=>{ if(confirm('Xác nhận đã xử lý và đặt lại mật khẩu cho @'+r.username+'?')) closeReset(r.id) }}
-                          style={{ padding:'8px 14px', background:'#10b981', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
-                          ✅ Đồng ý
-                        </button>
-                        <button onClick={()=>{ if(confirm('Từ chối yêu cầu của @'+r.username+'?')) updateDoc(doc(db,'resetRequests',r.id),{status:'rejected'}) }}
-                          style={{ padding:'8px 14px', background:'#ef4444', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
-                          ❌ Từ chối
-                        </button>
+                      <div style={{ fontSize:11, color:'#aaa', marginTop:4 }}>
+                        Yêu cầu lúc: {r.requestAt?.toDate?r.requestAt.toDate().toLocaleString('vi-VN'):'—'}
                       </div>
                     </div>
+                    <div style={{ display:'flex', gap:8, flexShrink:0 }}>
+                      <button
+                        disabled={sending===r.id}
+                        onClick={()=>approveReset(r)}
+                        style={{ padding:'8px 16px', background: sending===r.id?'#9ca3af':'#10b981', color:'#fff', border:'none', borderRadius:8, cursor:sending===r.id?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>
+                        {sending===r.id ? '⏳ Đang gửi...' : '✅ Đồng ý'}
+                      </button>
+                      <button
+                        onClick={()=>rejectReset(r)}
+                        style={{ padding:'8px 16px', background:'#ef4444', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
+                        ❌ Từ chối
+                      </button>
+                    </div>
                   </div>
-                ))}
-              </div>
-            </>
+                </div>
+              ))}
+            </div>
         }
       </>}
     </div>
