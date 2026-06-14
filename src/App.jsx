@@ -319,7 +319,7 @@ function AppInner() {
   }
 
   return (
-    <div style={{ display:'flex', height:'100vh', overflow:'hidden', fontFamily:'Times New Roman,serif' }}>
+    <div style={{ display:'flex', position:'fixed', inset:0, fontFamily:'Times New Roman,serif' }}>
 
       {/* ── Sidebar ── */}
       <div style={{ width:210, background:'#fff', borderRight:'0.5px solid #e5e4e0', display:'flex', flexDirection:'column', flexShrink:0, height:'100vh', overflow:'hidden' }}>
