@@ -118,33 +118,56 @@ export default function DocDetail({ doc, onEdit, onClose }) {
 
   // ── Phân tích sâu & ghi nhớ ──
   const handleAnalyze = async () => {
-    if (!fileUrl) { alert('Văn bản này chưa có file đính kèm!'); return }
     setAnalyzing(true)
     try {
-      setAnalyzeStep('📥 Đang tải file...')
-      const text = await readFileFromUrl(fileUrl, fileName)
-      if (!text || text.length < 100) {
-        setAnalyzeStep('⚠️ File không đọc được text (có thể là scan ảnh)')
-        setTimeout(() => setAnalyzeStep(''), 3000)
-        return
-      }
-      setAnalyzeStep(`✅ Đọc xong ${text.length} ký tự · 🤖 AI đang phân tích sâu...`)
-      const result = await analyzeDeepForMemory(text, fileName)
+      // Bước 1: Dùng dữ liệu sẵn có trong Firestore (luôn có)
+      const docText = [
+        `Số ký hiệu: ${doc.code || ''}`,
+        `Ngày ban hành: ${doc.date || ''}`,
+        `Cơ quan ban hành: ${doc.org || ''}`,
+        `Loại văn bản: ${doc.docType || ''}`,
+        `Nội dung/Về việc: ${doc.subject || ''}`,
+        `Trích yếu: ${doc.detail || ''}`,
+        `Ghi chú: ${doc.note || ''}`,
+      ].filter(l => !l.endsWith(': ')).join('\n')
 
-      // Thử parse JSON, nếu không được thì lưu dạng text
+      let fullText = docText
+
+      // Bước 2: Thử đọc thêm từ file nếu có (bonus)
+      if (hasFile) {
+        setAnalyzeStep('📥 Thử đọc thêm nội dung file...')
+        try {
+          const fileContent = await Promise.race([
+            readFileFromUrl(fileUrl, fileName),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000))
+          ])
+          if (fileContent && fileContent.length > 200) {
+            fullText = docText + '\n\nNỘI DUNG FILE:\n' + fileContent.slice(0, 8000)
+            setAnalyzeStep(`✅ Đọc được ${fileContent.length} ký tự từ file`)
+          } else {
+            setAnalyzeStep('⚠️ File không đọc được text — dùng thông tin sẵn có')
+          }
+        } catch {
+          setAnalyzeStep('⚠️ Không đọc được file — dùng thông tin sẵn có')
+        }
+      }
+
+      setAnalyzeStep('🤖 AI đang phân tích...')
+      const result = await analyzeDeepForMemory(fullText, fileName || doc.code)
+
       let parsed = parseJ(result)
       if (!parsed) {
-        // AI trả về text thường → tạo memory từ text
         parsed = {
           summary: result.slice(0, 1000),
-          keyPoints: result.split('\n').filter(l => l.trim().startsWith('-') || l.trim().match(/^\d+\./)).map(l => l.replace(/^[-\d.]+\s*/, '').trim()).filter(Boolean).slice(0, 10),
+          keyPoints: result.split('\n').filter(l => l.trim().match(/^[-\d•*]/)).map(l => l.replace(/^[-\d.•*]+\s*/, '').trim()).filter(Boolean).slice(0, 10),
           legalBasis: '',
           requirements: '',
           risks: '',
-          keywords: [],
+          keywords: (doc.subject || '').split(/\s+/).filter(w => w.length > 3).slice(0, 8),
         }
       }
-      await saveMemory({ ...parsed, textLength: text.length, fileName })
+
+      await saveMemory({ ...parsed, fileName: fileName || doc.code })
       setAnalyzeStep('✅ Đã ghi nhớ thành công!')
       setShowChat(true)
       setTimeout(() => setAnalyzeStep(''), 2000)
