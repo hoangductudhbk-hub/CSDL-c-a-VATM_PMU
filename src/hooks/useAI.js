@@ -182,25 +182,44 @@ export function useAI() {
   const analyzeDeepForMemory = async (text, fileName = '') => {
     setLoading(true)
     resetIdxIfNewDay()
-    // Giới hạn 12K ký tự để tránh rate limit
     const clean = text.replace(/\r\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{3,}/g,' ').slice(0, 12000)
     const prompt = `Phân tích sâu văn bản hành chính Việt Nam và trả về JSON (không giải thích thêm):
 {
-  "summary": "Tóm tắt đầy đủ 8-12 câu",
-  "keyPoints": ["điểm 1", "điểm 2", "tối đa 10"],
-  "legalBasis": "căn cứ pháp lý chính",
+  "summary": "Tóm tắt đầy đủ 8-12 câu về nội dung văn bản",
+  "keyPoints": ["điểm quan trọng 1", "điểm 2", "tối đa 10 điểm"],
+  "legalBasis": "căn cứ pháp lý chính được viện dẫn",
   "requirements": "yêu cầu kỹ thuật hoặc điều khoản quan trọng",
   "risks": "rủi ro hoặc điểm cần lưu ý",
-  "keywords": ["từ khóa 1", "tối đa 15"]
+  "keywords": ["từ khóa 1", "từ khóa 2", "tối đa 15 từ"]
 }
 
 Tên file: ${fileName}
-NỘI DUNG:
+NỘI DUNG VĂN BẢN (đọc toàn bộ và phân tích chi tiết):
 ---
 ${clean}
 ---`
     try {
-      // Thử Gemini Flash trước (1 key, chờ nếu 429)
+      // ── Groq làm CHÍNH (ổn định hơn, 30 RPM) ──
+      for (const key of getGroqKeys()) {
+        try {
+          const res = await fetch(GROQ_URL, {
+            method: 'POST',
+            headers: { 'Content-Type':'application/json', Authorization:`Bearer ${key}` },
+            body: JSON.stringify({
+              model: 'llama-3.3-70b-versatile',
+              max_tokens: 2000,
+              temperature: 0.1,
+              messages: [{ role:'user', content: prompt }],
+            }),
+          })
+          if (res.status === 429) { await new Promise(r => setTimeout(r, 2000)); continue }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const result = (await res.json()).choices?.[0]?.message?.content || ''
+          if (result) return result
+        } catch(e) { continue }
+      }
+      // ── Gemini làm FALLBACK (chờ 5s để tránh 429) ──
+      await new Promise(r => setTimeout(r, 5000))
       for (const key of getGemKeys()) {
         try {
           const res = await fetch(GEM_URL('gemini-2.0-flash', key), {
@@ -211,32 +230,13 @@ ${clean}
               generationConfig: { temperature: 0.1, maxOutputTokens: 2000 },
             }),
           })
-          if (res.status === 429) {
-            await new Promise(r => setTimeout(r, 3000)) // chờ 3s rồi thử key tiếp
-            continue
-          }
+          if (res.status === 429) { await new Promise(r => setTimeout(r, 3000)); continue }
           if (!res.ok) continue
           const result = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
           if (result) return result
         } catch(e) { continue }
       }
-      // Fallback Groq (dùng model mạnh nhất)
-      for (const key of getGroqKeys()) {
-        try {
-          const res = await fetch(GROQ_URL, {
-            method: 'POST',
-            headers: { 'Content-Type':'application/json', Authorization:`Bearer ${key}` },
-            body: JSON.stringify({
-              model: 'llama-3.3-70b-versatile', max_tokens: 2000, temperature: 0.1,
-              messages: [{ role:'user', content: prompt }],
-            }),
-          })
-          if (!res.ok) { if(res.status===429) continue; throw new Error(`HTTP ${res.status}`) }
-          const result = (await res.json()).choices?.[0]?.message?.content || ''
-          if (result) return result
-        } catch(e) { continue }
-      }
-      throw new Error('Tất cả AI đang bận (429). Vui lòng thử lại sau 1 phút!')
+      throw new Error('Tất cả AI đang bận. Vui lòng thử lại sau 1 phút!')
     } finally { setLoading(false) }
   }
 
