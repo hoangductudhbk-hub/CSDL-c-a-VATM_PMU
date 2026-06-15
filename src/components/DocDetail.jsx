@@ -130,8 +130,20 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       }
       setAnalyzeStep(`✅ Đọc xong ${text.length} ký tự · 🤖 AI đang phân tích sâu...`)
       const result = await analyzeDeepForMemory(text, fileName)
-      const parsed = parseJ(result)
-      if (!parsed) throw new Error('AI không trả về JSON hợp lệ')
+
+      // Thử parse JSON, nếu không được thì lưu dạng text
+      let parsed = parseJ(result)
+      if (!parsed) {
+        // AI trả về text thường → tạo memory từ text
+        parsed = {
+          summary: result.slice(0, 1000),
+          keyPoints: result.split('\n').filter(l => l.trim().startsWith('-') || l.trim().match(/^\d+\./)).map(l => l.replace(/^[-\d.]+\s*/, '').trim()).filter(Boolean).slice(0, 10),
+          legalBasis: '',
+          requirements: '',
+          risks: '',
+          keywords: [],
+        }
+      }
       await saveMemory({ ...parsed, textLength: text.length, fileName })
       setAnalyzeStep('✅ Đã ghi nhớ thành công!')
       setShowChat(true)
