@@ -8,7 +8,6 @@ const GEMINI_MODELS     = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
 const GEM_URL = (model, key) =>
   `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`
 
-// ── Đọc key từ Vercel Environment Variables (ưu tiên) hoặc localStorage ──
 const getGroqKeys = () => {
   const fromEnv = [
     import.meta.env.VITE_GROQ_API_KEY,
@@ -28,8 +27,6 @@ const getGemKeys = () => {
   if (fromEnv.length) return fromEnv
   return (localStorage.getItem('gemini_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
 }
-
-const isReal = () => Boolean(getGroqKeys().length || getGemKeys().length)
 
 const saveKey = (k) => {
   k = k.trim()
@@ -65,6 +62,31 @@ const SYSTEM = `Bạn là chuyên gia phân tích văn bản hành chính Việt
 
 export function useAI() {
   const [loading, setLoading] = useState(false)
+
+  // ── Gọi Gemini với maxTokens tuỳ chỉnh ──
+  const callGemini = async (model, parts, maxOutputTokens = 1000) => {
+    const keys = getGemKeys()
+    if (!keys.length) throw new Error('QUOTA')
+    for (const key of keys) {
+      try {
+        const res = await fetch(GEM_URL(model, key), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts }],
+            generationConfig: { temperature: 0.1, maxOutputTokens },
+          }),
+        })
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}))
+          if (res.status === 429 || res.status === 503 || res.status === 404) continue
+          throw new Error(e?.error?.message || `HTTP ${res.status}`)
+        }
+        return (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
+      } catch(e) { if (!['QUOTA','429','503'].some(s => e.message.includes(s))) throw e }
+    }
+    throw new Error('QUOTA')
+  }
 
   const callGroqText = async (model, userText) => {
     const keys = getGroqKeys()
@@ -116,30 +138,7 @@ export function useAI() {
     throw new Error('QUOTA')
   }
 
-  const callGemini = async (model, parts) => {
-    const keys = getGemKeys()
-    if (!keys.length) throw new Error('QUOTA')
-    for (const key of keys) {
-      try {
-        const res = await fetch(GEM_URL(model, key), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents:[{ parts }],
-            generationConfig:{ temperature:0.05, maxOutputTokens:1000 },
-          }),
-        })
-        if (!res.ok) {
-          const e = await res.json().catch(() => ({}))
-          if (res.status === 429 || res.status === 503 || res.status === 404) continue
-          throw new Error(e?.error?.message || `HTTP ${res.status}`)
-        }
-        return (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
-      } catch(e) { if(!['QUOTA','429','503'].some(s=>e.message.includes(s))) throw e }
-    }
-    throw new Error('QUOTA')
-  }
-
+  // ── Phân tích trích xuất thông tin (dùng khi thêm văn bản) ──
   const analyzeText = async (text, fileName = '') => {
     setLoading(true)
     resetIdxIfNewDay()
@@ -147,25 +146,13 @@ export function useAI() {
     const clean = text.replace(/\r\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{3,}/g,' ').slice(0,6000)
     const prompt = `Phân tích văn bản (3 trang đầu):${hint}\n\n---\n${clean}\n---`
     try {
-      // Gemini trước (thông minh hơn)
-      let mIdx = parseInt(localStorage.getItem('ai_gem_idx') || '0')
-      while (mIdx < GEMINI_MODELS.length) {
-        try {
-          const r = await callGemini(GEMINI_MODELS[mIdx], [{ text:`${SYSTEM}\n\n${prompt}` }])
-          localStorage.setItem('ai_gem_idx', mIdx)
-          return r
-        } catch(e) { if(e.message !== 'QUOTA') throw e; mIdx++; localStorage.setItem('ai_gem_idx', mIdx) }
+      for (const model of GEMINI_MODELS) {
+        try { return await callGemini(model, [{ text:`${SYSTEM}\n\n${prompt}` }]) } catch(e) { if(e.message !== 'QUOTA') throw e }
       }
-      // Groq fallback
-      let gIdx = parseInt(localStorage.getItem('ai_groq_idx') || '0')
-      while (gIdx < GROQ_TEXT_MODELS.length) {
-        try {
-          const r = await callGroqText(GROQ_TEXT_MODELS[gIdx], prompt)
-          localStorage.setItem('ai_groq_idx', gIdx)
-          return r
-        } catch(e) { if(e.message !== 'QUOTA') throw e; gIdx++; localStorage.setItem('ai_groq_idx', gIdx) }
+      for (const model of GROQ_TEXT_MODELS) {
+        try { return await callGroqText(model, prompt) } catch(e) { if(e.message !== 'QUOTA') throw e }
       }
-      throw new Error('Tất cả AI hết quota hôm nay. Vui lòng thử lại sau.')
+      throw new Error('Tất cả AI hết quota.')
     } finally { setLoading(false) }
   }
 
@@ -177,52 +164,148 @@ export function useAI() {
       if (getGroqKeys().length) {
         try { return await callGroqVision(base64Images, hint) } catch(e) { if(e.message !== 'QUOTA') throw e }
       }
-      let mIdx = parseInt(localStorage.getItem('ai_gem_idx') || '0')
-      while (mIdx < GEMINI_MODELS.length) {
+      for (const model of GEMINI_MODELS) {
         try {
           const parts = [
             { text:`${SYSTEM}\n\nĐọc ảnh scan văn bản Việt Nam${hint} và trả về JSON.` },
             ...base64Images.slice(0,3).map(b64 => ({ inline_data:{ mime_type:'image/jpeg', data:b64 } }))
           ]
-          return await callGemini(GEMINI_MODELS[mIdx], parts)
-        } catch(e) { if(e.message !== 'QUOTA') throw e; mIdx++; localStorage.setItem('ai_gem_idx', mIdx) }
-      }
-      throw new Error('Tất cả AI hết quota. Thử lại sau.')
-    } finally { setLoading(false) }
-  }
-
-  const ask = async (question, context = '') => {
-    setLoading(true)
-    resetIdxIfNewDay()
-    const sys = `Bạn là trợ lý quản lý dự án VATM. Trả lời tiếng Việt, ngắn gọn.${context?'\n\nDữ liệu:\n'+context:''}`
-    try {
-      // Gemini trước (thông minh hơn)
-      let mIdx = parseInt(localStorage.getItem('ai_gem_idx') || '0')
-      while (mIdx < GEMINI_MODELS.length) {
-        try { return await callGemini(GEMINI_MODELS[mIdx], [{text:`${sys}\n\nCâu hỏi: ${question}`}]) }
-        catch(e) { if(e.message !== 'QUOTA') throw e; mIdx++ }
-      }
-      // Groq fallback
-      let gIdx = parseInt(localStorage.getItem('ai_groq_idx') || '0')
-      while (gIdx < GROQ_TEXT_MODELS.length) {
-        try {
-          const keys = getGroqKeys()
-          for (const key of keys) {
-            const res = await fetch(GROQ_URL, {
-              method:'POST',
-              headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${key}` },
-              body:JSON.stringify({ model:GROQ_TEXT_MODELS[gIdx], max_tokens:800, temperature:0.1,
-                messages:[{role:'system',content:sys},{role:'user',content:question}] }),
-            })
-            if (!res.ok) { if(res.status===429) continue; throw new Error(`HTTP ${res.status}`) }
-            return (await res.json()).choices?.[0]?.message?.content || ''
-          }
-          gIdx++; localStorage.setItem('ai_groq_idx', gIdx)
-        } catch(e) { if(e.message !== 'QUOTA') throw e; gIdx++ }
+          return await callGemini(model, parts)
+        } catch(e) { if(e.message !== 'QUOTA') throw e }
       }
       throw new Error('Tất cả AI hết quota.')
     } finally { setLoading(false) }
   }
 
-  return { ask, analyzeText, analyzeImages, getKey: () => getGroqKeys()[0] || getGemKeys()[0], saveKey, isReal, loading }
+  // ── Phân tích SÂU toàn bộ văn bản → tạo bộ nhớ (dùng 1 lần duy nhất) ──
+  const analyzeDeepForMemory = async (text, fileName = '') => {
+    setLoading(true)
+    resetIdxIfNewDay()
+    // Đọc tối đa 20K ký tự (nhiều hơn lúc trích xuất thông thường)
+    const clean = text.replace(/\r\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{3,}/g,' ').slice(0, 20000)
+    const prompt = `Phân tích sâu toàn bộ văn bản hành chính sau và trả về JSON (không giải thích thêm):
+{
+  "summary": "Tóm tắt đầy đủ nội dung 8-12 câu",
+  "keyPoints": ["điểm quan trọng 1", "điểm quan trọng 2", "...tối đa 10 điểm"],
+  "legalBasis": "căn cứ pháp lý chính",
+  "requirements": "yêu cầu kỹ thuật hoặc điều khoản quan trọng nếu có",
+  "risks": "rủi ro hoặc điểm cần lưu ý nếu có",
+  "keywords": ["từ khóa 1", "từ khóa 2", "...tối đa 15 từ khóa"]
+}
+
+Tên file: ${fileName}
+NỘI DUNG VĂN BẢN:
+---
+${clean}
+---`
+    try {
+      for (const model of GEMINI_MODELS) {
+        try {
+          const result = await callGemini(model, [{ text: prompt }], 2000)
+          return result
+        } catch(e) { if(e.message !== 'QUOTA') throw e }
+      }
+      // Fallback Groq nếu Gemini hết quota
+      for (const key of getGroqKeys()) {
+        try {
+          const res = await fetch(GROQ_URL, {
+            method: 'POST',
+            headers: { 'Content-Type':'application/json', Authorization:`Bearer ${key}` },
+            body: JSON.stringify({
+              model: 'llama-3.3-70b-versatile', max_tokens: 2000, temperature: 0.1,
+              messages: [{ role:'user', content: prompt }],
+            }),
+          })
+          if (!res.ok) { if(res.status===429) continue; throw new Error(`HTTP ${res.status}`) }
+          return (await res.json()).choices?.[0]?.message?.content || ''
+        } catch(e) { if(e.message !== 'QUOTA') continue; throw e }
+      }
+      throw new Error('Tất cả AI hết quota.')
+    } finally { setLoading(false) }
+  }
+
+  // ── Hỏi đáp sâu dựa vào bộ nhớ đã lưu (tốn rất ít token) ──
+  const askDeep = async (question, memory, chatHistory = []) => {
+    setLoading(true)
+    resetIdxIfNewDay()
+    // Tạo context từ bộ nhớ (không đọc lại file!)
+    const ctx = `BỘ NHỚ VĂN BẢN:
+Tóm tắt: ${memory.summary || ''}
+Điểm quan trọng: ${(memory.keyPoints || []).join('; ')}
+Căn cứ pháp lý: ${memory.legalBasis || ''}
+Yêu cầu kỹ thuật: ${memory.requirements || ''}
+Rủi ro: ${memory.risks || ''}
+Từ khóa: ${(memory.keywords || []).join(', ')}`
+
+    const historyCtx = chatHistory.slice(-4).map(m => `${m.role === 'user' ? 'Hỏi' : 'Trả lời'}: ${m.content}`).join('\n')
+
+    const prompt = `Bạn là chuyên gia phân tích văn bản pháp lý Việt Nam. Dựa vào bộ nhớ văn bản bên dưới để trả lời câu hỏi. Nếu thông tin không có trong bộ nhớ, hãy nói rõ.
+
+${ctx}
+${historyCtx ? '\nLỊCH SỬ HỘI THOẠI:\n' + historyCtx : ''}
+
+CÂU HỎI: ${question}
+Trả lời tiếng Việt, chi tiết và chính xác:`
+
+    try {
+      for (const model of GEMINI_MODELS) {
+        try { return await callGemini(model, [{ text: prompt }], 1500) } catch(e) { if(e.message !== 'QUOTA') throw e }
+      }
+      for (const key of getGroqKeys()) {
+        try {
+          const res = await fetch(GROQ_URL, {
+            method: 'POST',
+            headers: { 'Content-Type':'application/json', Authorization:`Bearer ${key}` },
+            body: JSON.stringify({
+              model: 'llama-3.3-70b-versatile', max_tokens: 1200, temperature: 0.1,
+              messages: [{ role:'user', content: prompt }],
+            }),
+          })
+          if (!res.ok) { if(res.status===429) continue; throw new Error(`HTTP ${res.status}`) }
+          return (await res.json()).choices?.[0]?.message?.content || ''
+        } catch(e) { continue }
+      }
+      throw new Error('Tất cả AI hết quota.')
+    } finally { setLoading(false) }
+  }
+
+  // ── Chat thông thường về dự án ──
+  const ask = async (question, context = '') => {
+    setLoading(true)
+    resetIdxIfNewDay()
+    const sys = `Bạn là trợ lý quản lý dự án VATM. Trả lời tiếng Việt, ngắn gọn.${context?'\n\nDữ liệu:\n'+context:''}`
+    try {
+      for (const model of GEMINI_MODELS) {
+        try { return await callGemini(model, [{text:`${sys}\n\nCâu hỏi: ${question}`}]) }
+        catch(e) { if(e.message !== 'QUOTA') throw e }
+      }
+      for (const key of getGroqKeys()) {
+        for (const model of GROQ_TEXT_MODELS) {
+          try {
+            const res = await fetch(GROQ_URL, {
+              method:'POST',
+              headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${key}` },
+              body:JSON.stringify({ model, max_tokens:800, temperature:0.1,
+                messages:[{role:'system',content:sys},{role:'user',content:question}] }),
+            })
+            if (!res.ok) { if(res.status===429) continue; throw new Error(`HTTP ${res.status}`) }
+            return (await res.json()).choices?.[0]?.message?.content || ''
+          } catch(e) { continue }
+        }
+      }
+      throw new Error('Tất cả AI hết quota.')
+    } finally { setLoading(false) }
+  }
+
+  return {
+    ask,
+    analyzeText,
+    analyzeImages,
+    analyzeDeepForMemory,
+    askDeep,
+    getKey: () => getGroqKeys()[0] || getGemKeys()[0],
+    saveKey,
+    isReal: () => Boolean(getGroqKeys().length || getGemKeys().length),
+    loading,
+  }
 }
