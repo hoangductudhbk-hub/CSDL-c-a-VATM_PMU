@@ -244,7 +244,6 @@ ${clean}
   const askDeep = async (question, memory, chatHistory = []) => {
     setLoading(true)
     resetIdxIfNewDay()
-    // Tạo context từ bộ nhớ (không đọc lại file!)
     const ctx = `BỘ NHỚ VĂN BẢN:
 Tóm tắt: ${memory.summary || ''}
 Điểm quan trọng: ${(memory.keyPoints || []).join('; ')}
@@ -253,35 +252,54 @@ Yêu cầu kỹ thuật: ${memory.requirements || ''}
 Rủi ro: ${memory.risks || ''}
 Từ khóa: ${(memory.keywords || []).join(', ')}`
 
-    const historyCtx = chatHistory.slice(-4).map(m => `${m.role === 'user' ? 'Hỏi' : 'Trả lời'}: ${m.content}`).join('\n')
+    const historyCtx = chatHistory.slice(-4).map(m => `${m.role==='user'?'Hỏi':'Trả lời'}: ${m.content}`).join('\n')
 
-    const prompt = `Bạn là chuyên gia phân tích văn bản pháp lý Việt Nam. Dựa vào bộ nhớ văn bản bên dưới để trả lời câu hỏi. Nếu thông tin không có trong bộ nhớ, hãy nói rõ.
+    const prompt = `Bạn là chuyên gia phân tích văn bản pháp lý Việt Nam. Dựa vào bộ nhớ văn bản bên dưới để trả lời câu hỏi chi tiết. Nếu thông tin không có trong bộ nhớ, hãy nói rõ.
 
 ${ctx}
-${historyCtx ? '\nLỊCH SỬ HỘI THOẠI:\n' + historyCtx : ''}
+${historyCtx ? '\nLỊCH SỬ:\n' + historyCtx : ''}
 
 CÂU HỎI: ${question}
 Trả lời tiếng Việt, chi tiết và chính xác:`
 
     try {
-      for (const model of GEMINI_MODELS) {
-        try { return await callGemini(model, [{ text: prompt }], 1500) } catch(e) { if(e.message !== 'QUOTA') throw e }
-      }
+      // ── Groq làm CHÍNH ──
       for (const key of getGroqKeys()) {
         try {
           const res = await fetch(GROQ_URL, {
             method: 'POST',
             headers: { 'Content-Type':'application/json', Authorization:`Bearer ${key}` },
             body: JSON.stringify({
-              model: 'llama-3.3-70b-versatile', max_tokens: 1200, temperature: 0.1,
+              model: 'llama-3.3-70b-versatile',
+              max_tokens: 1500, temperature: 0.1,
               messages: [{ role:'user', content: prompt }],
             }),
           })
-          if (!res.ok) { if(res.status===429) continue; throw new Error(`HTTP ${res.status}`) }
-          return (await res.json()).choices?.[0]?.message?.content || ''
+          if (res.status === 429) { await new Promise(r => setTimeout(r, 1500)); continue }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const result = (await res.json()).choices?.[0]?.message?.content || ''
+          if (result) return result
         } catch(e) { continue }
       }
-      throw new Error('Tất cả AI hết quota.')
+      // ── Gemini fallback (chờ 5s) ──
+      await new Promise(r => setTimeout(r, 5000))
+      for (const key of getGemKeys()) {
+        try {
+          const res = await fetch(GEM_URL('gemini-2.0-flash', key), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { temperature: 0.1, maxOutputTokens: 1500 },
+            }),
+          })
+          if (res.status === 429) { await new Promise(r => setTimeout(r, 3000)); continue }
+          if (!res.ok) continue
+          const result = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
+          if (result) return result
+        } catch(e) { continue }
+      }
+      throw new Error('AI đang bận. Thử lại sau 1 phút!')
     } finally { setLoading(false) }
   }
 
