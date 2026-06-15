@@ -6,13 +6,12 @@ import {
 } from 'firebase/firestore'
 import { db } from '../firebase'
 
-export function useDocuments(projectId, userId) {
-  const [docs, setDocs]       = useState([])
+export function useDocuments(projectId, userId, packageId = null) {
+  const [allDocs, setAllDocs] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!projectId || !userId) return
-    // ✅ Lấy văn bản theo projectId (không lọc userId — mọi người đều thấy)
     const q = query(
       collection(db, 'documents'),
       where('projectId', '==', projectId)
@@ -20,17 +19,23 @@ export function useDocuments(projectId, userId) {
     const unsub = onSnapshot(q, snap => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }))
       list.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0))
-      setDocs(list)
+      setAllDocs(list)
       setLoading(false)
     })
     return unsub
   }, [projectId, userId])
 
+  // Lọc theo gói thầu nếu có
+  const docs = packageId
+    ? allDocs.filter(d => d.packageId === packageId)
+    : allDocs
+
   const addDocument = (data, silent) =>
     addDoc(collection(db, 'documents'), {
       ...data,
       projectId,
-      uploadedBy: userId,   // lưu ai upload
+      packageId: packageId || null,
+      uploadedBy: userId,
       createdAt:  serverTimestamp(),
       updatedAt:  serverTimestamp(),
     })
@@ -43,5 +48,5 @@ export function useDocuments(projectId, userId) {
 
   const deleteDocument = (id) => deleteDoc(doc(db, 'documents', id))
 
-  return { docs, loading, addDocument, updateDocument, deleteDocument }
+  return { docs, allDocs, loading, addDocument, updateDocument, deleteDocument }
 }

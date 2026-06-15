@@ -3,6 +3,7 @@ import React from 'react'
 import { useAuth }        from './context/AuthContext'
 import { useProjects }    from './hooks/useProjects'
 import { useDocuments }   from './hooks/useDocuments'
+import { usePackages }    from './hooks/usePackages'
 import { useAI }          from './hooks/useAI'
 import DocModal           from './components/DocModal'
 import DocDetail          from './components/DocDetail'
@@ -86,8 +87,7 @@ function RejectedScreen({ userDoc, logout }) {
           Tài khoản <strong>@{userDoc?.username}</strong> không được cấp quyền truy cập.<br/>
           Vui lòng liên hệ quản trị viên để biết thêm thông tin.
         </p>
-        <a href="mailto:hoangductudhbk@gmail.com"
-          style={{ display:'block', fontSize:13, color:'#2563eb', marginBottom:24, textDecoration:'none' }}>
+        <a href="mailto:hoangductudhbk@gmail.com" style={{ display:'block', fontSize:13, color:'#2563eb', marginBottom:24, textDecoration:'none' }}>
           📧 hoangductudhbk@gmail.com
         </a>
         <button onClick={logout} style={{ fontSize:12, color:'#888', background:'none', border:'0.5px solid #ddd', borderRadius:8, cursor:'pointer', padding:'8px 20px' }}>Đăng xuất</button>
@@ -104,28 +104,18 @@ function FloatingUpload({ onOpen }) {
   const isDone = !draft.loading && (draft.status || '').startsWith('✅')
   const isErr  = !draft.loading && (draft.status || '').startsWith('⚠️')
   return (
-    <div style={{ position:'fixed', bottom:20, right:20, zIndex:9999,
-      display:'flex', alignItems:'center', gap:10, background:'#fff', borderRadius:14,
-      boxShadow:'0 4px 24px rgba(0,0,0,.18)', padding:'10px 14px', minWidth:280, maxWidth:360, border:'1px solid #eee' }}>
-      <div style={{ width:34, height:34, borderRadius:8, flexShrink:0, display:'flex',
-        alignItems:'center', justifyContent:'center', fontSize:14,
-        background: isDone ? '#1D9E75' : isErr ? '#e74c3c' : '#1a1a1a' }}>
+    <div style={{ position:'fixed', bottom:20, right:20, zIndex:9999, display:'flex', alignItems:'center', gap:10, background:'#fff', borderRadius:14, boxShadow:'0 4px 24px rgba(0,0,0,.18)', padding:'10px 14px', minWidth:280, maxWidth:360, border:'1px solid #eee' }}>
+      <div style={{ width:34, height:34, borderRadius:8, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', fontSize:14, background: isDone ? '#1D9E75' : isErr ? '#e74c3c' : '#1a1a1a' }}>
         {isDone ? '✅' : isErr ? '⚠️' : <SpinIcon />}
       </div>
       <div style={{ flex:1, minWidth:0 }}>
         <div style={{ fontSize:13, fontWeight:600, color:'#1a1a1a', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{short}</div>
         <div style={{ fontSize:11, color:'#888', marginTop:2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
-          {draft.loading ? (draft.status||'').replace(/^⏳\s*/,'') || 'Đang xử lý...'
-            : isDone ? 'Xong! Nhấn để xem kết quả'
-            : (draft.status||'').replace(/^⚠️\s*/,'') || 'Có lỗi xảy ra'}
+          {draft.loading ? (draft.status||'').replace(/^⏳\s*/,'') || 'Đang xử lý...' : isDone ? 'Xong! Nhấn để xem kết quả' : (draft.status||'').replace(/^⚠️\s*/,'') || 'Có lỗi xảy ra'}
         </div>
       </div>
       {!draft.loading && (
-        <button onClick={() => onOpen(draft.projectId)}
-          style={{ flexShrink:0, padding:'5px 12px', border:'none', borderRadius:7, color:'#fff',
-            cursor:'pointer', fontSize:12, fontWeight:500, background: isDone ? '#1D9E75' : '#e74c3c' }}>
-          Mở
-        </button>
+        <button onClick={() => onOpen(draft.projectId)} style={{ flexShrink:0, padding:'5px 12px', border:'none', borderRadius:7, color:'#fff', cursor:'pointer', fontSize:12, fontWeight:500, background: isDone ? '#1D9E75' : '#e74c3c' }}>Mở</button>
       )}
       <button onClick={clearDraft} style={{ flexShrink:0, background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:14, padding:'2px 4px' }}>✕</button>
     </div>
@@ -180,9 +170,7 @@ function StatusCell({ doc, updateDocument, admin }) {
   const s = SM2[doc.status || 'prep']
   if (!editing) return (
     <span onClick={() => { if(admin) { setVal(doc.status||'prep'); setEditing(true) } }}
-      style={{ fontSize:11, padding:'4px 10px', borderRadius:20, background:s.bg, color:s.color,
-        cursor:admin?'pointer':'default', display:'inline-flex', alignItems:'center', gap:5,
-        whiteSpace:'nowrap', border:'0.5px solid '+s.color }}
+      style={{ fontSize:11, padding:'4px 10px', borderRadius:20, background:s.bg, color:s.color, cursor:admin?'pointer':'default', display:'inline-flex', alignItems:'center', gap:5, whiteSpace:'nowrap', border:'0.5px solid '+s.color }}
       title={admin ? 'Nhấn để đổi trạng thái' : ''}>
       {s.label}{admin ? ' ✎' : ''}
     </span>
@@ -190,74 +178,88 @@ function StatusCell({ doc, updateDocument, admin }) {
   const sv = SM2[val]
   return (
     <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-      <select value={val} onChange={e => setVal(e.target.value)}
-        style={{ fontSize:11, padding:'4px 8px', borderRadius:20, background:sv.bg, color:sv.color, border:'0.5px solid '+sv.color, cursor:'pointer', outline:'none', fontWeight:500 }}>
+      <select value={val} onChange={e => setVal(e.target.value)} style={{ fontSize:11, padding:'4px 8px', borderRadius:20, background:sv.bg, color:sv.color, border:'0.5px solid '+sv.color, cursor:'pointer', outline:'none', fontWeight:500 }}>
         <option value="done">✅ Hoàn thành</option>
         <option value="pending">🔄 Đang thực hiện</option>
         <option value="prep">⬜ Chưa thực hiện</option>
       </select>
-      <button onClick={() => { updateDocument(doc.id, { status: val }); setEditing(false) }}
-        style={{ padding:'3px 8px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>✓</button>
-      <button onClick={() => setEditing(false)}
-        style={{ padding:'3px 6px', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', fontSize:11, color:'#888' }}>✕</button>
+      <button onClick={() => { updateDocument(doc.id, { status: val }); setEditing(false) }} style={{ padding:'3px 8px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:6, cursor:'pointer', fontSize:11, fontWeight:600 }}>✓</button>
+      <button onClick={() => setEditing(false)} style={{ padding:'3px 6px', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', fontSize:11, color:'#888' }}>✕</button>
     </div>
   )
 }
 
 function AppInner() {
   const { user, userDoc, status, isAdmin, isApproved, logout } = useAuth()
-
   const { projects, loading: pLoad, addProject, deleteProject } = useProjects(user?.uid)
+  const { packages, addPackage, deletePackage } = usePackages()
   const { logLogin, logLogout, logViewDoc, logAddDoc, logEditDoc, logDeleteDoc,
           logAddProj, logDeleteProj, logExportReport } = useActivityLog(user, userDoc)
   const { draft } = useUploadCtx()
-  const [selProj, setSelProj] = useState('home')
+
+  const [selProj, setSelProj]         = useState('home')
+  const [selPkg,  setSelPkg]          = useState(null)
+  const [expandedProjs, setExpandedProjs] = useState(new Set())
+
   const proj = selProj === 'home' ? null : (projects.find(p => p.id === selProj) || null)
-  const { docs, addDocument, updateDocument, deleteDocument } = useDocuments(proj?.id, user?.uid)
+  const selPkgObj = selPkg ? packages.find(p => p.id === selPkg) : null
+
+  const { docs, allDocs, addDocument, updateDocument, deleteDocument } = useDocuments(proj?.id, user?.uid, selPkg)
   const { deleteFile }    = useCloudinaryStorage()
   const { ask, getKey, saveKey } = useAI()
-  const [tab,            setTab]            = useState('docs')
-  const [search,         setSearch]         = useState('')
-  const [filter,         setFilter]         = useState('all')
-  const [modal,          setModal]          = useState(null)
-  const [editDoc,        setEditDoc]        = useState(null)
-  const [detailDoc,      setDetailDoc]      = useState(null)
-  const [chat,           setChat]           = useState([])
-  const [chatInput,      setChatInput]      = useState('')
-  const [aiLoading,      setAiLoad]         = useState(false)
-  const [showAddProj,    setShowAddProj]    = useState(false)
-  const [showKeyModal,   setShowKeyModal]   = useState(false)
-  const [showChangePw,   setShowChangePw]   = useState(false)
-  const [loggedIn,       setLoggedIn]       = useState(false)
-  const [newProjName,    setNewProjName]    = useState('')
-  const [projPage,       setProjPage]       = useState(0)
+
+  const [tab,         setTab]         = useState('docs')
+  const [search,      setSearch]      = useState('')
+  const [filter,      setFilter]      = useState('all')
+  const [modal,       setModal]       = useState(null)
+  const [editDoc,     setEditDoc]     = useState(null)
+  const [detailDoc,   setDetailDoc]   = useState(null)
+  const [chat,        setChat]        = useState([])
+  const [chatInput,   setChatInput]   = useState('')
+  const [aiLoading,   setAiLoad]      = useState(false)
+  const [showAddProj, setShowAddProj] = useState(false)
+  const [showAddPkg,  setShowAddPkg]  = useState(null) // null hoặc projectId
+  const [showKeyModal,  setShowKeyModal]  = useState(false)
+  const [showChangePw,  setShowChangePw]  = useState(false)
+  const [loggedIn,      setLoggedIn]      = useState(false)
+  const [newProjName,   setNewProjName]   = useState('')
+  const [newPkgName,    setNewPkgName]    = useState('')
+  const [projPage,      setProjPage]      = useState(0)
   const chatEndRef = useRef(null)
 
   useEffect(() => {
     if (user && userDoc && !loggedIn) { logLogin(); setLoggedIn(true) }
   }, [user, userDoc])
 
+  const toggleExpand = (projId) => {
+    setExpandedProjs(prev => {
+      const next = new Set(prev)
+      if (next.has(projId)) next.delete(projId)
+      else next.add(projId)
+      return next
+    })
+  }
+
+  const selectProject = (projId) => {
+    setSelProj(projId); setSelPkg(null); setTab('docs')
+    setExpandedProjs(prev => { const next = new Set(prev); next.add(projId); return next })
+  }
+
+  const selectPackage = (projId, pkgId) => {
+    setSelProj(projId); setSelPkg(pkgId); setTab('docs')
+  }
+
   const openFromDraft = (projectId) => {
     if (projectId) setSelProj(projectId)
     setEditDoc(null); setModal('add')
   }
 
-  if (user === undefined) {
-    return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontSize:14, color:'#888' }}>⏳ Đang tải...</div>
-  }
-
+  if (user === undefined) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontSize:14, color:'#888' }}>⏳ Đang tải...</div>
   if (!user) return <LoginRegister />
-
-  if (status === null) {
-    return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontSize:14, color:'#888' }}>⏳ Đang kiểm tra quyền truy cập...</div>
-  }
-
-  if (status === 'pending') return <PendingScreen userDoc={userDoc} logout={logout} />
+  if (status === null) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontSize:14, color:'#888' }}>⏳ Đang kiểm tra quyền truy cập...</div>
+  if (status === 'pending')  return <PendingScreen  userDoc={userDoc} logout={logout} />
   if (status === 'rejected') return <RejectedScreen userDoc={userDoc} logout={logout} />
-
-  if (pLoad) {
-    return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontSize:14, color:'#888' }}>⏳ Đang tải dự án...</div>
-  }
+  if (pLoad) return <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', fontSize:14, color:'#888' }}>⏳ Đang tải dự án...</div>
 
   const safeDocs = docs || []
   const filtered = safeDocs.filter(d => {
@@ -286,7 +288,7 @@ function AppInner() {
 
   const handleAsk = async (q) => {
     if (!q.trim() || aiLoading) return
-    const ctx = `Dự án: ${proj?.name}\nTổng: ${stats.total} văn bản, Hoàn thành: ${stats.done}\n${safeDocs.slice(0,8).map(d => d.code+': '+d.subject+'('+d.status+')').join('; ')}`
+    const ctx = `Dự án: ${proj?.name}${selPkgObj?` > ${selPkgObj.name}`:''}\nTổng: ${stats.total} văn bản, Hoàn thành: ${stats.done}\n${safeDocs.slice(0,8).map(d => d.code+': '+d.subject+'('+d.status+')').join('; ')}`
     setChat(c => [...c, { role:'user', content:q }])
     setChatInput(''); setAiLoad(true)
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
@@ -302,8 +304,7 @@ function AppInner() {
     const now = new Date()
     const ngay = now.toLocaleDateString('vi-VN')
     const s2 = (n) => String(n).padStart(2,'0')
-    const dd=s2(now.getDate()), mm=s2(now.getMonth()+1)
-    const hh=s2(now.getHours()), min=s2(now.getMinutes())
+    const dd=s2(now.getDate()), mm=s2(now.getMonth()+1), hh=s2(now.getHours()), min=s2(now.getMinutes())
     const rows = safeDocs.map((d,i) => {
       const s = SM[d.status] || SM.prep
       return `<tr><td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${i+1}</td>
@@ -313,14 +314,15 @@ function AppInner() {
         <td style="padding:6px 10px;border:1px solid #ddd">${d.subject||''}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;color:${s.color};font-weight:bold">${s.label}</td></tr>`
     }).join('')
+    const title = selPkgObj ? `${proj?.name} > ${selPkgObj.name}` : (proj?.name||'')
     const html = `<html><head><meta charset='utf-8'><style>body{font-family:'Times New Roman',serif;font-size:14pt}h1{font-size:16pt;font-weight:bold;text-align:center}table{border-collapse:collapse;width:100%}th{background:#1a1a1a;color:#fff;padding:6pt 8pt;border:1px solid #333}td{padding:5pt 8pt;border:1px solid #ccc}</style></head><body>
-    <h1>BÁO CÁO TỔNG HỢP VĂN BẢN</h1><h1>DỰ ÁN: ${proj?.name||''}</h1>
+    <h1>BÁO CÁO TỔNG HỢP VĂN BẢN</h1><h1>${title}</h1>
     <p style="text-align:center">Ngày xuất: ${ngay} | Tổng: ${stats.total} | Tiến độ: ${progress}%</p>
     <table><thead><tr><th>STT</th><th>Số hiệu</th><th>Ngày</th><th>Loại</th><th>Nội dung</th><th>Trạng thái</th></tr></thead><tbody>${rows}</tbody></table></body></html>`
     logExportReport(proj?.name)
     const blob = new Blob(['\uFEFF' + html], { type:'application/msword;charset=utf-8' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
-    const pn = (proj?.name||'DuAn').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').replace(/[^a-zA-Z0-9]/g,'_')
+    const pn = title.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').replace(/[^a-zA-Z0-9]/g,'_')
     a.download = `BaoCao_${pn}_${dd}-${mm}-${now.getFullYear()}_${hh}h${min}.doc`; a.click()
   }
 
@@ -328,7 +330,7 @@ function AppInner() {
     <div style={{ display:'flex', position:'fixed', inset:0, fontFamily:'Times New Roman,serif' }}>
 
       {/* ── Sidebar ── */}
-      <div style={{ width:210, background:'#fff', borderRight:'0.5px solid #e5e4e0', display:'flex', flexDirection:'column', flexShrink:0, height:'100vh', overflow:'hidden' }}>
+      <div style={{ width:220, background:'#fff', borderRight:'0.5px solid #e5e4e0', display:'flex', flexDirection:'column', flexShrink:0, height:'100vh', overflow:'hidden' }}>
         <div style={{ padding:'16px 16px 12px', borderBottom:'0.5px solid #e5e4e0', textAlign:'center' }}>
           <img src="/vatm-logo.png" alt="VATM" style={{ width:72, height:72, borderRadius:'50%', objectFit:'cover', display:'block', margin:'0 auto 8px' }}/>
           <div style={{ fontSize:13, fontWeight:700, color:'#1a1a1a' }}>VATM-PMU</div>
@@ -337,23 +339,20 @@ function AppInner() {
 
         <div style={{ padding:'0 8px', flex:'none' }}>
           {[['home','🏠','Trang chủ','docs'],['home','📖','Hướng dẫn sử dụng','guide'],['home','📋','Lịch sử truy cập','history']].map(([p_,icon,label,t]) => (
-            <button key={label} onClick={() => { setSelProj(p_); setTab(t) }}
-              style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer',
-                background:tab===t&&selProj==='home'?'#f0f0ec':'transparent', color:'#1a1a1a', fontSize:13,
-                fontWeight:600, display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
+            <button key={label} onClick={() => { setSelProj(p_); setSelPkg(null); setTab(t) }}
+              style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:tab===t&&selProj==='home'?'#f0f0ec':'transparent', color:'#1a1a1a', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
               <span style={{ fontSize:14 }}>{icon}</span> {label}
             </button>
           ))}
           {isAdmin && (
-            <button onClick={() => { setSelProj('home'); setTab('admin') }}
-              style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer',
-                background:tab==='admin'?'#fef3c7':'transparent', color:'#92400e', fontSize:13,
-                fontWeight:600, display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
+            <button onClick={() => { setSelProj('home'); setSelPkg(null); setTab('admin') }}
+              style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:tab==='admin'?'#fef3c7':'transparent', color:'#92400e', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
               <span style={{ fontSize:14 }}>👥</span> Quản lý người dùng
             </button>
           )}
         </div>
 
+        {/* Danh sách dự án + gói thầu */}
         <div style={{ padding:'0 8px', borderTop:'0.5px solid #f0f0ec', marginTop:4, flex:1, overflowY:'auto' }}>
           <div style={{ fontSize:12, color:'#555', padding:'8px 8px 4px', fontWeight:800, letterSpacing:'0.05em' }}>DỰ ÁN</div>
           {(() => {
@@ -361,19 +360,57 @@ function AppInner() {
             const totalPages = Math.ceil(projects.length / PAGE)
             const paginated  = projects.slice(projPage * PAGE, projPage * PAGE + PAGE)
             return <>
-              {paginated.map(p => (
-                <div key={p.id} style={{ display:'flex', alignItems:'center', borderRadius:8, marginBottom:2, background:proj?.id===p.id?'#f0f0ec':'transparent' }}>
-                  <button onClick={() => { setSelProj(p.id); setTab('docs') }}
-                    style={{ flex:1, textAlign:'left', padding:'8px 10px', border:'none', cursor:'pointer', background:'transparent', color:'#1a1a1a', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6, minWidth:0 }}>
-                    <span style={{ fontSize:14, flexShrink:0 }}>📋</span>
-                    <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</span>
-                  </button>
-                  {isAdmin && (
-                    <button onClick={() => { if (confirm('Xóa dự án "'+p.name+'"?')) { deleteProject(p.id); logDeleteProj(p.name); if (selProj===p.id) setSelProj('home') } }}
-                      style={{ padding:'4px 8px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:12, flexShrink:0 }}>✕</button>
-                  )}
-                </div>
-              ))}
+              {paginated.map(p => {
+                const pkgsForProj = packages.filter(pkg => pkg.projectId === p.id)
+                const isExpanded  = expandedProjs.has(p.id)
+                const isProjSel   = proj?.id === p.id
+
+                return (
+                  <div key={p.id} style={{ marginBottom:2 }}>
+                    {/* Dòng dự án */}
+                    <div style={{ display:'flex', alignItems:'center', borderRadius:8, background: isProjSel && !selPkg ? '#f0f0ec' : 'transparent' }}>
+                      {/* Nút expand */}
+                      <button onClick={() => toggleExpand(p.id)}
+                        style={{ padding:'4px 4px 4px 6px', background:'none', border:'none', cursor:'pointer', color:'#aaa', fontSize:9, flexShrink:0, lineHeight:1 }}>
+                        {isExpanded ? '▼' : '▶'}
+                      </button>
+                      <button onClick={() => selectProject(p.id)}
+                        style={{ flex:1, textAlign:'left', padding:'6px 4px', border:'none', cursor:'pointer', background:'transparent', color:'#1a1a1a', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:4, minWidth:0 }}>
+                        <span style={{ fontSize:13, flexShrink:0 }}>📋</span>
+                        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</span>
+                      </button>
+                      {isAdmin && (
+                        <button onClick={() => { if (confirm('Xóa dự án "'+p.name+'"?')) { deleteProject(p.id); logDeleteProj(p.name); if (selProj===p.id) { setSelProj('home'); setSelPkg(null) } } }}
+                          style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:11, flexShrink:0 }}>✕</button>
+                      )}
+                    </div>
+
+                    {/* Gói thầu (khi mở rộng) */}
+                    {isExpanded && (
+                      <div style={{ paddingLeft:22, paddingBottom:4 }}>
+                        {pkgsForProj.map(pkg => (
+                          <div key={pkg.id} style={{ display:'flex', alignItems:'center', borderRadius:6, marginBottom:1, background: selPkg===pkg.id ? '#e8f0fe' : 'transparent' }}>
+                            <button onClick={() => selectPackage(p.id, pkg.id)}
+                              style={{ flex:1, textAlign:'left', padding:'5px 6px', border:'none', cursor:'pointer', background:'transparent', color: selPkg===pkg.id ? '#1a56db' : '#444', fontSize:12, fontWeight: selPkg===pkg.id ? 600 : 400, display:'flex', alignItems:'center', gap:4, minWidth:0 }}>
+                              <span style={{ fontSize:12 }}>📁</span>
+                              <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{pkg.name}</span>
+                            </button>
+                            {isAdmin && (
+                              <button onClick={() => { if (confirm('Xóa gói thầu "'+pkg.name+'"?')) { deletePackage(pkg.id); if (selPkg===pkg.id) setSelPkg(null) } }}
+                                style={{ padding:'2px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:10, flexShrink:0 }}>✕</button>
+                            )}
+                          </div>
+                        ))}
+                        {/* Nút thêm gói thầu */}
+                        <button onClick={() => setShowAddPkg(p.id)}
+                          style={{ fontSize:11, color:'#888', background:'none', border:'none', cursor:'pointer', padding:'4px 6px', width:'100%', textAlign:'left' }}>
+                          + Thêm gói thầu
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
               {totalPages > 1 && (
                 <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'4px 8px', marginTop:4 }}>
                   <button onClick={() => setProjPage(p => Math.max(0,p-1))} disabled={projPage===0}
@@ -397,12 +434,10 @@ function AppInner() {
           {userDoc?.email && <div style={{ fontSize:10, color:'#aaa', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{userDoc.email}</div>}
           {isAdmin && <div style={{ fontSize:10, color:'#92400e', background:'#fef3c7', padding:'2px 8px', borderRadius:10, display:'inline-block', marginBottom:6 }}>👑 Admin</div>}
           <br/>
-          <button onClick={() => setShowChangePw(true)}
-            style={{ fontSize:11, color:'#0a2342', background:'none', border:'0.5px solid #0a2342', borderRadius:6, cursor:'pointer', padding:'4px 10px', marginBottom:6, width:'100%' }}>
+          <button onClick={() => setShowChangePw(true)} style={{ fontSize:11, color:'#0a2342', background:'none', border:'0.5px solid #0a2342', borderRadius:6, cursor:'pointer', padding:'4px 10px', marginBottom:6, width:'100%' }}>
             🔑 Đổi mật khẩu
           </button>
-          <button onClick={() => { logLogout().then(() => logout()) }}
-            style={{ fontSize:11, color:'#888', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', padding:'4px 10px', width:'100%' }}>
+          <button onClick={() => { logLogout().then(() => logout()) }} style={{ fontSize:11, color:'#888', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', padding:'4px 10px', width:'100%' }}>
             Đăng xuất
           </button>
         </div>
@@ -433,14 +468,14 @@ function AppInner() {
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, flex:1 }}>
               {[
                 { num:'1', title:'Đăng ký tài khoản', icon:'📝', content:'Nhấn tab <b>Đăng ký</b> → điền Tên đăng nhập, Mật khẩu, Họ tên, Đơn vị, Email → nhấn <b>Gửi đăng ký</b>. Tài khoản chờ admin phê duyệt trước khi đăng nhập được.' },
-                { num:'2', title:'Đăng nhập hệ thống', icon:'🔑', content:'Nhập <b>Tên đăng nhập hoặc Email</b> và <b>Mật khẩu</b> → nhấn <b>Đăng nhập</b>. Nếu quên mật khẩu nhấn <b>Quên mật khẩu?</b> → điền username + email → admin gửi mật khẩu tạm về email.' },
-                { num:'3', title:'Chọn dự án & xem văn bản', icon:'📋', content:'Danh sách dự án ở <b>thanh bên trái</b>. Nhấn vào tên dự án để xem văn bản. Dùng ô <b>tìm kiếm</b> theo số hiệu, nội dung hoặc <b>lọc</b> theo trạng thái.' },
+                { num:'2', title:'Đăng nhập hệ thống', icon:'🔑', content:'Nhập <b>Tên đăng nhập hoặc Email</b> và <b>Mật khẩu</b> → nhấn <b>Đăng nhập</b>. Nếu quên mật khẩu nhấn <b>Quên mật khẩu?</b> → điền username → admin gửi mật khẩu tạm về email.' },
+                { num:'3', title:'Chọn dự án & gói thầu', icon:'📋', content:'Dự án ở <b>thanh bên trái</b>. Nhấn <b>▶</b> để mở rộng xem gói thầu. Nhấn vào <b>📁 gói thầu</b> để xem văn bản riêng của gói đó.' },
                 { num:'4', title:'Thêm văn bản bằng AI', icon:'✨', content:'Nhấn <b>+ Thêm văn bản</b> → tab <b>✨ AI tự điền</b> → chọn file PDF/Word/Excel → AI tự đọc và điền thông tin. Ctrl+Click để upload <b>nhiều file cùng lúc</b>.' },
                 { num:'5', title:'Thêm văn bản thủ công', icon:'✏️', content:'Nhấn <b>+ Thêm văn bản</b> → tab <b>✏️ Nhập thủ công</b> → điền Số ký hiệu, Ngày, Cơ quan, Loại, Nội dung, Trạng thái → đính kèm file nếu có → nhấn <b>Thêm văn bản</b>.' },
                 { num:'6', title:'Xem, sửa và xóa văn bản', icon:'📄', content:'<b>Nhấn vào dòng</b> để xem chi tiết & tải file gốc. Nhấn <b>✏️</b> để sửa. Nhấn <b>🗑️</b> để xóa (file cũng bị xóa). Nhấn vào <b>trạng thái</b> để đổi nhanh tiến độ.' },
                 { num:'7', title:'Trợ lý AI (Chat)', icon:'🤖', content:'Khi xem dự án, phần <b>✨ Trợ lý AI</b> ở dưới cho phép hỏi về dự án. Dùng nút gợi ý <b>📋 Tóm tắt</b>, <b>🔴 Việc gấp</b>, <b>📊 Báo cáo</b>, <b>⚠️ Rủi ro</b> hoặc tự gõ câu hỏi.' },
-                { num:'8', title:'Xuất báo cáo Word', icon:'📊', content:'Chọn dự án → tab <b>Xuất báo cáo</b> → nhấn <b>📥 Tải báo cáo Word</b>. File tổng hợp toàn bộ văn bản gồm số hiệu, ngày, loại, nội dung, trạng thái sẽ được tải về.' },
-                { num:'9', title:'Đổi mật khẩu', icon:'🔐', content:'Nhấn <b>🔑 Đổi mật khẩu</b> ở góc dưới trái → nhập mật khẩu hiện tại → nhập mật khẩu mới (≥6 ký tự) → xác nhận → nhấn <b>Đổi mật khẩu</b>. Nên đổi ngay sau lần đầu đăng nhập.' },
+                { num:'8', title:'Xuất báo cáo Word', icon:'📊', content:'Chọn dự án/gói thầu → tab <b>Xuất báo cáo</b> → nhấn <b>📥 Tải báo cáo Word</b>. File tổng hợp toàn bộ văn bản của phạm vi đang chọn sẽ được tải về.' },
+                { num:'9', title:'Đổi mật khẩu', icon:'🔐', content:'Nhấn <b>🔑 Đổi mật khẩu</b> ở góc dưới trái → nhập mật khẩu hiện tại → nhập mật khẩu mới (≥6 ký tự) → xác nhận → nhấn <b>Đổi mật khẩu</b>.' },
                 { num:'10', title:'Lịch sử truy cập', icon:'📋', content:'Nhấn <b>📋 Lịch sử truy cập</b> ở menu trái để xem hoạt động của tất cả người dùng: đăng nhập/xuất, thêm/sửa/xóa văn bản. Lọc theo <b>người dùng</b> hoặc <b>loại hành động</b>.' },
               ].map(item => (
                 <div key={item.num} style={{ display:'flex', gap:10, padding:'8px 12px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
@@ -460,8 +495,18 @@ function AppInner() {
         )}
 
         {proj && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && <>
-          <div style={{ padding:'16px 24px 12px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
-            <div style={{ fontSize:17, fontWeight:700 }}>{proj?.name}</div>
+          <div style={{ padding:'12px 24px 10px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <div>
+              <div style={{ fontSize:15, fontWeight:700, color:'#0a2342' }}>
+                {proj?.name}
+                {selPkgObj && <span style={{ color:'#888', fontWeight:400 }}> › <span style={{ color:'#1a56db', fontWeight:600 }}>📁 {selPkgObj.name}</span></span>}
+              </div>
+              {selPkg && (
+                <button onClick={() => setSelPkg(null)} style={{ fontSize:11, color:'#888', background:'none', border:'none', cursor:'pointer', padding:0, marginTop:2 }}>
+                  ← Xem tất cả văn bản dự án
+                </button>
+              )}
+            </div>
             <button onClick={() => { setEditDoc(null); setModal('add') }}
               style={{ padding:'8px 16px', background:'#fff', border:'0.5px solid #ddd', borderRadius:8, cursor:'pointer', fontSize:13 }}>+ Thêm văn bản</button>
           </div>
@@ -484,8 +529,7 @@ function AppInner() {
           <div style={{ padding:'0 24px', background:'#fff', borderBottom:'0.5px solid #e5e4e0', display:'flex' }}>
             {[['docs','Văn bản'],['progress','Tiến độ pháp lý'],['report','Xuất báo cáo']].map(([v,l]) => (
               <button key={v} onClick={() => setTab(v)}
-                style={{ padding:'12px 16px', border:'none', borderBottom:tab===v?'2px solid #1a1a1a':'2px solid transparent',
-                  background:'transparent', cursor:'pointer', fontSize:13, fontWeight:tab===v?600:400, color:tab===v?'#1a1a1a':'#888' }}>{l}</button>
+                style={{ padding:'12px 16px', border:'none', borderBottom:tab===v?'2px solid #1a1a1a':'2px solid transparent', background:'transparent', cursor:'pointer', fontSize:13, fontWeight:tab===v?600:400, color:tab===v?'#1a1a1a':'#888' }}>{l}</button>
             ))}
           </div>
 
@@ -548,7 +592,9 @@ function AppInner() {
             {tab === 'report' && (
               <div style={{ maxWidth:600 }}>
                 <div style={{ padding:'20px', background:'#fff', border:'0.5px solid #e5e4e0', borderRadius:12 }}>
-                  <p style={{ fontSize:13, color:'#555', marginBottom:16 }}>Xuất báo cáo tổng hợp dự án <strong>{proj?.name}</strong> ({stats.total} văn bản).</p>
+                  <p style={{ fontSize:13, color:'#555', marginBottom:16 }}>
+                    Xuất báo cáo: <strong>{selPkgObj ? `${proj?.name} › ${selPkgObj.name}` : proj?.name}</strong> ({stats.total} văn bản).
+                  </p>
                   <button onClick={exportReport} style={{ padding:'10px 20px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13 }}>📥 Tải báo cáo Word (.doc)</button>
                 </div>
               </div>
@@ -594,6 +640,7 @@ function AppInner() {
         )}
       </div>
 
+      {/* Modals */}
       {(modal==='add'||modal==='edit') && (
         <DocModal project={proj} doc={editDoc} onSave={handleSave} onClose={() => { setModal(null); setEditDoc(null) }}/>
       )}
@@ -601,6 +648,8 @@ function AppInner() {
         <DocDetail doc={detailDoc} onEdit={() => { setEditDoc(detailDoc); setDetailDoc(null); setModal('edit') }} onClose={() => setDetailDoc(null)}/>
       )}
       {showChangePw && <ChangePassword onClose={() => setShowChangePw(false)} />}
+
+      {/* Modal thêm dự án */}
       {showAddProj && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}>
           <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:400, boxShadow:'0 8px 32px rgba(0,0,0,.15)' }}>
@@ -619,6 +668,33 @@ function AppInner() {
           </div>
         </div>
       )}
+
+      {/* Modal thêm gói thầu */}
+      {showAddPkg && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}>
+          <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:400, boxShadow:'0 8px 32px rgba(0,0,0,.15)' }}>
+            <h3 style={{ fontSize:15, fontWeight:600, marginBottom:16 }}>📁 Thêm gói thầu</h3>
+            <input value={newPkgName} onChange={e => setNewPkgName(e.target.value)} placeholder="Tên gói thầu" autoFocus
+              onKeyDown={async e => {
+                if (e.key==='Enter' && newPkgName.trim()) {
+                  await addPackage(newPkgName.trim(), showAddPkg)
+                  setNewPkgName(''); setShowAddPkg(null)
+                }
+              }}
+              style={{ width:'100%', padding:'9px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', marginBottom:12, boxSizing:'border-box' }}/>
+            <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+              <button onClick={() => { setShowAddPkg(null); setNewPkgName('') }} style={{ padding:'8px 16px', border:'0.5px solid #ddd', borderRadius:8, cursor:'pointer', background:'#fff', fontSize:13 }}>Hủy</button>
+              <button onClick={async () => {
+                if (newPkgName.trim()) {
+                  await addPackage(newPkgName.trim(), showAddPkg)
+                  setNewPkgName(''); setShowAddPkg(null)
+                }
+              }} style={{ padding:'8px 16px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13 }}>📁 Thêm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showKeyModal && <KeyModal onClose={() => setShowKeyModal(false)} saveKey={saveKey}/>}
       <FloatingUpload onOpen={openFromDraft}/>
     </div>
