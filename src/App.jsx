@@ -208,6 +208,21 @@ function AppInner() {
   const { deleteFile }    = useCloudinaryStorage()
   const { ask, getKey, saveKey } = useAI()
 
+  // Load memories của tất cả văn bản trong dự án
+  const [projMemories, setProjMemories] = useState({})
+  useEffect(() => {
+    if (!proj?.id || !allDocs?.length) return
+    const loadMemories = async () => {
+      const { collection, getDocs } = await import('firebase/firestore')
+      const { db } = await import('./firebase')
+      const snap = await getDocs(collection(db, 'documentMemory'))
+      const mem = {}
+      snap.docs.forEach(d => { mem[d.id] = d.data() })
+      setProjMemories(mem)
+    }
+    loadMemories()
+  }, [proj?.id, allDocs?.length])
+
   const [tab,         setTab]         = useState('docs')
   const [search,      setSearch]      = useState('')
   const [filter,      setFilter]      = useState('all')
@@ -288,7 +303,17 @@ function AppInner() {
 
   const handleAsk = async (q) => {
     if (!q.trim() || aiLoading) return
-    const ctx = `Dự án: ${proj?.name}${selPkgObj?` > ${selPkgObj.name}`:''}\nTổng: ${stats.total} văn bản, Hoàn thành: ${stats.done}\n${safeDocs.slice(0,8).map(d => d.code+': '+d.subject+'('+d.status+')').join('; ')}`
+    // Tạo context từ memories đã lưu + metadata cơ bản
+    const memCtx = safeDocs.map(d => {
+      const mem = projMemories[d.id]
+      if (mem?.summary) return `[${d.code||d.subject}]: ${mem.summary}${mem.keyPoints?.length ? '\nĐiểm quan trọng: ' + mem.keyPoints.slice(0,5).join('; ') : ''}`
+      return `[${d.code||'—'}] ${d.subject||''} (${d.status})`
+    }).join('\n\n')
+    const ctx = `Dự án: ${proj?.name}${selPkgObj?' › '+selPkgObj.name:''}
+Tổng: ${stats.total} văn bản | Hoàn thành: ${stats.done} | Đang thực hiện: ${stats.pending}
+
+DANH SÁCH VĂN BẢN VÀ NỘI DUNG:
+${memCtx}`
     setChat(c => [...c, { role:'user', content:q }])
     setChatInput(''); setAiLoad(true)
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
@@ -296,7 +321,7 @@ function AppInner() {
       const res = await ask(q, ctx)
       setChat(c => [...c, { role:'ai', content:res }])
     } catch {
-      setChat(c => [...c, { role:'ai', content:'❌ Lỗi kết nối AI.' }])
+      setChat(c => [...c, { role:'ai', content:'❌ AI đang bận. Thử lại sau 1 phút!' }])
     } finally { setAiLoad(false) }
   }
 

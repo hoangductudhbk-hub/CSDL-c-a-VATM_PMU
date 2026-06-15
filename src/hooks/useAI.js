@@ -307,27 +307,36 @@ Trả lời tiếng Việt, chi tiết và chính xác:`
   const ask = async (question, context = '') => {
     setLoading(true)
     resetIdxIfNewDay()
-    const sys = `Bạn là trợ lý quản lý dự án VATM. Trả lời tiếng Việt, ngắn gọn.${context?'\n\nDữ liệu:\n'+context:''}`
+    const sys = `Bạn là trợ lý quản lý dự án VATM. Trả lời tiếng Việt, chi tiết và hữu ích.${context?'\n\nDỮ LIỆU DỰ ÁN:\n'+context:''}`
     try {
-      for (const model of GEMINI_MODELS) {
-        try { return await callGemini(model, [{text:`${sys}\n\nCâu hỏi: ${question}`}]) }
-        catch(e) { if(e.message !== 'QUOTA') throw e }
-      }
+      // ── Groq làm CHÍNH ──
       for (const key of getGroqKeys()) {
-        for (const model of GROQ_TEXT_MODELS) {
-          try {
-            const res = await fetch(GROQ_URL, {
-              method:'POST',
-              headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${key}` },
-              body:JSON.stringify({ model, max_tokens:800, temperature:0.1,
-                messages:[{role:'system',content:sys},{role:'user',content:question}] }),
-            })
-            if (!res.ok) { if(res.status===429) continue; throw new Error(`HTTP ${res.status}`) }
-            return (await res.json()).choices?.[0]?.message?.content || ''
-          } catch(e) { continue }
-        }
+        try {
+          const res = await fetch(GROQ_URL, {
+            method:'POST',
+            headers:{ 'Content-Type':'application/json', Authorization:`Bearer ${key}` },
+            body:JSON.stringify({ model:'llama-3.3-70b-versatile', max_tokens:1200, temperature:0.1,
+              messages:[{role:'system',content:sys},{role:'user',content:question}] }),
+          })
+          if (res.status===429) { await new Promise(r=>setTimeout(r,1500)); continue }
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          return (await res.json()).choices?.[0]?.message?.content || ''
+        } catch(e) { continue }
       }
-      throw new Error('Tất cả AI hết quota.')
+      // ── Gemini fallback ──
+      await new Promise(r => setTimeout(r, 5000))
+      for (const key of getGemKeys()) {
+        try {
+          const res = await fetch(GEM_URL('gemini-2.0-flash', key), {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({ contents:[{parts:[{text:`${sys}\n\nCâu hỏi: ${question}`}]}], generationConfig:{temperature:0.1,maxOutputTokens:1200} }),
+          })
+          if (res.status===429) { await new Promise(r=>setTimeout(r,3000)); continue }
+          if (!res.ok) continue
+          return (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
+        } catch(e) { continue }
+      }
+      throw new Error('AI đang bận. Thử lại sau 1 phút!')
     } finally { setLoading(false) }
   }
 
