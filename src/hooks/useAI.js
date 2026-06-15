@@ -67,9 +67,10 @@ export function useAI() {
   const callGemini = async (model, parts, maxOutputTokens = 1000) => {
     const keys = getGemKeys()
     if (!keys.length) throw new Error('QUOTA')
-    for (const key of keys) {
+    for (let i = 0; i < keys.length; i++) {
+      if (i > 0) await new Promise(r => setTimeout(r, 2000)) // delay 2s giữa các key
       try {
-        const res = await fetch(GEM_URL(model, key), {
+        const res = await fetch(GEM_URL(model, keys[i]), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -181,31 +182,45 @@ export function useAI() {
   const analyzeDeepForMemory = async (text, fileName = '') => {
     setLoading(true)
     resetIdxIfNewDay()
-    // Đọc tối đa 20K ký tự (nhiều hơn lúc trích xuất thông thường)
-    const clean = text.replace(/\r\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{3,}/g,' ').slice(0, 20000)
-    const prompt = `Phân tích sâu toàn bộ văn bản hành chính sau và trả về JSON (không giải thích thêm):
+    // Giới hạn 12K ký tự để tránh rate limit
+    const clean = text.replace(/\r\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{3,}/g,' ').slice(0, 12000)
+    const prompt = `Phân tích sâu văn bản hành chính Việt Nam và trả về JSON (không giải thích thêm):
 {
-  "summary": "Tóm tắt đầy đủ nội dung 8-12 câu",
-  "keyPoints": ["điểm quan trọng 1", "điểm quan trọng 2", "...tối đa 10 điểm"],
+  "summary": "Tóm tắt đầy đủ 8-12 câu",
+  "keyPoints": ["điểm 1", "điểm 2", "tối đa 10"],
   "legalBasis": "căn cứ pháp lý chính",
-  "requirements": "yêu cầu kỹ thuật hoặc điều khoản quan trọng nếu có",
-  "risks": "rủi ro hoặc điểm cần lưu ý nếu có",
-  "keywords": ["từ khóa 1", "từ khóa 2", "...tối đa 15 từ khóa"]
+  "requirements": "yêu cầu kỹ thuật hoặc điều khoản quan trọng",
+  "risks": "rủi ro hoặc điểm cần lưu ý",
+  "keywords": ["từ khóa 1", "tối đa 15"]
 }
 
 Tên file: ${fileName}
-NỘI DUNG VĂN BẢN:
+NỘI DUNG:
 ---
 ${clean}
 ---`
     try {
-      for (const model of GEMINI_MODELS) {
+      // Thử Gemini Flash trước (1 key, chờ nếu 429)
+      for (const key of getGemKeys()) {
         try {
-          const result = await callGemini(model, [{ text: prompt }], 2000)
-          return result
-        } catch(e) { if(e.message !== 'QUOTA') throw e }
+          const res = await fetch(GEM_URL('gemini-2.0-flash', key), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { temperature: 0.1, maxOutputTokens: 2000 },
+            }),
+          })
+          if (res.status === 429) {
+            await new Promise(r => setTimeout(r, 3000)) // chờ 3s rồi thử key tiếp
+            continue
+          }
+          if (!res.ok) continue
+          const result = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
+          if (result) return result
+        } catch(e) { continue }
       }
-      // Fallback Groq nếu Gemini hết quota
+      // Fallback Groq (dùng model mạnh nhất)
       for (const key of getGroqKeys()) {
         try {
           const res = await fetch(GROQ_URL, {
@@ -217,10 +232,11 @@ ${clean}
             }),
           })
           if (!res.ok) { if(res.status===429) continue; throw new Error(`HTTP ${res.status}`) }
-          return (await res.json()).choices?.[0]?.message?.content || ''
-        } catch(e) { if(e.message !== 'QUOTA') continue; throw e }
+          const result = (await res.json()).choices?.[0]?.message?.content || ''
+          if (result) return result
+        } catch(e) { continue }
       }
-      throw new Error('Tất cả AI hết quota.')
+      throw new Error('Tất cả AI đang bận (429). Vui lòng thử lại sau 1 phút!')
     } finally { setLoading(false) }
   }
 
