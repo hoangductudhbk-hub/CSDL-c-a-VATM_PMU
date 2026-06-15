@@ -13,7 +13,6 @@ const loadPdfJs = () => new Promise((res,rej) => {
 })
 const extractPdfText = async (buf) => {
   const lib=await loadPdfJs(); const pdf=await lib.getDocument({data:buf}).promise
-  // ── FIX: file > 10MB chỉ đọc 3 trang đầu thay vì 15 ──────────
   const maxPages = buf.byteLength > 10*1024*1024 ? 3 : Math.min(pdf.numPages, 15)
   let text=''
   for(let i=1;i<=maxPages;i++){
@@ -49,8 +48,6 @@ const extractXlsxText = async (buf) => {
 }
 const parseJ = (s) => { try{const m=s.match(/\{[\s\S]*\}/);return JSON.parse(m?m[0]:s.replace(/```json|```/g,'').trim())}catch{return null} }
 
-
-
 export default function DocModal({ doc, onSave, onClose }) {
   const isEdit = Boolean(doc?.id)
   const { ask, analyzeText, analyzeImages, getKey, saveKey, isReal } = useAI()
@@ -80,7 +77,8 @@ export default function DocModal({ doc, onSave, onClose }) {
       try {
         const fi = await uploadFile(pendingFile, pct => setSt(`⏳ Đang upload... ${pct}%`))
         if (!fi?.fileUrl) throw new Error('Không nhận được URL')
-        final = {...final, ...fi}
+        // Lưu thêm tên file và kích thước
+        final = {...final, ...fi, fileName: pendingFile.name, fileSize: pendingFile.size}
         setSt('✅ Upload xong!')
         await new Promise(r => setTimeout(r, 400))
       } catch(e) {
@@ -155,7 +153,8 @@ export default function DocModal({ doc, onSave, onClose }) {
             console.warn('Upload err:', ue.message)
             queue[i].status='⚠️ Lưu văn bản (không có file)'
           }
-          onSave({...p,fileName:file.name,...fi},true)
+          // Lưu thêm tên file và kích thước trong batch
+          onSave({...p, fileName:file.name, fileSize:file.size, ...fi}, true)
           queue[i].status='✅ Xong'
         } else queue[i].status='⚠️ Không đọc được'
       } catch(e) { queue[i].status='❌ '+(e.message||'Lỗi') }
@@ -189,7 +188,6 @@ export default function DocModal({ doc, onSave, onClose }) {
           ))}
         </div>}
 
-        {/* Batch progress */}
         {fileQueue.length > 1 && (
           <div>
             <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>{processing?'⏳ Đang xử lý hàng loạt...':'📋 Kết quả:'}</div>
@@ -215,7 +213,6 @@ export default function DocModal({ doc, onSave, onClose }) {
           </div>
         )}
 
-        {/* AI mode */}
         {mode==='ai'&&fileQueue.length<=1&&!processing&&(
           <div>
             <div style={{display:'flex',gap:0,marginBottom:14,border:'0.5px solid #ddd',borderRadius:8,overflow:'hidden'}}>
@@ -235,7 +232,6 @@ export default function DocModal({ doc, onSave, onClose }) {
           </div>
         )}
 
-        {/* Manual mode */}
         {mode==='manual'&&!processing&&fileQueue.length<=1&&(
           <div>
             {status&&<div style={{marginBottom:12,padding:'9px 12px',borderRadius:8,fontSize:12,background:sBg,color:sColor}}>{status}</div>}
@@ -275,8 +271,6 @@ export default function DocModal({ doc, onSave, onClose }) {
             </div>
           </div>
         )}
-
-
       </div>
     </div>
   )

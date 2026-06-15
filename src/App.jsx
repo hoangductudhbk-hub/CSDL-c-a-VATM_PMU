@@ -37,6 +37,12 @@ const SM = {
   prep:    { label: 'Chưa thực hiện', bg: '#f5f5f5', color: '#666',    dot: '#aaa' },
 }
 
+const fmtSize = (bytes) => {
+  if (!bytes) return ''
+  if (bytes >= 1024*1024) return ` · ${(bytes/1024/1024).toFixed(1)}MB`
+  return ` · ${(bytes/1024).toFixed(0)}KB`
+}
+
 function SpinIcon() {
   return (
     <div style={{ width:16, height:16, border:'2.5px solid rgba(255,255,255,.3)',
@@ -385,7 +391,6 @@ function AppInner() {
           })()}
         </div>
 
-        {/* User info + đổi mật khẩu + đăng xuất */}
         <div style={{ padding:'12px 16px', borderTop:'0.5px solid #e5e4e0', flexShrink:0, background:'#fff' }}>
           <div style={{ fontSize:12, fontWeight:700, color:'#0a2342' }}>{userDoc?.name || 'Người dùng'}</div>
           <div style={{ fontSize:11, color:'#888' }}>@{userDoc?.username}</div>
@@ -419,16 +424,6 @@ function AppInner() {
 
         {tab === 'history' && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><HistoryView user={user}/></div>}
 
-        {tab === 'about' && (
-          <div style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', padding:48, background:'linear-gradient(135deg, #e8f4fd 0%, #bdd9f0 100%)' }}>
-            <div style={{ textAlign:'center' }}>
-              <img src="/vatm-logo.png" alt="VATM" style={{ width:200, height:200, borderRadius:'50%', objectFit:'cover', marginBottom:24 }}/>
-              <h2 style={{ fontSize:40, fontWeight:700, color:'#0a2342', marginBottom:12 }}>VATM-PMU</h2>
-              <p style={{ fontSize:18, color:'#1a5490', lineHeight:1.8 }}>Phần mềm Quản lý Văn bản & Dự án<br/>Ban Quản lý dự án chuyên ngành Quản lý bay</p>
-            </div>
-          </div>
-        )}
-
         {tab === 'guide' && (
           <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
             <div style={{ padding:'8px 20px 6px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', flexShrink:0 }}>
@@ -437,26 +432,16 @@ function AppInner() {
             <div style={{ flex:1, padding:'10px 20px', overflow:'hidden', display:'flex', flexDirection:'column' }}>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, flex:1 }}>
               {[
-                { num:'1', title:'Đăng ký tài khoản', icon:'📝',
-                  content:'Nhấn tab <b>Đăng ký</b> → điền Tên đăng nhập, Mật khẩu, Họ tên, Đơn vị, Email → nhấn <b>Gửi đăng ký</b>. Tài khoản chờ admin phê duyệt trước khi đăng nhập được.' },
-                { num:'2', title:'Đăng nhập hệ thống', icon:'🔑',
-                  content:'Nhập <b>Tên đăng nhập hoặc Email</b> và <b>Mật khẩu</b> → nhấn <b>Đăng nhập</b>. Nếu quên mật khẩu nhấn <b>Quên mật khẩu?</b> → điền username + email → admin gửi mật khẩu tạm về email.' },
-                { num:'3', title:'Chọn dự án & xem văn bản', icon:'📋',
-                  content:'Danh sách dự án ở <b>thanh bên trái</b>. Nhấn vào tên dự án để xem văn bản. Dùng ô <b>tìm kiếm</b> theo số hiệu, nội dung hoặc <b>lọc</b> theo trạng thái.' },
-                { num:'4', title:'Thêm văn bản bằng AI', icon:'✨',
-                  content:'Nhấn <b>+ Thêm văn bản</b> → tab <b>✨ AI tự điền</b> → chọn file PDF/Word/Excel → AI tự đọc và điền thông tin. Ctrl+Click để upload <b>nhiều file cùng lúc</b>.' },
-                { num:'5', title:'Thêm văn bản thủ công', icon:'✏️',
-                  content:'Nhấn <b>+ Thêm văn bản</b> → tab <b>✏️ Nhập thủ công</b> → điền Số ký hiệu, Ngày, Cơ quan, Loại, Nội dung, Trạng thái → đính kèm file nếu có → nhấn <b>Thêm văn bản</b>.' },
-                { num:'6', title:'Xem, sửa và xóa văn bản', icon:'📄',
-                  content:'<b>Nhấn vào dòng</b> để xem chi tiết & tải file gốc. Nhấn <b>✏️</b> để sửa. Nhấn <b>🗑️</b> để xóa (file cũng bị xóa). Nhấn vào <b>trạng thái</b> để đổi nhanh tiến độ.' },
-                { num:'7', title:'Trợ lý AI (Chat)', icon:'🤖',
-                  content:'Khi xem dự án, phần <b>✨ Trợ lý AI</b> ở dưới cho phép hỏi về dự án. Dùng nút gợi ý <b>📋 Tóm tắt</b>, <b>🔴 Việc gấp</b>, <b>📊 Báo cáo</b>, <b>⚠️ Rủi ro</b> hoặc tự gõ câu hỏi.' },
-                { num:'8', title:'Xuất báo cáo Word', icon:'📊',
-                  content:'Chọn dự án → tab <b>Xuất báo cáo</b> → nhấn <b>📥 Tải báo cáo Word</b>. File tổng hợp toàn bộ văn bản gồm số hiệu, ngày, loại, nội dung, trạng thái sẽ được tải về.' },
-                { num:'9', title:'Đổi mật khẩu', icon:'🔐',
-                  content:'Nhấn <b>🔑 Đổi mật khẩu</b> ở góc dưới trái → nhập mật khẩu hiện tại → nhập mật khẩu mới (≥6 ký tự) → xác nhận → nhấn <b>Đổi mật khẩu</b>. Nên đổi ngay sau lần đầu đăng nhập.' },
-                { num:'10', title:'Lịch sử truy cập', icon:'📋',
-                  content:'Nhấn <b>📋 Lịch sử truy cập</b> ở menu trái để xem hoạt động của tất cả người dùng: đăng nhập/xuất, thêm/sửa/xóa văn bản. Lọc theo <b>người dùng</b> hoặc <b>loại hành động</b>.' },
+                { num:'1', title:'Đăng ký tài khoản', icon:'📝', content:'Nhấn tab <b>Đăng ký</b> → điền Tên đăng nhập, Mật khẩu, Họ tên, Đơn vị, Email → nhấn <b>Gửi đăng ký</b>. Tài khoản chờ admin phê duyệt trước khi đăng nhập được.' },
+                { num:'2', title:'Đăng nhập hệ thống', icon:'🔑', content:'Nhập <b>Tên đăng nhập hoặc Email</b> và <b>Mật khẩu</b> → nhấn <b>Đăng nhập</b>. Nếu quên mật khẩu nhấn <b>Quên mật khẩu?</b> → điền username + email → admin gửi mật khẩu tạm về email.' },
+                { num:'3', title:'Chọn dự án & xem văn bản', icon:'📋', content:'Danh sách dự án ở <b>thanh bên trái</b>. Nhấn vào tên dự án để xem văn bản. Dùng ô <b>tìm kiếm</b> theo số hiệu, nội dung hoặc <b>lọc</b> theo trạng thái.' },
+                { num:'4', title:'Thêm văn bản bằng AI', icon:'✨', content:'Nhấn <b>+ Thêm văn bản</b> → tab <b>✨ AI tự điền</b> → chọn file PDF/Word/Excel → AI tự đọc và điền thông tin. Ctrl+Click để upload <b>nhiều file cùng lúc</b>.' },
+                { num:'5', title:'Thêm văn bản thủ công', icon:'✏️', content:'Nhấn <b>+ Thêm văn bản</b> → tab <b>✏️ Nhập thủ công</b> → điền Số ký hiệu, Ngày, Cơ quan, Loại, Nội dung, Trạng thái → đính kèm file nếu có → nhấn <b>Thêm văn bản</b>.' },
+                { num:'6', title:'Xem, sửa và xóa văn bản', icon:'📄', content:'<b>Nhấn vào dòng</b> để xem chi tiết & tải file gốc. Nhấn <b>✏️</b> để sửa. Nhấn <b>🗑️</b> để xóa (file cũng bị xóa). Nhấn vào <b>trạng thái</b> để đổi nhanh tiến độ.' },
+                { num:'7', title:'Trợ lý AI (Chat)', icon:'🤖', content:'Khi xem dự án, phần <b>✨ Trợ lý AI</b> ở dưới cho phép hỏi về dự án. Dùng nút gợi ý <b>📋 Tóm tắt</b>, <b>🔴 Việc gấp</b>, <b>📊 Báo cáo</b>, <b>⚠️ Rủi ro</b> hoặc tự gõ câu hỏi.' },
+                { num:'8', title:'Xuất báo cáo Word', icon:'📊', content:'Chọn dự án → tab <b>Xuất báo cáo</b> → nhấn <b>📥 Tải báo cáo Word</b>. File tổng hợp toàn bộ văn bản gồm số hiệu, ngày, loại, nội dung, trạng thái sẽ được tải về.' },
+                { num:'9', title:'Đổi mật khẩu', icon:'🔐', content:'Nhấn <b>🔑 Đổi mật khẩu</b> ở góc dưới trái → nhập mật khẩu hiện tại → nhập mật khẩu mới (≥6 ký tự) → xác nhận → nhấn <b>Đổi mật khẩu</b>. Nên đổi ngay sau lần đầu đăng nhập.' },
+                { num:'10', title:'Lịch sử truy cập', icon:'📋', content:'Nhấn <b>📋 Lịch sử truy cập</b> ở menu trái để xem hoạt động của tất cả người dùng: đăng nhập/xuất, thêm/sửa/xóa văn bản. Lọc theo <b>người dùng</b> hoặc <b>loại hành động</b>.' },
               ].map(item => (
                 <div key={item.num} style={{ display:'flex', gap:10, padding:'8px 12px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
                   <div style={{ flexShrink:0, width:26, height:26, borderRadius:7, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:12 }}>{item.num}</div>
@@ -541,7 +526,11 @@ function AppInner() {
                         <td style={{ padding:'10px 12px' }}><span style={{ fontSize:11, padding:'3px 8px', borderRadius:12, background:'#f0f0ec', color:'#555' }}>{d.docType||'Khác'}</span></td>
                         <td style={{ padding:'10px 12px', fontSize:13, maxWidth:320 }}>
                           <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>{d.subject||''}</span>
-                          {(d.fileUrl||d.downloadUrl) && <span style={{ fontSize:10, color:'#22c55e' }}>✦ Có file</span>}
+                          {(d.fileUrl||d.downloadUrl) && (
+                            <span style={{ fontSize:10, color:'#2563eb', display:'block', marginTop:2 }}>
+                              📎 {d.fileName||'file'}{fmtSize(d.fileSize)}
+                            </span>
+                          )}
                         </td>
                         <td style={{ padding:'6px 12px' }} onClick={e => e.stopPropagation()}>
                           <StatusCell doc={d} updateDocument={updateDocument} admin={isAdmin}/>
@@ -605,7 +594,6 @@ function AppInner() {
         )}
       </div>
 
-      {/* Modals */}
       {(modal==='add'||modal==='edit') && (
         <DocModal project={proj} doc={editDoc} onSave={handleSave} onClose={() => { setModal(null); setEditDoc(null) }}/>
       )}
