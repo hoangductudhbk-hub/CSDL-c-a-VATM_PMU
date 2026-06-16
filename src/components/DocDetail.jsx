@@ -185,7 +185,7 @@ const findRelevantChunks = (text, question) => {
 const fmtDate = (ts) => {
   if (!ts) return ''
   const d = ts.toDate ? ts.toDate() : new Date(ts.seconds * 1000)
-  return d.toLocaleDateString('vi-VN')
+  return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' })
 }
 
 export default function DocDetail({ doc, onEdit, onClose }) {
