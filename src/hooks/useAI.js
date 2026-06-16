@@ -4,10 +4,11 @@ import { useState } from 'react'
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const OPENROUTER_MODELS = [
-  'openrouter/free',              // Auto-chọn model free tốt nhất
-  'meta-llama/llama-3.3-70b-instruct:free',
-  'deepseek/deepseek-r1:free',
-  'qwen/qwen3-8b:free',
+  'google/gemma-4-31b-it:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'poolside/laguna-m.1:free',
+  'poolside/laguna-xs.2:free',
 ]
 const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
