@@ -223,10 +223,16 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       setAnalyzeStep(`⏳ Vui lòng đợi thêm ${countdown} giây nữa để AI sẵn sàng!`)
       return
     }
+    // Xóa chat cũ khi phân tích lại để tránh AI trả lời theo lịch sử cũ
+    setChat([])
+    setShowChat(false)
     if (countdown > 0) {
       setAnalyzeStep(`⏳ Vui lòng đợi thêm ${countdown} giây nữa để AI sẵn sàng!`)
       return
     }
+    // Xóa chat cũ khi phân tích lại để tránh AI trả lời theo lịch sử cũ
+    setChat([])
+    setShowChat(false)
     setAnalyzing(true)
     try {
       // Bước 1: metadata sẵn có trong Firestore
