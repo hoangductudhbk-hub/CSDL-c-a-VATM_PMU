@@ -47,9 +47,28 @@ export function useDocuments(projectId, userId, packageId = null) {
     })
 
   const deleteDocument = async (id) => {
-    // Xóa văn bản
+    // Lấy thông tin văn bản để biết fileUrl
+    const docData = allDocs.find(d => d.id === id)
+
+    // Xóa file trên GitHub nếu có
+    if (docData?.fileUrl?.includes('raw.githubusercontent.com')) {
+      try {
+        // Trích path từ URL: .../main/docs/filename.pdf → docs/filename.pdf
+        const match = docData.fileUrl.match(/\/main\/(.+)$/)
+        if (match) {
+          await fetch(`/api/delete-file?path=${encodeURIComponent(match[1])}`, {
+            method: 'DELETE'
+          })
+        }
+      } catch(e) {
+        console.warn('Không xóa được file GitHub:', e.message)
+      }
+    }
+
+    // Xóa văn bản trong Firestore
     await deleteDoc(doc(db, 'documents', id))
-    // Xóa luôn bộ nhớ AI để không làm đầy Firestore
+
+    // Xóa bộ nhớ AI trong Firestore
     try { await deleteDoc(doc(db, 'documentMemory', id)) } catch {}
   }
 
