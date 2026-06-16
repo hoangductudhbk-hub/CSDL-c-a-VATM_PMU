@@ -410,7 +410,7 @@ export function useAI() {
   }
 
   // ── Hỏi đáp sâu — dùng toàn bộ bộ nhớ mở rộng ──
-  const askDeep = async (question, memory, chatHistory = []) => {
+  const askDeep = async (question, memory, chatHistory = [], relevantText = '') => {
     setLoading(true)
     resetIdxIfNewDay()
 
@@ -430,20 +430,28 @@ export function useAI() {
     const historyCtx = chatHistory.slice(-4).map(m =>
       `${m.role==='user'?'Hỏi':'Trả lời'}: ${m.content}`).join('\n')
 
+    const ragSection = relevantText
+      ? `\n📄 ĐOẠN VĂN BẢN GỐC LIÊN QUAN ĐẾN CÂU HỎI (ưu tiên dùng):
+---
+${relevantText}
+---`
+      : ''
+
     const prompt = `Bạn là trợ lý tra cứu văn bản hành chính Việt Nam.
 
-NGUYÊN TẮC BẮT BUỘC:
-- CHỈ trả lời dựa trên thông tin có trong BỘ NHỚ VĂN BẢN bên dưới
-- KHÔNG suy đoán, KHÔNG bổ sung thông tin ngoài bộ nhớ
-- Nếu bộ nhớ KHÔNG có thông tin để trả lời → nói rõ: "Văn bản không đề cập đến nội dung này"
-- Trích dẫn NGUYÊN VĂN số liệu, tên người, điều khoản từ bộ nhớ
-- KHÔNG dùng từ "có thể", "có lẽ", "thường thì", "suy đoán"
+NGUYÊN TẮC:
+- Ưu tiên dùng ĐOẠN VĂN BẢN GỐC bên dưới (nếu có) — đây là nội dung CHÍNH XÁC nhất
+- Bổ sung từ BỘ NHỚ TỔNG HỢP nếu cần thêm thông tin
+- Trích dẫn NGUYÊN VĂN câu chữ từ văn bản gốc
+- KHÔNG bịa thêm thông tin ngoài 2 nguồn trên
+- Nếu cả 2 nguồn đều không có → nói: "Văn bản không có thông tin này"
+${ragSection}
 
 ${ctx}
 ${historyCtx ? '\nLỊCH SỬ HỘI THOẠI:\n' + historyCtx : ''}
 
 CÂU HỎI: ${question}
-Trả lời ngắn gọn, chính xác, chỉ dựa vào bộ nhớ trên:`
+Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
 
     try {
       return await callAIWithText(prompt, 2000)

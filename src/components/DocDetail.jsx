@@ -138,6 +138,50 @@ const parseJ = (s) => {
   try { const m=s.match(/\{[\s\S]*\}/); return JSON.parse(m?m[0]:s.replace(/```json|```/g,'').trim()) } catch { return null }
 }
 
+// ── RAG: Tìm đoạn văn bản liên quan đến câu hỏi ──────────────────
+const findRelevantChunks = (text, question) => {
+  if (!text || !question) return ''
+
+  // 1. Tách từ khóa từ câu hỏi (bỏ stop words tiếng Việt)
+  const stopWords = new Set(['là','gì','có','của','và','các','cho','trong','được','không','về','này','đó','với','những','theo','từ','khi','hay','hoặc','như','thì','mà','để','tôi','bạn','hãy','cần','phải','làm','nào','ai','bao','nhiêu','sao'])
+  const keywords = question.toLowerCase()
+    .replace(/[?.,!;:""''()\[\]]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !stopWords.has(w))
+
+  if (!keywords.length) return text.slice(0, 3000)
+
+  // 2. Chia văn bản thành đoạn ~400 ký tự có overlap
+  const chunks = []
+  const size = 400, overlap = 100
+  for (let i = 0; i < text.length; i += size - overlap) {
+    chunks.push({ text: text.slice(i, i + size), pos: i })
+  }
+
+  // 3. Tính điểm liên quan cho từng đoạn
+  const scored = chunks.map(chunk => {
+    const lower = chunk.text.toLowerCase()
+    let score = 0
+    for (const kw of keywords) {
+      // Khớp chính xác = 3 điểm, khớp một phần = 1 điểm
+      if (lower.includes(kw)) score += 3
+      else if (keywords.some(k => k.length > 3 && lower.includes(k.slice(0, -1)))) score += 1
+    }
+    return { ...chunk, score }
+  })
+
+  // 4. Lấy các đoạn điểm cao nhất, tối đa 3000 ký tự
+  const relevant = scored
+    .filter(c => c.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8)
+    .sort((a, b) => a.pos - b.pos) // Sắp xếp lại theo vị trí gốc
+
+  if (!relevant.length) return text.slice(0, 2000) // fallback: đầu văn bản
+
+  return relevant.map(c => c.text).join('\n---\n').slice(0, 3000)
+}
+
 const fmtDate = (ts) => {
   if (!ts) return ''
   const d = ts.toDate ? ts.toDate() : new Date(ts.seconds * 1000)
@@ -327,7 +371,12 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     setChatInput('')
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 50)
     try {
-      const answer = await askDeep(q, memory, chat)
+      // RAG: Tìm đoạn văn bản gốc liên quan đến câu hỏi
+      const rawText = memory?.extractedText || ''
+      const relevantText = rawText.length > 100
+        ? findRelevantChunks(rawText, q)
+        : ''
+      const answer = await askDeep(q, memory, chat, relevantText)
       setChat(c => [...c, { role:'ai', content: answer }])
     } catch(e) {
       const errMsg = e.message === 'AI_QUOTA'
