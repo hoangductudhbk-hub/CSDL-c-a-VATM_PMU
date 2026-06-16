@@ -46,7 +46,12 @@ export function useDocuments(projectId, userId, packageId = null) {
       updatedAt: serverTimestamp(),
     })
 
-  const deleteDocument = (id) => deleteDoc(doc(db, 'documents', id))
+  const deleteDocument = async (id) => {
+    // Xóa văn bản
+    await deleteDoc(doc(db, 'documents', id))
+    // Xóa luôn bộ nhớ AI để không làm đầy Firestore
+    try { await deleteDoc(doc(db, 'documentMemory', id)) } catch {}
+  }
 
   return { docs, allDocs, loading, addDocument, updateDocument, deleteDocument }
 }
