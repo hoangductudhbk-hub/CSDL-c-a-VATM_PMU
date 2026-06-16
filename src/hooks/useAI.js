@@ -147,14 +147,14 @@ const callOpenRouter = async (prompt, maxTokens = 1000) => {
   return null
 }
 
-// ── Gọi AI: Gemini → OpenRouter → Groq (tránh rate limit) ─────
+// ── Gọi AI: OpenRouter → Gemini → Groq ────────────────────────
 const callAI = async (prompt, maxTokens = 1000) => {
-  // Gemini trước — ít rate limit
-  const gem = await callGemini(prompt, maxTokens)
-  if (gem) return gem
-  // OpenRouter fallback — nhiều model free
+  // OpenRouter trước — không bị 429 như Gemini
   const or = await callOpenRouter(prompt, maxTokens)
   if (or) return or
+  // Gemini fallback
+  const gem = await callGemini(prompt, maxTokens)
+  if (gem) return gem
   // Groq cuối cùng
   const groq = await callGroq(prompt, maxTokens)
   if (groq) return groq
@@ -381,11 +381,11 @@ CÂU HỎI: ${question}
 Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
 
     try {
-      // Gemini → OpenRouter → Groq
-      const gem = await callGemini(prompt, 2000)
-      if (gem) return gem
+      // OpenRouter → Gemini → Groq
       const or = await callOpenRouter(prompt, 2000)
       if (or) return or
+      const gem = await callGemini(prompt, 2000)
+      if (gem) return gem
       const groq = await callGroq(prompt, 2000)
       if (groq) return groq
       const err = new Error('AI_RATE_LIMIT')
@@ -400,10 +400,10 @@ Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
     resetIdxIfNewDay()
     const sys = `Bạn là trợ lý quản lý dự án VATM. Trả lời tiếng Việt, chi tiết và hữu ích.${context ? '\n\nDỮ LIỆU DỰ ÁN:\n' + context : ''}`
     try {
-      const gem = await callGemini(`${sys}\n\nCâu hỏi: ${question}`, 1200)
-      if (gem) return gem
       const or = await callOpenRouter(`${sys}\n\nCâu hỏi: ${question}`, 1200)
       if (or) return or
+      const gem = await callGemini(`${sys}\n\nCâu hỏi: ${question}`, 1200)
+      if (gem) return gem
       const groq = await callGroq(question, 1200, sys)
       if (groq) return groq
       const err = new Error('AI_RATE_LIMIT')
