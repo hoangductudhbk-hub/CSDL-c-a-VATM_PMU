@@ -275,8 +275,11 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       setShowChat(true)
       setTimeout(() => setAnalyzeStep(''), 2000)
     } catch(e) {
-      setAnalyzeStep('❌ Lỗi: ' + e.message)
-      setTimeout(() => setAnalyzeStep(''), 4000)
+      const msg = e.message === 'AI_QUOTA'
+        ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!'
+        : '❌ Lỗi: ' + e.message
+      setAnalyzeStep(msg)
+      setTimeout(() => setAnalyzeStep(''), 6000)
     } finally { setAnalyzing(false) }
   }
 
@@ -290,7 +293,10 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       const answer = await askDeep(q, memory, chat)
       setChat(c => [...c, { role:'ai', content: answer }])
     } catch(e) {
-      setChat(c => [...c, { role:'ai', content:'❌ Lỗi: ' + e.message }])
+      const errMsg = e.message === 'AI_QUOTA'
+        ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!'
+        : '❌ Lỗi: ' + e.message
+      setChat(prev => [...prev, { role:'ai', content: errMsg }])
     }
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
   }

@@ -115,7 +115,7 @@ const callAIWithText = async (prompt, maxTokens = 2000) => {
       if (result) return result
     } catch(e) { continue }
   }
-  throw new Error('Tất cả AI đang bận!')
+  throw new Error('AI_QUOTA')
 }
 
 // ── PROMPT TRÍCH XUẤT CHI TIẾT TỪNG CHUNK ────────────────────────────────────
@@ -363,7 +363,7 @@ export function useAI() {
       for (const model of GROQ_TEXT_MODELS) {
         try { return await callGroqText(model, prompt) } catch(e) { if(e.message !== 'QUOTA') throw e }
       }
-      throw new Error('Tất cả AI hết quota.')
+      throw new Error('AI_QUOTA')
     } finally { setLoading(false) }
   }
 
@@ -384,7 +384,7 @@ export function useAI() {
           return await callGemini(model, parts)
         } catch(e) { if(e.message !== 'QUOTA') throw e }
       }
-      throw new Error('Tất cả AI hết quota.')
+      throw new Error('AI_QUOTA')
     } finally { setLoading(false) }
   }
 
@@ -461,7 +461,7 @@ Trả lời tiếng Việt, đầy đủ số liệu và chi tiết:`
           return (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
         } catch(e) { continue }
       }
-      throw new Error('AI đang bận. Thử lại sau 1 phút!')
+      throw new Error('AI_QUOTA')
     } finally { setLoading(false) }
   }
 
