@@ -60,103 +60,7 @@ const SYSTEM = `Bạn là chuyên gia phân tích văn bản hành chính Việt
 - "status": "done" nếu đã ban hành, "prep" nếu chưa
 {"code":"","date":"","org":"","docType":"","subject":"","detail":"","note":"","status":"done"}`
 
-// ── ĐỌC TOÀN BỘ FILE TỪ GITHUB QUA PROXY ────────────────────────────────────
-export const readFileViaProxy = async (fileUrl, fileName = '', onStep = null) => {
-  const step = (msg) => { if (onStep) onStep(msg) }
-  const ext = (fileName || fileUrl).split('.').pop().toLowerCase()
-
-  step('📥 Đang tải file qua proxy...')
-
-  const proxyUrl = `/api/read-file?url=${encodeURIComponent(fileUrl)}`
-  const res = await fetch(proxyUrl)
-  if (!res.ok) throw new Error(`Proxy lỗi ${res.status}`)
-  const { base64, size } = await res.json()
-  if (!base64) throw new Error('Proxy không trả về dữ liệu')
-
-  step(`✅ Đã tải ${Math.round(size / 1024)}KB · Đang trích xuất text...`)
-
-  // ── PDF → đọc TOÀN BỘ trang, không giới hạn ──
-  if (ext === 'pdf') {
-    try {
-      if (!window.pdfjsLib) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script')
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
-          script.onload = resolve
-          script.onerror = reject
-          document.head.appendChild(script)
-        })
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
-      }
-
-      const binary = atob(base64)
-      const bytes  = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-
-      const pdf   = await window.pdfjsLib.getDocument({ data: bytes }).promise
-      const total = pdf.numPages
-      let text = ''
-
-      // Đọc TẤT CẢ trang — không giới hạn
-      for (let p = 1; p <= total; p++) {
-        step(`📄 Đang đọc trang ${p}/${total}...`)
-        const page    = await pdf.getPage(p)
-        const content = await page.getTextContent()
-        text += content.items.map(i => i.str).join(' ') + '\n'
-      }
-
-      if (text.trim().length < 100) {
-        step('⚠️ PDF là file scan ảnh — không có text')
-        return ''
-      }
-      step(`✅ Đọc xong toàn bộ ${total} trang · ${text.length} ký tự`)
-      return text.trim()
-
-    } catch(e) {
-      step('⚠️ Lỗi đọc PDF: ' + e.message)
-      return ''
-    }
-  }
-
-  // ── DOCX → dùng mammoth, đọc toàn bộ ──
-  if (ext === 'docx' || ext === 'doc') {
-    try {
-      if (!window.mammoth) {
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script')
-          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js'
-          script.onload = resolve
-          script.onerror = reject
-          document.head.appendChild(script)
-        })
-      }
-      const binary = atob(base64)
-      const bytes  = new Uint8Array(binary.length)
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-      const result = await window.mammoth.extractRawText({ arrayBuffer: bytes.buffer })
-      step(`✅ Đọc xong toàn bộ Word · ${result.value.length} ký tự`)
-      return result.value.trim()
-    } catch(e) {
-      step('⚠️ Lỗi đọc Word: ' + e.message)
-      return ''
-    }
-  }
-
-  // ── TXT / CSV ──
-  if (['txt','csv'].includes(ext)) {
-    try {
-      const text = decodeURIComponent(escape(atob(base64)))
-      step(`✅ Đọc xong · ${text.length} ký tự`)
-      return text
-    } catch { return atob(base64) }
-  }
-
-  step('⚠️ Định dạng chưa hỗ trợ: ' + ext)
-  return ''
-}
-
-// ── GỌI AI 1 CHUNK ────────────────────────────────────────────────────────────
+// ── GỌI AI ───────────────────────────────────────────────────────────────────
 const callAIWithText = async (prompt, maxTokens = 2000) => {
   const groqKeys = (() => {
     const fromEnv = [
@@ -167,7 +71,6 @@ const callAIWithText = async (prompt, maxTokens = 2000) => {
     if (fromEnv.length) return fromEnv
     return (localStorage.getItem('groq_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
   })()
-
   const gemKeys = (() => {
     const fromEnv = [
       import.meta.env.VITE_GEMINI_API_KEY,
@@ -178,7 +81,6 @@ const callAIWithText = async (prompt, maxTokens = 2000) => {
     return (localStorage.getItem('gemini_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
   })()
 
-  // Groq trước
   for (const key of groqKeys) {
     try {
       const res = await fetch(GROQ_URL, {
@@ -196,8 +98,6 @@ const callAIWithText = async (prompt, maxTokens = 2000) => {
       if (result) return result
     } catch(e) { continue }
   }
-
-  // Gemini fallback
   await new Promise(r => setTimeout(r, 5000))
   for (const key of gemKeys) {
     try {
@@ -218,90 +118,154 @@ const callAIWithText = async (prompt, maxTokens = 2000) => {
   throw new Error('Tất cả AI đang bận!')
 }
 
-// ── PHÂN TÍCH TOÀN BỘ VĂN BẢN DÀI BẰNG CHUNKING ────────────────────────────
-// Tự động chia chunk → AI đọc từng phần → gộp thành 1 bộ nhớ hoàn chỉnh
+// ── PROMPT TRÍCH XUẤT CHI TIẾT TỪNG CHUNK ────────────────────────────────────
+// Giữ nguyên số liệu, không tóm tắt chung chung
+const buildChunkPrompt = (chunk, chunkIdx, totalChunks, fileName) => `
+Bạn là chuyên gia trích xuất thông tin văn bản hành chính Việt Nam.
+Đây là PHẦN ${chunkIdx}/${totalChunks} của văn bản: "${fileName}"
+
+NHIỆM VỤ: Trích xuất TẤT CẢ thông tin quan trọng trong phần này, GIỮ NGUYÊN số liệu cụ thể, KHÔNG tóm tắt chung chung.
+
+Trả về JSON:
+{
+  "summary": "mô tả ngắn nội dung phần này (2-3 câu)",
+  "keyPoints": ["điểm quan trọng với số liệu cụ thể", "..."],
+  "members": ["Họ tên - chức vụ/vai trò", "..."],
+  "technicalSpecs": ["thông số kỹ thuật ĐẦY ĐỦ: tên thiết bị + số liệu + đơn vị + tiêu chuẩn", "..."],
+  "financial": ["số tiền/chi phí/giá trị ĐẦY ĐỦ với đơn vị + mục đích", "..."],
+  "legal": ["điều khoản/quy định/văn bản pháp lý được viện dẫn", "..."],
+  "deadlines": ["thời hạn/tiến độ cụ thể + mốc thời gian", "..."],
+  "otherData": ["số liệu/dữ kiện quan trọng khác chưa được phân loại ở trên", "..."]
+}
+
+Lưu ý quan trọng:
+- Giữ NGUYÊN số liệu: "công suất 500KVA" không được viết thành "có quy định về máy phát"
+- Giữ NGUYÊN tên người: "Nguyễn Văn A - Tổ trưởng" không được bỏ qua
+- Giữ NGUYÊN số tiền: "1.234.567.890 đồng" không được viết thành "có quy định tài chính"
+- Nếu không có thông tin cho field nào, để mảng rỗng []
+
+NỘI DUNG PHẦN ${chunkIdx}:
+---
+${chunk}
+---`
+
+// ── PROMPT TỔNG HỢP CUỐI CÙNG ─────────────────────────────────────────────
+const buildFinalPrompt = (allChunkData, fileName, totalChunks) => `
+Bạn là chuyên gia phân tích văn bản hành chính Việt Nam.
+Bạn vừa đọc xong TOÀN BỘ ${totalChunks} phần của văn bản: "${fileName}"
+
+Dưới đây là dữ liệu đã trích xuất từ từng phần (GIỮ NGUYÊN số liệu, không được bỏ bất kỳ thông tin nào):
+${allChunkData}
+
+Tổng hợp thành bộ nhớ hoàn chỉnh. Trả về JSON (không giải thích thêm):
+{
+  "summary": "Tóm tắt tổng quan 10-15 câu bao quát TOÀN BỘ văn bản, đề cập mục tiêu, phạm vi, các nội dung chính",
+
+  "keyPoints": [
+    "điểm quan trọng 1 với số liệu cụ thể nếu có",
+    "điểm quan trọng 2...",
+    "liệt kê TẤT CẢ điểm quan trọng, không giới hạn số lượng"
+  ],
+
+  "members": [
+    "Họ tên đầy đủ - chức vụ/vai trò/đơn vị",
+    "liệt kê TẤT CẢ cá nhân/tổ chức được đề cập"
+  ],
+
+  "technicalSpecs": [
+    "Tên thiết bị/hệ thống: thông số đầy đủ (công suất, kích thước, tiêu chuẩn, model...)",
+    "liệt kê TẤT CẢ thông số kỹ thuật từ toàn bộ văn bản, GIỮ NGUYÊN số liệu"
+  ],
+
+  "financial": [
+    "Hạng mục: số tiền cụ thể + đơn vị + điều kiện thanh toán",
+    "liệt kê TẤT CẢ thông tin tài chính, chi phí, giá trị hợp đồng"
+  ],
+
+  "legal": [
+    "Tên văn bản pháp lý - số hiệu - nội dung liên quan",
+    "liệt kê TẤT CẢ căn cứ pháp lý, điều khoản, quy định được viện dẫn"
+  ],
+
+  "deadlines": [
+    "Công việc/Hạng mục: thời hạn/ngày cụ thể",
+    "liệt kê TẤT CẢ mốc thời gian, tiến độ"
+  ],
+
+  "requirements": "Mô tả đầy đủ các yêu cầu, điều kiện, tiêu chuẩn phải đáp ứng",
+
+  "risks": "Rủi ro, điểm cần lưu ý, điều kiện đặc biệt",
+
+  "otherData": [
+    "Dữ kiện/số liệu quan trọng khác chưa phân loại ở trên"
+  ],
+
+  "keywords": ["từ khóa 1", "từ khóa 2", "tối đa 20 từ khóa đặc trưng của văn bản"]
+}`
+
+// ── PHÂN TÍCH TOÀN BỘ VĂN BẢN (CHUNKING + GIỮ NGUYÊN SỐ LIỆU) ──────────────
 export const analyzeFullDocument = async (text, fileName = '', onStep = null) => {
   const step = (msg) => { if (onStep) onStep(msg) }
-  const CHUNK_SIZE = 12000  // ~6 trang mỗi chunk
+  const CHUNK_SIZE = 10000  // nhỏ hơn để AI đọc kỹ hơn mỗi phần
   const clean = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{3,}/g, ' ')
 
-  // Nếu text ngắn → phân tích thẳng, không cần chunk
+  // Văn bản ngắn → phân tích thẳng 1 lần
   if (clean.length <= CHUNK_SIZE) {
-    step('📝 Văn bản ngắn · Phân tích trực tiếp...')
-    const prompt = buildDeepPrompt(clean, fileName)
-    const result = await callAIWithText(prompt, 2000)
-    return result
+    step('📝 Văn bản ngắn · Phân tích chi tiết trực tiếp...')
+    const prompt = buildSingleDocPrompt(clean, fileName)
+    return await callAIWithText(prompt, 3000)
   }
 
-  // Chia thành nhiều chunk
+  // Chia chunks
   const chunks = []
   for (let i = 0; i < clean.length; i += CHUNK_SIZE) {
     chunks.push(clean.slice(i, i + CHUNK_SIZE))
   }
+  step(`📚 Văn bản ${Math.round(clean.length/1000)}K ký tự · Chia thành ${chunks.length} phần · Bắt đầu đọc...`)
 
-  step(`📚 Văn bản dài ${Math.round(clean.length/1000)}K ký tự · Chia thành ${chunks.length} phần`)
-
-  // AI đọc từng chunk → lấy tóm tắt ngắn
-  const chunkSummaries = []
+  // Đọc từng chunk — giữ nguyên toàn bộ dữ liệu
+  const chunkResults = []
   for (let i = 0; i < chunks.length; i++) {
-    step(`🔍 AI đang đọc phần ${i + 1}/${chunks.length}...`)
+    step(`🔍 Đang đọc và trích xuất phần ${i + 1}/${chunks.length}...`)
     try {
-      const prompt = `Đây là PHẦN ${i+1}/${chunks.length} của văn bản "${fileName}".
-Tóm tắt ngắn gọn phần này (3-5 điểm quan trọng, chỉ liệt kê, không giải thích dài):
----
-${chunks[i]}
----
-Trả về dạng JSON: {"points": ["điểm 1", "điểm 2", ...]}`
-
-      const result = await callAIWithText(prompt, 800)
-      // Parse điểm từ kết quả
-      const match = result.match(/\{[\s\S]*\}/)
-      if (match) {
-        const parsed = JSON.parse(match[0])
-        chunkSummaries.push(...(parsed.points || []))
-      } else {
-        chunkSummaries.push(`Phần ${i+1}: ${result.slice(0, 300)}`)
-      }
-      // Delay nhỏ giữa các chunk để không bị rate limit
+      const prompt = buildChunkPrompt(chunks[i], i + 1, chunks.length, fileName)
+      const result = await callAIWithText(prompt, 1500)
+      // Giữ kết quả thô — không parse để tránh mất dữ liệu
+      chunkResults.push(`=== PHẦN ${i+1}/${chunks.length} ===\n${result}`)
       if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 1500))
     } catch(e) {
-      step(`⚠️ Lỗi đọc phần ${i+1}: ${e.message}`)
-      chunkSummaries.push(`Phần ${i+1}: Không đọc được`)
+      step(`⚠️ Lỗi phần ${i+1}: ${e.message}`)
+      chunkResults.push(`=== PHẦN ${i+1}/${chunks.length} ===\n{"error": "${e.message}"}`)
     }
   }
 
-  // Gộp tất cả → AI tổng hợp thành bộ nhớ hoàn chỉnh
-  step(`🧠 Đang tổng hợp ${chunks.length} phần thành bộ nhớ hoàn chỉnh...`)
-  const allPoints = chunkSummaries.join('\n')
-  const finalPrompt = `Bạn vừa đọc toàn bộ ${chunks.length} phần của văn bản hành chính Việt Nam: "${fileName}".
-
-Đây là tổng hợp từng phần:
-${allPoints}
-
-Dựa vào toàn bộ thông tin trên, tạo bộ nhớ tổng hợp hoàn chỉnh. Trả về JSON (không giải thích thêm):
-{
-  "summary": "Tóm tắt đầy đủ 10-15 câu bao quát TOÀN BỘ nội dung văn bản",
-  "keyPoints": ["điểm quan trọng nhất 1", "điểm 2", "...", "tối đa 15 điểm từ tất cả các phần"],
-  "legalBasis": "tất cả căn cứ pháp lý được viện dẫn",
-  "requirements": "tất cả yêu cầu kỹ thuật và điều khoản quan trọng",
-  "risks": "rủi ro và điểm cần lưu ý",
-  "keywords": ["từ khóa 1", "...", "tối đa 20 từ khóa"]
-}`
-
-  const finalResult = await callAIWithText(finalPrompt, 2500)
-  step(`✅ Hoàn thành! Đã đọc và ghi nhớ toàn bộ văn bản ${chunks.length} phần`)
+  // Tổng hợp tất cả thành bộ nhớ hoàn chỉnh
+  step(`🧠 Đang tổng hợp dữ liệu từ ${chunks.length} phần thành bộ nhớ hoàn chỉnh...`)
+  const allData = chunkResults.join('\n\n')
+  const finalPrompt = buildFinalPrompt(allData, fileName, chunks.length)
+  const finalResult = await callAIWithText(finalPrompt, 3000)
+  step(`✅ Hoàn thành! Đã ghi nhớ toàn bộ ${chunks.length} phần văn bản`)
   return finalResult
 }
 
-const buildDeepPrompt = (text, fileName) => `Phân tích sâu văn bản hành chính Việt Nam và trả về JSON (không giải thích thêm):
+// ── PROMPT CHO VĂN BẢN NGẮN (1 LẦN) ─────────────────────────────────────────
+const buildSingleDocPrompt = (text, fileName) => `
+Bạn là chuyên gia phân tích văn bản hành chính Việt Nam.
+Phân tích chi tiết và trả về JSON đầy đủ (không giải thích thêm):
 {
-  "summary": "Tóm tắt đầy đủ 8-12 câu về nội dung văn bản",
-  "keyPoints": ["điểm quan trọng 1", "điểm 2", "tối đa 10 điểm"],
-  "legalBasis": "căn cứ pháp lý chính được viện dẫn",
-  "requirements": "yêu cầu kỹ thuật hoặc điều khoản quan trọng",
-  "risks": "rủi ro hoặc điểm cần lưu ý",
-  "keywords": ["từ khóa 1", "từ khóa 2", "tối đa 15 từ"]
+  "summary": "Tóm tắt tổng quan 8-12 câu",
+  "keyPoints": ["điểm quan trọng với số liệu cụ thể", "..."],
+  "members": ["Họ tên - chức vụ/vai trò", "..."],
+  "technicalSpecs": ["Tên thiết bị: thông số đầy đủ", "..."],
+  "financial": ["Hạng mục: số tiền + đơn vị", "..."],
+  "legal": ["Văn bản pháp lý - số hiệu - nội dung", "..."],
+  "deadlines": ["Công việc: thời hạn cụ thể", "..."],
+  "requirements": "yêu cầu và điều kiện đầy đủ",
+  "risks": "rủi ro và điểm cần lưu ý",
+  "otherData": ["dữ kiện quan trọng khác", "..."],
+  "keywords": ["từ khóa 1", "...", "tối đa 20 từ"]
 }
+
 Tên file: ${fileName}
 NỘI DUNG:
 ---
@@ -424,7 +388,6 @@ export function useAI() {
     } finally { setLoading(false) }
   }
 
-  // ── Phân tích SÂU → gọi analyzeFullDocument (có chunking) ──
   const analyzeDeepForMemory = async (text, fileName = '', onStep = null) => {
     setLoading(true)
     resetIdxIfNewDay()
@@ -433,29 +396,37 @@ export function useAI() {
     } finally { setLoading(false) }
   }
 
+  // ── Hỏi đáp sâu — dùng toàn bộ bộ nhớ mở rộng ──
   const askDeep = async (question, memory, chatHistory = []) => {
     setLoading(true)
     resetIdxIfNewDay()
-    const ctx = `BỘ NHỚ VĂN BẢN:
-Tóm tắt: ${memory.summary || ''}
-Điểm quan trọng: ${(memory.keyPoints || []).join('; ')}
-Căn cứ pháp lý: ${memory.legalBasis || ''}
-Yêu cầu kỹ thuật: ${memory.requirements || ''}
-Rủi ro: ${memory.risks || ''}
-Từ khóa: ${(memory.keywords || []).join(', ')}`
+
+    const ctx = `BỘ NHỚ VĂN BẢN ĐẦY ĐỦ:
+📋 Tóm tắt: ${memory.summary || ''}
+📌 Điểm quan trọng: ${(memory.keyPoints || []).join('; ')}
+👥 Thành viên/Đơn vị: ${(memory.members || []).join('; ')}
+⚙️ Thông số kỹ thuật: ${(memory.technicalSpecs || []).join('; ')}
+💰 Tài chính: ${(memory.financial || []).join('; ')}
+⚖️ Pháp lý: ${(memory.legal || []).join('; ')}
+📅 Tiến độ/Thời hạn: ${(memory.deadlines || []).join('; ')}
+📋 Yêu cầu: ${memory.requirements || ''}
+⚠️ Rủi ro: ${memory.risks || ''}
+📊 Dữ liệu khác: ${(memory.otherData || []).join('; ')}
+🔑 Từ khóa: ${(memory.keywords || []).join(', ')}`
 
     const historyCtx = chatHistory.slice(-4).map(m =>
       `${m.role==='user'?'Hỏi':'Trả lời'}: ${m.content}`).join('\n')
-    const prompt = `Bạn là chuyên gia phân tích văn bản pháp lý Việt Nam. Dựa vào bộ nhớ văn bản bên dưới để trả lời câu hỏi chi tiết.
+
+    const prompt = `Bạn là chuyên gia phân tích văn bản pháp lý Việt Nam. Dựa vào bộ nhớ đầy đủ bên dưới để trả lời chính xác và chi tiết. Luôn trích dẫn số liệu cụ thể khi có.
 
 ${ctx}
-${historyCtx ? '\nLỊCH SỬ:\n' + historyCtx : ''}
+${historyCtx ? '\nLỊCH SỬ HỘI THOẠI:\n' + historyCtx : ''}
 
 CÂU HỎI: ${question}
-Trả lời tiếng Việt, chi tiết và chính xác:`
+Trả lời tiếng Việt, đầy đủ số liệu và chi tiết:`
 
     try {
-      return await callAIWithText(prompt, 1500)
+      return await callAIWithText(prompt, 2000)
     } finally { setLoading(false) }
   }
 
