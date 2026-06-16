@@ -38,20 +38,18 @@ const extractDocxText = async (buf) => {
 const readFileViaProxy = async (url, fileName, onStep = null) => {
   const proxyUrl = `/api/read-file?url=${encodeURIComponent(url)}`
   if (onStep) onStep('📥 Đang tải file qua proxy...')
+
+  // Stream trực tiếp dưới dạng binary (không base64 — không giới hạn kích thước)
   const res = await fetch(proxyUrl)
   if (!res.ok) throw new Error(`Proxy error: ${res.status}`)
-  const { base64, size } = await res.json()
-  if (!base64) throw new Error('No content')
-  if (onStep) onStep(`✅ Đã tải ${Math.round(size/1024)}KB · Đang đọc nội dung...`)
 
-  // Convert base64 → ArrayBuffer
-  const binary = atob(base64)
-  const buf = new Uint8Array(binary.length)
-  for(let i=0;i<binary.length;i++) buf[i] = binary.charCodeAt(i)
+  const arrayBuf = await res.arrayBuffer()
+  const sizeMB = (arrayBuf.byteLength / 1024 / 1024).toFixed(1)
+  if (onStep) onStep(`✅ Đã tải ${sizeMB}MB · Đang đọc nội dung...`)
 
   const ext = (fileName || '').split('.').pop().toLowerCase()
-  if (ext === 'pdf') return extractPdfTextFull(buf.buffer, onStep)
-  if (['doc','docx'].includes(ext)) return extractDocxText(buf.buffer)
+  if (ext === 'pdf') return extractPdfTextFull(arrayBuf, onStep)
+  if (['doc','docx'].includes(ext)) return extractDocxText(arrayBuf)
   return ''
 }
 
@@ -257,10 +255,18 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                       <div style={{ fontSize:13, fontWeight:600, color:'#1a1a1a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{fileName || 'tài liệu'}</div>
                       {fileSize > 0 && <div style={{ fontSize:11, color:'#9b9b9b', marginTop:2 }}>{(fileSize/1024/1024).toFixed(1)} MB</div>}
                     </div>
-                    <a href={fileUrl} target="_blank" rel="noreferrer"
-                      style={{ padding:'7px 14px', borderRadius:8, fontSize:12, fontWeight:600, background:'#f0fdf4', border:'0.5px solid #bbf7d0', color:'#15803d', cursor:'pointer', textDecoration:'none' }}>
+                    <button onClick={async () => {
+                        // Tải qua proxy với tên file gốc
+                        const a = document.createElement('a')
+                        a.href = `/api/read-file?url=${encodeURIComponent(fileUrl)}`
+                        a.download = fileName || 'document.pdf'
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                      }}
+                      style={{ padding:'7px 14px', borderRadius:8, fontSize:12, fontWeight:600, background:'#f0fdf4', border:'0.5px solid #bbf7d0', color:'#15803d', cursor:'pointer' }}>
                       📥 Tải về
-                    </a>
+                    </button>
                   </div>
                 </div>
               ) : (
