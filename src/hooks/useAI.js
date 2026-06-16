@@ -211,7 +211,7 @@ export const analyzeFullDocument = async (text, fileName = '', onStep = null) =>
 
   // Văn bản ngắn → phân tích thẳng 1 lần
   if (clean.length <= CHUNK_SIZE) {
-    step('📝 Văn bản ngắn · Phân tích chi tiết trực tiếp...')
+    step('🤖 Đang phân tích văn bản...')
     const prompt = buildSingleDocPrompt(clean, fileName)
     return await callAIWithText(prompt, 3000)
   }
