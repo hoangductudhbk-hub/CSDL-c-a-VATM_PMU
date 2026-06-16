@@ -48,8 +48,12 @@ export function useCloudinaryStorage() {
       const base64   = await fileToBase64(file, notify)
       notify(30)
 
-      // Giữ nguyên tên file gốc (kể cả tiếng Việt), chỉ bỏ ký tự nguy hiểm
-      const safeName = `${Date.now()}_${file.name.replace(/[/\\:*?"<>|]/g,'_')}`
+      // Giữ tên file gốc, chỉ bỏ ký tự bị cấm trong path URL
+      const cleanName = file.name
+        .replace(/[/\\:*?"<>|#%]/g, '-')  // ký tự cấm → dấu gạch
+        .replace(/\s+/g, '_')              // khoảng trắng → _
+        .replace(/-+/g, '-')               // nhiều dấu - liên tiếp → 1
+      const safeName = `${Date.now()}_${cleanName}`
       const path     = `docs/${safeName}`
       const body     = JSON.stringify({ message:`Upload: ${file.name}`, content: base64 })
 
