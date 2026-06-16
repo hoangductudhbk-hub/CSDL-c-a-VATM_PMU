@@ -1,4 +1,6 @@
-// api/cleanup-files.js — Dùng Firestore REST API (không cần firebase-admin)
+// api/cleanup-files.js — Dùng Google Auth để gọi Firestore REST API
+import { GoogleAuth } from 'google-auth-library'
+
 export default async function handler(req, res) {
   if (req.query.secret !== 'vatm2026') {
     return res.status(401).json({ error: 'Unauthorized' })
@@ -15,22 +17,37 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Bước 1: Lấy danh sách file trong docs/ trên GitHub
+    // Lấy Google Access Token từ service account
+    const auth = new GoogleAuth({
+      credentials: {
+        client_email: process.env.FIREBASE_CLIENT_EMAIL,
+        private_key:  process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      },
+      scopes: ['https://www.googleapis.com/auth/datastore'],
+    })
+    const client      = await auth.getClient()
+    const accessToken = (await client.getAccessToken()).token
+
+    const fsHeaders = {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    }
+
+    // Bước 1: Lấy danh sách file GitHub
     const ghRes = await fetch(
       `https://api.github.com/repos/${owner}/${repo}/contents/docs`,
       { headers: ghHeaders }
     )
-    if (!ghRes.ok) throw new Error('Không lấy được file GitHub: ' + ghRes.status)
-    const ghFiles = await ghRes.json()
+    if (!ghRes.ok) throw new Error('GitHub lỗi: ' + ghRes.status)
+    const ghFiles  = await ghRes.json()
     const allGhPaths = ghFiles.map(f => f.path)
 
-    // Bước 2: Lấy tất cả documents từ Firestore REST API
+    // Bước 2: Lấy documents từ Firestore
     const fsUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/documents?pageSize=300`
-    const fsRes = await fetch(fsUrl)
-    if (!fsRes.ok) throw new Error('Không lấy được Firestore: ' + fsRes.status)
+    const fsRes = await fetch(fsUrl, { headers: fsHeaders })
+    if (!fsRes.ok) throw new Error('Firestore lỗi: ' + fsRes.status)
     const fsData = await fsRes.json()
 
-    // Trích fileUrl từ Firestore documents
     const usedPaths = new Set()
     for (const doc of (fsData.documents || [])) {
       const fields = doc.fields || {}
@@ -57,15 +74,13 @@ export default async function handler(req, res) {
     const results = []
     for (const path of orphans) {
       try {
-        // Lấy SHA
         const infoRes = await fetch(
           `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
           { headers: ghHeaders }
         )
-        if (!infoRes.ok) { results.push({ path, status: 'skip - not found' }); continue }
+        if (!infoRes.ok) { results.push({ path, status: 'skip' }); continue }
         const { sha } = await infoRes.json()
 
-        // Xóa
         const delRes = await fetch(
           `https://api.github.com/repos/${owner}/${repo}/contents/${path}`,
           {
@@ -74,7 +89,7 @@ export default async function handler(req, res) {
             body: JSON.stringify({ message: `Cleanup: ${path}`, sha, branch: 'main' }),
           }
         )
-        results.push({ path, status: delRes.ok ? '✅ Đã xóa' : '❌ Lỗi xóa' })
+        results.push({ path, status: delRes.ok ? '✅ Đã xóa' : '❌ Lỗi' })
         await new Promise(r => setTimeout(r, 500))
       } catch(e) {
         results.push({ path, status: '❌ ' + e.message })
