@@ -2,6 +2,13 @@
 import { useState } from 'react'
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const OPENROUTER_MODELS = [
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'google/gemma-3-27b-it:free',
+  'qwen/qwen-2.5-72b-instruct:free',
+  'mistralai/mistral-7b-instruct:free',
+]
 const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
 const GEM_URL = (model, key) =>
@@ -27,6 +34,9 @@ const getGemKeys = () => {
   if (fromEnv.length) return fromEnv
   return (localStorage.getItem('gemini_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
 }
+
+const getOpenRouterKey = () =>
+  import.meta.env.VITE_OPENROUTER_API_KEY || localStorage.getItem('openrouter_key') || ''
 
 const saveKey = (k) => {
   k = k.trim()
@@ -106,12 +116,45 @@ const callGroq = async (prompt, maxTokens = 1000, system = null) => {
   return null
 }
 
-// ── Gọi AI: Gemini trước, Groq sau (tránh rate limit) ───────────
+// ── Gọi OpenRouter ──────────────────────────────────────────────
+const callOpenRouter = async (prompt, maxTokens = 1000) => {
+  const key = getOpenRouterKey()
+  if (!key) return null
+  for (const model of OPENROUTER_MODELS) {
+    try {
+      const res = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`,
+          'HTTP-Referer': 'https://pmuvatm.vercel.app',
+          'X-Title': 'VATM-PMU',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          temperature: 0.1,
+          messages: [{ role: 'user', content: prompt }],
+        }),
+      })
+      if (res.status === 429) continue
+      if (!res.ok) continue
+      const result = (await res.json()).choices?.[0]?.message?.content || ''
+      if (result) return result
+    } catch { continue }
+  }
+  return null
+}
+
+// ── Gọi AI: Gemini → OpenRouter → Groq (tránh rate limit) ─────
 const callAI = async (prompt, maxTokens = 1000) => {
-  // Gemini trước — ít rate limit hơn
+  // Gemini trước — ít rate limit
   const gem = await callGemini(prompt, maxTokens)
   if (gem) return gem
-  // Groq fallback
+  // OpenRouter fallback — nhiều model free
+  const or = await callOpenRouter(prompt, maxTokens)
+  if (or) return or
+  // Groq cuối cùng
   const groq = await callGroq(prompt, maxTokens)
   if (groq) return groq
   const err = new Error('AI_RATE_LIMIT')
@@ -337,9 +380,11 @@ CÂU HỎI: ${question}
 Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
 
     try {
-      // Gemini trước cho chat — nhanh và ít rate limit
+      // Gemini → OpenRouter → Groq
       const gem = await callGemini(prompt, 2000)
       if (gem) return gem
+      const or = await callOpenRouter(prompt, 2000)
+      if (or) return or
       const groq = await callGroq(prompt, 2000)
       if (groq) return groq
       const err = new Error('AI_RATE_LIMIT')
@@ -356,6 +401,8 @@ Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
     try {
       const gem = await callGemini(`${sys}\n\nCâu hỏi: ${question}`, 1200)
       if (gem) return gem
+      const or = await callOpenRouter(`${sys}\n\nCâu hỏi: ${question}`, 1200)
+      if (or) return or
       const groq = await callGroq(question, 1200, sys)
       if (groq) return groq
       const err = new Error('AI_RATE_LIMIT')
