@@ -34,6 +34,74 @@ const extractDocxText = async (buf) => {
   return (await window.mammoth.extractRawText({arrayBuffer:buf})).value
 }
 
+// ── Đọc PDF scan bằng Gemini Vision (OCR) ──────────────────────
+const readPDFWithGemini = async (arrayBuf, fileName, onStep) => {
+  if (onStep) onStep('🔍 PDF scan — dùng Gemini OCR đọc toàn bộ...')
+
+  // Convert ArrayBuffer → base64
+  const bytes = new Uint8Array(arrayBuf)
+  let binary = ''
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+  const base64 = btoa(binary)
+
+  const gemKeys = [
+    import.meta.env.VITE_GEMINI_API_KEY,
+    import.meta.env.VITE_GEMINI_API_KEY_2,
+    import.meta.env.VITE_GEMINI_API_KEY_3,
+  ].filter(Boolean)
+
+  const GEM_URL = (key) =>
+    `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${key}`
+
+  for (let i = 0; i < gemKeys.length; i++) {
+    try {
+      if (onStep) onStep(`🔍 Gemini đang đọc và nhận dạng văn bản${i > 0 ? ` (key ${i+1})` : ''}...`)
+      const res = await fetch(GEM_URL(gemKeys[i]), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              {
+                inline_data: {
+                  mime_type: 'application/pdf',
+                  data: base64
+                }
+              },
+              {
+                text: `Trích xuất TOÀN BỘ nội dung văn bản trong file PDF này (tên file: ${fileName}).
+Yêu cầu:
+- Giữ nguyên 100% câu chữ, số liệu, tên người, bảng biểu, điều khoản
+- Giữ nguyên cấu trúc: tiêu đề, điều, khoản, mục
+- Không tóm tắt, không bỏ bất kỳ thông tin nào
+- Chỉ trả về nội dung văn bản thuần túy`
+              }
+            ]
+          }],
+          generationConfig: { temperature: 0, maxOutputTokens: 8192 }
+        })
+      })
+
+      if (res.status === 429) {
+        if (i < gemKeys.length - 1) { await new Promise(r => setTimeout(r, 3000)); continue }
+        throw new Error('Gemini hết quota')
+      }
+      if (!res.ok) { continue }
+
+      const data = await res.json()
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+      if (text.length > 100) {
+        if (onStep) onStep(`✅ Gemini đọc xong ${text.length.toLocaleString()} ký tự`)
+        return text
+      }
+    } catch(e) {
+      if (i === gemKeys.length - 1) throw e
+      continue
+    }
+  }
+  throw new Error('Không thể đọc PDF bằng Gemini')
+}
+
 // Đọc file qua proxy /api/read-file để tránh CORS
 const readFileViaProxy = async (url, fileName, onStep = null) => {
   const proxyUrl = `/api/read-file?url=${encodeURIComponent(url)}`
@@ -48,9 +116,16 @@ const readFileViaProxy = async (url, fileName, onStep = null) => {
   if (onStep) onStep(`✅ Đã tải ${sizeMB}MB · Đang đọc nội dung...`)
 
   const ext = (fileName || '').split('.').pop().toLowerCase()
-  if (ext === 'pdf') return extractPdfTextFull(arrayBuf, onStep)
-  if (['doc','docx'].includes(ext)) return extractDocxText(arrayBuf)
-  return ''
+  if (ext === 'pdf') {
+    const text = await extractPdfTextFull(arrayBuf, onStep)
+    // Trả về cả text lẫn arrayBuf để dùng Gemini nếu text rỗng
+    return { text, arrayBuf, ext }
+  }
+  if (['doc','docx'].includes(ext)) {
+    const text = await extractDocxText(arrayBuf)
+    return { text, arrayBuf, ext }
+  }
+  return { text: '', arrayBuf, ext }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -141,23 +216,42 @@ export default function DocDetail({ doc, onEdit, onClose }) {
 
       let fullText = docMeta
 
-      // Bước 2: Đọc file qua proxy (không bị CORS)
-      if (hasFile) {
+      // Bước 2: Kiểm tra cache extractedText trong Firestore
+      let extractedText = memory?.extractedText || ''
+
+      if (extractedText.length > 100) {
+        setAnalyzeStep(`📚 Dùng văn bản đã lưu (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
+        fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + extractedText
+
+      } else if (hasFile) {
+        // Bước 3: Tải file qua proxy
         setAnalyzeStep('📥 Đang tải file qua proxy...')
         try {
-          const fileContent = await Promise.race([
+          const result = await Promise.race([
             readFileViaProxy(fileUrl, fileName, setAnalyzeStep),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 120000))
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 180000))
           ])
-          if (fileContent && fileContent.length > 100) {
-            // Dùng TOÀN BỘ nội dung — không giới hạn ký tự, chunking tự động trong AI
-            fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + fileContent
-            setAnalyzeStep(`✅ Đọc xong ${fileContent.length.toLocaleString()} ký tự · 🤖 AI bắt đầu phân tích...`)
+
+          let fileText = result.text || ''
+
+          // Bước 4: Nếu PDF không có text (scan) → dùng Gemini OCR
+          if (fileText.length < 100 && result.ext === 'pdf' && result.arrayBuf) {
+            try {
+              fileText = await readPDFWithGemini(result.arrayBuf, fileName, setAnalyzeStep)
+            } catch(e) {
+              setAnalyzeStep(`⚠️ Gemini OCR lỗi: ${e.message} — dùng metadata`)
+            }
+          }
+
+          if (fileText.length > 100) {
+            extractedText = fileText
+            fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + fileText
+            setAnalyzeStep(`✅ Đọc xong ${fileText.length.toLocaleString()} ký tự · 🤖 AI bắt đầu phân tích...`)
           } else {
-            setAnalyzeStep('⚠️ File không có text (scan ảnh) — dùng thông tin metadata')
+            setAnalyzeStep('⚠️ Không đọc được nội dung file — dùng metadata')
           }
         } catch(e) {
-          setAnalyzeStep(`⚠️ ${e.message === 'timeout' ? 'File quá lớn/chậm' : 'Lỗi đọc file'} — dùng metadata`)
+          setAnalyzeStep(`⚠️ ${e.message === 'timeout' ? 'File quá lớn/chậm' : 'Lỗi: ' + e.message} — dùng metadata`)
         }
       }
 
@@ -176,7 +270,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
         }
       }
 
-      await saveMemory({ ...parsed, fileName: fileName || doc.code, readChars: fullText.length })
+      await saveMemory({ ...parsed, fileName: fileName || doc.code, readChars: fullText.length, extractedText: extractedText || '' })
       setAnalyzeStep('✅ Đã ghi nhớ thành công!')
       setShowChat(true)
       setTimeout(() => setAnalyzeStep(''), 2000)
