@@ -48,7 +48,8 @@ export function useCloudinaryStorage() {
       const base64   = await fileToBase64(file, notify)
       notify(30)
 
-      const safeName = `${Date.now()}_${file.name.replace(/[^\w._-]/g,'_')}`
+      // Giữ nguyên tên file gốc (kể cả tiếng Việt), chỉ bỏ ký tự nguy hiểm
+      const safeName = `${Date.now()}_${file.name.replace(/[/\\:*?"<>|]/g,'_')}`
       const path     = `docs/${safeName}`
       const body     = JSON.stringify({ message:`Upload: ${file.name}`, content: base64 })
 
