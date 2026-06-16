@@ -10,12 +10,13 @@ const loadPdfJs = () => new Promise((res,rej) => {
   s.onerror=rej; document.head.appendChild(s)
 })
 
-const extractPdfTextFull = async (buf) => {
+const extractPdfTextFull = async (buf, onStep = null) => {
   const lib = await loadPdfJs()
   const pdf = await lib.getDocument({data: buf}).promise
-  const maxPages = Math.min(pdf.numPages, 60)
+  const maxPages = pdf.numPages // Đọc TOÀN BỘ trang
   let text = ''
   for(let i=1;i<=maxPages;i++){
+    if (onStep) onStep(`📄 Đang đọc trang ${i}/${maxPages}...`)
     const page = await pdf.getPage(i)
     const c = await page.getTextContent()
     text += c.items.map(it=>it.str).join(' ') + '\n'
@@ -34,12 +35,14 @@ const extractDocxText = async (buf) => {
 }
 
 // Đọc file qua proxy /api/read-file để tránh CORS
-const readFileViaProxy = async (url, fileName) => {
+const readFileViaProxy = async (url, fileName, onStep = null) => {
   const proxyUrl = `/api/read-file?url=${encodeURIComponent(url)}`
+  if (onStep) onStep('📥 Đang tải file qua proxy...')
   const res = await fetch(proxyUrl)
   if (!res.ok) throw new Error(`Proxy error: ${res.status}`)
   const { base64, size } = await res.json()
   if (!base64) throw new Error('No content')
+  if (onStep) onStep(`✅ Đã tải ${Math.round(size/1024)}KB · Đang đọc nội dung...`)
 
   // Convert base64 → ArrayBuffer
   const binary = atob(base64)
@@ -47,7 +50,7 @@ const readFileViaProxy = async (url, fileName) => {
   for(let i=0;i<binary.length;i++) buf[i] = binary.charCodeAt(i)
 
   const ext = (fileName || '').split('.').pop().toLowerCase()
-  if (ext === 'pdf') return extractPdfTextFull(buf.buffer)
+  if (ext === 'pdf') return extractPdfTextFull(buf.buffer, onStep)
   if (['doc','docx'].includes(ext)) return extractDocxText(buf.buffer)
   return ''
 }
@@ -145,13 +148,13 @@ export default function DocDetail({ doc, onEdit, onClose }) {
         setAnalyzeStep('📥 Đang tải file qua proxy...')
         try {
           const fileContent = await Promise.race([
-            readFileViaProxy(fileUrl, fileName),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000))
+            readFileViaProxy(fileUrl, fileName, setAnalyzeStep),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 120000))
           ])
           if (fileContent && fileContent.length > 100) {
-            // Lấy tối đa 14K ký tự nội dung file
-            fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + fileContent.slice(0, 14000)
-            setAnalyzeStep(`✅ Đọc được ${fileContent.length.toLocaleString()} ký tự từ file · 🤖 AI phân tích...`)
+            // Dùng TOÀN BỘ nội dung — không giới hạn ký tự, chunking tự động trong AI
+            fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + fileContent
+            setAnalyzeStep(`✅ Đọc xong ${fileContent.length.toLocaleString()} ký tự · 🤖 AI bắt đầu phân tích...`)
           } else {
             setAnalyzeStep('⚠️ File không có text (scan ảnh) — dùng thông tin metadata')
           }
@@ -161,7 +164,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       }
 
       setAnalyzeStep(prev => prev.includes('AI') ? prev : '🤖 AI đang phân tích sâu...')
-      const result = await analyzeDeepForMemory(fullText, fileName || doc.code)
+      const result = await analyzeDeepForMemory(fullText, fileName || doc.code, setAnalyzeStep)
 
       let parsed = parseJ(result)
       if (!parsed) {
