@@ -244,9 +244,11 @@ export function useAI() {
     const clean = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{3,}/g, ' ').slice(0, 6000)
     const prompt = `${SYSTEM}\n\nPhân tích văn bản:${hint}\n---\n${clean}\n---`
     try {
-      const gem = await callGemini(prompt, 1000)
-      if (gem) return gem
-      return await callGroq(prompt, 1000, SYSTEM) || ''
+      // Groq trước cho analyzeText — nhanh hơn khi thêm nhiều văn bản cùng lúc
+      const groq = await callGroq(prompt, 1000, SYSTEM)
+      if (groq) return groq
+      // Gemini fallback khi Groq 429
+      return await callGemini(prompt, 1000) || ''
     } finally { setLoading(false) }
   }
 
