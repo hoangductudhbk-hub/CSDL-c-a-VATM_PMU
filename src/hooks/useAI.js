@@ -430,13 +430,20 @@ export function useAI() {
     const historyCtx = chatHistory.slice(-4).map(m =>
       `${m.role==='user'?'Hỏi':'Trả lời'}: ${m.content}`).join('\n')
 
-    const prompt = `Bạn là chuyên gia phân tích văn bản pháp lý Việt Nam. Dựa vào bộ nhớ đầy đủ bên dưới để trả lời chính xác và chi tiết. Luôn trích dẫn số liệu cụ thể khi có.
+    const prompt = `Bạn là trợ lý tra cứu văn bản hành chính Việt Nam.
+
+NGUYÊN TẮC BẮT BUỘC:
+- CHỈ trả lời dựa trên thông tin có trong BỘ NHỚ VĂN BẢN bên dưới
+- KHÔNG suy đoán, KHÔNG bổ sung thông tin ngoài bộ nhớ
+- Nếu bộ nhớ KHÔNG có thông tin để trả lời → nói rõ: "Văn bản không đề cập đến nội dung này"
+- Trích dẫn NGUYÊN VĂN số liệu, tên người, điều khoản từ bộ nhớ
+- KHÔNG dùng từ "có thể", "có lẽ", "thường thì", "suy đoán"
 
 ${ctx}
 ${historyCtx ? '\nLỊCH SỬ HỘI THOẠI:\n' + historyCtx : ''}
 
 CÂU HỎI: ${question}
-Trả lời tiếng Việt, đầy đủ số liệu và chi tiết:`
+Trả lời ngắn gọn, chính xác, chỉ dựa vào bộ nhớ trên:`
 
     try {
       return await callAIWithText(prompt, 2000)
