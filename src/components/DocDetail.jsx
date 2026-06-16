@@ -152,6 +152,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
 
   const [analyzing,   setAnalyzing]   = useState(false)
   const [analyzeStep, setAnalyzeStep] = useState('')
+  const [countdown,   setCountdown]   = useState(0)  // giây còn lại trước khi retry
   const [showChat,    setShowChat]    = useState(false)
   const [chat,        setChat]        = useState([])
   const [chatInput,   setChatInput]   = useState('')
@@ -199,8 +200,33 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     }
   }
 
+  // ── Đếm ngược và tự retry ──
+  const startCountdownAndRetry = (seconds) => {
+    let left = seconds
+    setCountdown(left)
+    setAnalyzeStep(`⏳ AI đang nghỉ ngơi... thử lại sau ${left}s`)
+    const timer = setInterval(() => {
+      left -= 1
+      setCountdown(left)
+      setAnalyzeStep(`⏳ AI đang nghỉ ngơi... thử lại sau ${left}s`)
+      if (left <= 0) {
+        clearInterval(timer)
+        setCountdown(0)
+        handleAnalyze() // Tự động retry
+      }
+    }, 1000)
+  }
+
   // ── Phân tích sâu & ghi nhớ ──
   const handleAnalyze = async () => {
+    if (countdown > 0) {
+      setAnalyzeStep(`⏳ Vui lòng đợi thêm ${countdown} giây nữa để AI sẵn sàng!`)
+      return
+    }
+    if (countdown > 0) {
+      setAnalyzeStep(`⏳ Vui lòng đợi thêm ${countdown} giây nữa để AI sẵn sàng!`)
+      return
+    }
     setAnalyzing(true)
     try {
       // Bước 1: metadata sẵn có trong Firestore
@@ -275,11 +301,16 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       setShowChat(true)
       setTimeout(() => setAnalyzeStep(''), 2000)
     } catch(e) {
-      const msg = e.message === 'AI_QUOTA'
-        ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!'
-        : '❌ Lỗi: ' + e.message
-      setAnalyzeStep(msg)
-      setTimeout(() => setAnalyzeStep(''), 6000)
+      if (e.message === 'AI_RATE_LIMIT') {
+        const wait = e.waitSeconds || 60
+        startCountdownAndRetry(wait)
+      } else if (e.message === 'AI_QUOTA') {
+        setAnalyzeStep('⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!')
+        setTimeout(() => setAnalyzeStep(''), 6000)
+      } else {
+        setAnalyzeStep('❌ Lỗi: ' + e.message)
+        setTimeout(() => setAnalyzeStep(''), 6000)
+      }
     } finally { setAnalyzing(false) }
   }
 

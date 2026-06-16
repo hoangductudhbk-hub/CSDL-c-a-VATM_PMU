@@ -81,6 +81,7 @@ const callAIWithText = async (prompt, maxTokens = 2000) => {
     return (localStorage.getItem('gemini_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
   })()
 
+  let maxWait = 0
   for (const key of groqKeys) {
     try {
       const res = await fetch(GROQ_URL, {
@@ -92,13 +93,20 @@ const callAIWithText = async (prompt, maxTokens = 2000) => {
           messages: [{ role: 'user', content: prompt }],
         }),
       })
-      if (res.status === 429) { await new Promise(r => setTimeout(r, 3000)); continue }
+      if (res.status === 429) {
+        // Lấy thời gian chờ từ header Groq
+        const retryAfter = res.headers.get('retry-after') || res.headers.get('x-ratelimit-reset-requests')
+        const wait = retryAfter ? Math.ceil(parseFloat(retryAfter)) : 60
+        maxWait = Math.max(maxWait, wait)
+        continue
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const result = (await res.json()).choices?.[0]?.message?.content || ''
       if (result) return result
     } catch(e) { continue }
   }
-  await new Promise(r => setTimeout(r, 5000))
+
+  // Thử Gemini fallback
   for (const key of gemKeys) {
     try {
       const res = await fetch(GEM_URL('gemini-2.0-flash', key), {
@@ -109,13 +117,18 @@ const callAIWithText = async (prompt, maxTokens = 2000) => {
           generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens },
         }),
       })
-      if (res.status === 429) { await new Promise(r => setTimeout(r, 3000)); continue }
+      if (res.status === 429) { await new Promise(r => setTimeout(r, 2000)); continue }
       if (!res.ok) continue
       const result = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
       if (result) return result
     } catch(e) { continue }
   }
-  throw new Error('AI_QUOTA')
+
+  // Tất cả đều 429 — throw kèm thời gian chờ
+  const waitSecs = maxWait || 60
+  const err = new Error('AI_RATE_LIMIT')
+  err.waitSeconds = waitSecs
+  throw err
 }
 
 // ── PROMPT TRÍCH XUẤT CHI TIẾT TỪNG CHUNK ────────────────────────────────────
