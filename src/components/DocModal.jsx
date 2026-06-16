@@ -54,7 +54,7 @@ export default function DocModal({ doc, onSave, onClose }) {
   const { uploadFile, uploading, getCloudName, saveCloudName } = useCloudinaryStorage()
 
   const [form, setForm] = useState({ code:'',date:'',org:'',subject:'',docType:'Công văn',status:'prep',detail:'',note:'', ...(doc||{}) })
-  const [mode, setMode]     = useState('manual')
+  const [mode, setMode]     = useState('ai')
   const [aiTab, setAiTab]   = useState('file')
   const [rawText, setRaw]   = useState('')
   const [status, setSt]     = useState('')
@@ -126,7 +126,7 @@ export default function DocModal({ doc, onSave, onClose }) {
         else setSt('⚠️ Không phân tích được. Điền thủ công.')
       } catch(e) {
         if (e.message==='NO_KEY') alert('Chưa có API key!')
-        else setSt('❌ Lỗi: '+e.message)
+        else setSt(e.message === 'AI_QUOTA' ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!' : '❌ Lỗi: '+e.message)
       } finally { setLoad(false) }
       return
     }
@@ -170,7 +170,7 @@ export default function DocModal({ doc, onSave, onClose }) {
       const r=await analyzeText(rawText); const p=parseJ(r)
       if (p) { setForm(f=>({...f,...p})); setMode('manual'); setSt('✅ Xong!') }
       else setSt('⚠️ Không phân tích được')
-    } catch(e) { if(e.message==='NO_KEY') alert('Chưa có key!'); else setSt('❌ Lỗi: '+e.message) }
+    } catch(e) { if(e.message==='NO_KEY') alert('Chưa có key!'); else setSt(e.message === 'AI_QUOTA' ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!' : '❌ Lỗi: '+e.message) }
     finally { setLoad(false) }
   }
 
