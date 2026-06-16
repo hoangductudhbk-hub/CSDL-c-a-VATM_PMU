@@ -454,7 +454,46 @@ CÂU HỎI: ${question}
 Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
 
     try {
-      return await callAIWithText(prompt, 2000)
+      // Thử Groq trước, nếu 429 → chuyển Gemini ngay không chờ
+      for (const key of getGroqKeys()) {
+        try {
+          const res = await fetch(GROQ_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+            body: JSON.stringify({
+              model: 'llama-3.3-70b-versatile',
+              max_tokens: 2000, temperature: 0.1,
+              messages: [{ role: 'user', content: prompt }],
+            }),
+          })
+          if (res.status === 429) continue // thử key khác ngay
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          const result = (await res.json()).choices?.[0]?.message?.content || ''
+          if (result) return result
+        } catch(e) { continue }
+      }
+
+      // Groq đều 429 → Gemini ngay (không delay 5s)
+      for (const key of getGemKeys()) {
+        try {
+          const res = await fetch(GEM_URL('gemini-2.0-flash', key), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { temperature: 0.1, maxOutputTokens: 2000 },
+            }),
+          })
+          if (res.status === 429) continue
+          if (!res.ok) continue
+          const result = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
+          if (result) return result
+        } catch(e) { continue }
+      }
+
+      const err = new Error('AI_RATE_LIMIT')
+      err.waitSeconds = 30
+      throw err
     } finally { setLoading(false) }
   }
 
