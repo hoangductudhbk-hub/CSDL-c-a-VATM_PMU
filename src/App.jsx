@@ -279,7 +279,7 @@ function AppInner() {
   const safeDocs = docs || []
   const filtered = safeDocs.filter(d => {
     const q = search.toLowerCase()
-    const matchS = !q || (d.code||'').toLowerCase().includes(q) || (d.subject||'').toLowerCase().includes(q) || (d.org||'').toLowerCase().includes(q)
+    const matchS = !q || (d.code||'').toLowerCase().includes(q) || (d.subject||'').toLowerCase().includes(q) || (d.org||'').toLowerCase().includes(q) || (d.docType||'').toLowerCase().includes(q) || (d.detail||'').toLowerCase().includes(q)
     return matchS && (filter === 'all' || d.status === filter)
   })
   const stats = {
