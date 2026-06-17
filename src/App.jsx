@@ -246,6 +246,8 @@ function AppInner() {
   const [showAddProj, setShowAddProj] = useState(false)
   const [showAddPkg,  setShowAddPkg]  = useState(null) // null hoặc projectId
   const [showKeyModal,  setShowKeyModal]  = useState(false)
+  const [renameTarget,  setRenameTarget]  = useState(null) // { type:'project'|'package', id, currentName }
+  const [renameInput,   setRenameInput]   = useState('')
   const [showChangePw,  setShowChangePw]  = useState(false)
   const [loggedIn,      setLoggedIn]      = useState(false)
   const [newProjName,   setNewProjName]   = useState('')
@@ -416,10 +418,10 @@ ${memCtx}`
                         <span style={{ fontSize:13, flexShrink:0 }}>📋</span>
                         <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</span>
                       </button>
-                      {isAdmin && (
-                        <button onClick={() => { if (confirm('Xóa dự án "'+p.name+'"?')) { deleteProject(p.id); logDeleteProj(p.name); if (selProj===p.id) { setSelProj('home'); setSelPkg(null) } } }}
+                      <button onClick={() => { setRenameInput(p.name); setRenameTarget({ type:'project', id:p.id, currentName:p.name }) }}
+                          style={{ padding:'4px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:11, flexShrink:0 }} title="Đổi tên">✎</button>
+                      <button onClick={() => { if (confirm('Xóa dự án "'+p.name+'"?')) { deleteProject(p.id); logDeleteProj(p.name); if (selProj===p.id) { setSelProj('home'); setSelPkg(null) } } }}
                           style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:11, flexShrink:0 }}>✕</button>
-                      )}
                     </div>
 
                     {/* Gói thầu (khi mở rộng) */}
@@ -432,10 +434,10 @@ ${memCtx}`
                               <span style={{ fontSize:12 }}>📁</span>
                               <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{pkg.name}</span>
                             </button>
-                            {isAdmin && (
-                              <button onClick={() => { if (confirm('Xóa gói thầu "'+pkg.name+'"?')) { deletePackage(pkg.id); if (selPkg===pkg.id) setSelPkg(null) } }}
+                            <button onClick={() => { setRenameInput(pkg.name); setRenameTarget({ type:'package', id:pkg.id, currentName:pkg.name }) }}
+                                style={{ padding:'2px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:10, flexShrink:0 }} title="Đổi tên">✎</button>
+                            <button onClick={() => { if (confirm('Xóa gói thầu "'+pkg.name+'"?')) { deletePackage(pkg.id); if (selPkg===pkg.id) setSelPkg(null) } }}
                                 style={{ padding:'2px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:10, flexShrink:0 }}>✕</button>
-                            )}
                           </div>
                         ))}
                         {/* Nút thêm gói thầu */}
@@ -614,7 +616,7 @@ ${memCtx}`
                           )}
                         </td>
                         <td style={{ padding:'6px 12px' }} onClick={e => e.stopPropagation()}>
-                          <StatusCell doc={d} updateDocument={updateDocument} admin={isAdmin}/>
+                          <StatusCell doc={d} updateDocument={updateDocument} admin={true}/>
                         </td>
                         <td style={{ padding:'10px 8px', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
                           <button onClick={() => { setEditDoc(d); setModal('edit') }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#888' }}>✏️</button>
@@ -727,6 +729,43 @@ ${memCtx}`
                   setNewPkgName(''); setShowAddPkg(null)
                 }
               }} style={{ padding:'8px 16px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13 }}>📁 Thêm</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal đổi tên dự án / gói thầu */}
+      {renameTarget && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200 }}>
+          <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:400, boxShadow:'0 8px 32px rgba(0,0,0,.15)' }}>
+            <h3 style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>
+              {renameTarget.type === 'project' ? '📋 Đổi tên dự án' : '📁 Đổi tên gói thầu'}
+            </h3>
+            <div style={{ fontSize:12, color:'#888', marginBottom:12 }}>Hiện tại: <em>{renameTarget.currentName}</em></div>
+            <input value={renameInput} onChange={e => setRenameInput(e.target.value)} autoFocus
+              onKeyDown={async e => {
+                if (e.key === 'Enter' && renameInput.trim()) {
+                  const { doc, updateDoc } = await import('firebase/firestore')
+                  const { db } = await import('./firebase')
+                  const col = renameTarget.type === 'project' ? 'projects' : 'packages'
+                  await updateDoc(doc(db, col, renameTarget.id), { name: renameInput.trim() })
+                  setRenameTarget(null)
+                }
+              }}
+              placeholder="Tên mới..."
+              style={{ width:'100%', padding:'9px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', marginBottom:16, boxSizing:'border-box' }}/>
+            <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+              <button onClick={() => setRenameTarget(null)} style={{ padding:'8px 16px', border:'0.5px solid #ddd', borderRadius:8, cursor:'pointer', background:'#fff', fontSize:13 }}>Hủy</button>
+              <button onClick={async () => {
+                if (!renameInput.trim()) return
+                const { doc, updateDoc } = await import('firebase/firestore')
+                const { db } = await import('./firebase')
+                const col = renameTarget.type === 'project' ? 'projects' : 'packages'
+                await updateDoc(doc(db, col, renameTarget.id), { name: renameInput.trim() })
+                setRenameTarget(null)
+              }} style={{ padding:'8px 20px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
+                ✓ Lưu
+              </button>
             </div>
           </div>
         </div>
