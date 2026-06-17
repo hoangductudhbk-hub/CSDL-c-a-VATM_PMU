@@ -21,6 +21,19 @@ const extractPdfText = async (buf) => {
   }
   return text.trim().replace(/\s+/g,' ').slice(0,8000)
 }
+// ── Đọc TOÀN BỘ text để lưu cache Firestore (giới hạn 100K ký tự) ──
+const extractPdfTextFull = async (buf) => {
+  const lib = await loadPdfJs()
+  const pdf = await lib.getDocument({data: buf}).promise
+  let text = ''
+  for(let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i)
+    const c = await page.getTextContent()
+    text += c.items.map(it => it.str).join(' ') + '\n'
+  }
+  return text.trim().replace(/\s+/g, ' ').slice(0, 100000)
+}
+
 const renderPdfToImages = async (buf,max=3) => {
   const lib=await loadPdfJs(); const pdf=await lib.getDocument({data:buf}).promise
   const pages=Math.min(pdf.numPages,max); const imgs=[]
@@ -62,6 +75,7 @@ export default function DocModal({ doc, onSave, onClose }) {
   const [fileQueue, setFQ]  = useState([])
   const [processing, setProc] = useState(false)
   const [pendingFile, setPF]  = useState(null)
+  const [extractedText, setExtractedText] = useState('')
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
@@ -70,7 +84,7 @@ export default function DocModal({ doc, onSave, onClose }) {
 
   const handleSave = async () => {
     if (!form.subject?.trim()) return alert('Nhập nội dung văn bản')
-    let final = {...form}
+    let final = {...form, ...(extractedText ? { extractedText: extractedText.slice(0, 100000) } : {})}
     if (pendingFile) {
       setSt('⏳ Đang upload file...')
       setLoad(true)
@@ -116,11 +130,26 @@ export default function DocModal({ doc, onSave, onClose }) {
       setLoad(true); setSt('⏳ Đang xử lý...')
       try {
         let result = ''
-        if (ext === 'pdf') result = await processOnePdf(await file.arrayBuffer(), file.name)
-        else if (['doc','docx'].includes(ext)) result = await analyzeText(await extractDocxText(await file.arrayBuffer()), file.name)
-        else if (['xls','xlsx'].includes(ext)) result = await analyzeText(await extractXlsxText(await file.arrayBuffer()), file.name)
-        else if (ext === 'txt') { const t=await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,8000));rd.readAsText(file,'utf-8')}); setRaw(t); setSt('✅ Đọc xong — nhấn AI phân tích'); setLoad(false); return }
-        else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
+        let rawExtracted = ''
+        const buf = await file.arrayBuffer()
+        if (ext === 'pdf') {
+          rawExtracted = await extractPdfTextFull(buf.slice(0))
+          result = isRealContent(rawExtracted)
+            ? await analyzeText(rawExtracted.slice(0, 8000), file.name)
+            : await (async () => { setSt('⏳ PDF scan — đang dùng vision AI...'); const imgs = await renderPdfToImages(buf.slice(0)); return await analyzeImages(imgs, file.name) })()
+        } else if (['doc','docx'].includes(ext)) {
+          rawExtracted = await extractDocxText(buf)
+          result = await analyzeText(rawExtracted.slice(0, 8000), file.name)
+          rawExtracted = rawExtracted.slice(0, 100000)
+        } else if (['xls','xlsx'].includes(ext)) {
+          rawExtracted = await extractXlsxText(buf)
+          result = await analyzeText(rawExtracted.slice(0, 8000), file.name)
+          rawExtracted = rawExtracted.slice(0, 100000)
+        } else if (ext === 'txt') {
+          const t = await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,100000));rd.readAsText(file,'utf-8')})
+          setRaw(t.slice(0, 8000)); setExtractedText(t); setSt('✅ Đọc xong — nhấn AI phân tích'); setLoad(false); return
+        } else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
+        setExtractedText(rawExtracted)
         const p = parseJ(result)
         if (p) { setForm(f=>({...f,...p,fileName:file.name})); setMode('manual'); setSt('✅ AI điền xong!') }
         else setSt('⚠️ Không phân tích được. Điền thủ công.')
@@ -139,10 +168,18 @@ export default function DocModal({ doc, onSave, onClose }) {
       queue[i].status='🔄 Đang xử lý...'; setFQ([...queue])
       try {
         let result=''
-        if (ext==='pdf') result=await processOnePdf(await file.arrayBuffer(),file.name)
-        else if (['doc','docx'].includes(ext)) result=await analyzeText(await extractDocxText(await file.arrayBuffer()),file.name)
-        else if (['xls','xlsx'].includes(ext)) result=await analyzeText(await extractXlsxText(await file.arrayBuffer()),file.name)
-        else { queue[i].status='⚠️ Không hỗ trợ'; setFQ([...queue]); continue }
+        let batchExtracted = ''
+        const bBuf = await file.arrayBuffer()
+        if (ext==='pdf') {
+          batchExtracted = await extractPdfTextFull(bBuf.slice(0))
+          result = isRealContent(batchExtracted) ? await analyzeText(batchExtracted.slice(0,8000),file.name) : await processOnePdf(bBuf,file.name)
+        } else if (['doc','docx'].includes(ext)) {
+          batchExtracted = (await extractDocxText(bBuf)).slice(0,100000)
+          result = await analyzeText(batchExtracted.slice(0,8000),file.name)
+        } else if (['xls','xlsx'].includes(ext)) {
+          batchExtracted = (await extractXlsxText(bBuf)).slice(0,100000)
+          result = await analyzeText(batchExtracted.slice(0,8000),file.name)
+        } else { queue[i].status='⚠️ Không hỗ trợ'; setFQ([...queue]); continue }
         const p=parseJ(result)
         if (p) {
           queue[i].status='⏳ Đang upload... 0%'; setFQ([...queue])
@@ -153,8 +190,8 @@ export default function DocModal({ doc, onSave, onClose }) {
             console.warn('Upload err:', ue.message)
             queue[i].status='⚠️ Lưu văn bản (không có file)'
           }
-          // Lưu thêm tên file và kích thước trong batch
-          onSave({...p, fileName:file.name, fileSize:file.size, ...fi}, true)
+          // Lưu tên file, kích thước và extractedText
+          onSave({...p, fileName:file.name, fileSize:file.size, extractedText: batchExtracted, ...fi}, true)
           queue[i].status='✅ Xong'
         } else queue[i].status='⚠️ Không đọc được'
       } catch(e) { queue[i].status='❌ '+(e.message||'Lỗi') }

@@ -292,11 +292,19 @@ export default function DocDetail({ doc, onEdit, onClose }) {
 
       let fullText = docMeta
 
-      // Bước 2: Kiểm tra cache extractedText trong Firestore
-      let extractedText = memory?.extractedText || ''
+      // Bước 2: Kiểm tra extractedText — ưu tiên: doc → memory → proxy
+      let extractedText = ''
 
-      if (extractedText.length > 100) {
-        setAnalyzeStep(`📚 Dùng văn bản đã lưu (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
+      if (doc.extractedText?.length > 100) {
+        // 🟢 Tốt nhất: text lưu ngay lúc upload, không cần fetch
+        extractedText = doc.extractedText
+        setAnalyzeStep(`⚡ Dùng text đã lưu sẵn (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
+        fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + extractedText
+
+      } else if (memory?.extractedText?.length > 100) {
+        // 🟡 Thứ 2: text đã lưu từ lần phân tích trước
+        extractedText = memory.extractedText
+        setAnalyzeStep(`📚 Dùng bộ nhớ cũ (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
         fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + extractedText
 
       } else if (hasFile) {
