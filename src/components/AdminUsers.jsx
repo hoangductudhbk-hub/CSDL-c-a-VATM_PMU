@@ -140,13 +140,26 @@ export default function AdminUsers() {
     await updateDoc(doc(db,'resetRequests',r.id), { status: 'rejected' })
   }
 
+  const SUPER_ADMIN = 'hoangductu'  // tài khoản gốc không thể thu hồi
+
+  const promoteAdmin = (uid) => {
+    if (!confirm('Bổ nhiệm người dùng này làm Admin?')) return
+    updateDoc(doc(db,'users',uid), { status:'admin' })
+  }
+  const revokeAdmin = (uid, username) => {
+    if (username === SUPER_ADMIN) return alert('Không thể thu hồi quyền Admin gốc!')
+    if (!confirm('Thu hồi quyền Admin của @'+username+'?')) return
+    updateDoc(doc(db,'users',uid), { status:'approved' })
+  }
+
   const counts = {
     pending:  users.filter(u=>u.status==='pending').length,
     approved: users.filter(u=>u.status==='approved').length,
     rejected: users.filter(u=>u.status==='rejected').length,
+    admin:    users.filter(u=>u.status==='admin').length,
   }
   const filtered = filter==='all'
-    ? users.filter(u=>u.status!=='admin')
+    ? users
     : users.filter(u=>u.status===filter)
 
   return (
@@ -180,12 +193,13 @@ export default function AdminUsers() {
         <div style={{ display:'flex', gap:10, marginBottom:20 }}>
           {[['pending','⏳',counts.pending,'#fef3c7','#92400e'],
             ['approved','✅',counts.approved,'#d1fae5','#065f46'],
-            ['rejected','❌',counts.rejected,'#fee2e2','#991b1b']].map(([v,icon,n,bg,c])=>(
+            ['rejected','❌',counts.rejected,'#fee2e2','#991b1b'],
+            ['admin','👑',counts.admin,'#fef3c7','#d97706']].map(([v,icon,n,bg,c])=>(
             <div key={v} onClick={()=>setFilter(v)}
               style={{ flex:1, background:filter===v?bg:'#f9fafb', borderRadius:12, padding:'12px 16px', textAlign:'center', cursor:'pointer',
                 border:`1.5px solid ${filter===v?c:'#e5e7eb'}` }}>
               <div style={{ fontSize:22, fontWeight:700, color:c }}>{n}</div>
-              <div style={{ fontSize:12, color:c, fontWeight:500 }}>{icon} {v==='pending'?'Chờ duyệt':v==='approved'?'Đã duyệt':'Từ chối'}</div>
+              <div style={{ fontSize:12, color:c, fontWeight:500 }}>{icon} {v==='pending'?'Chờ duyệt':v==='approved'?'Đã duyệt':v==='rejected'?'Từ chối':'Admin'}</div>
             </div>
           ))}
         </div>
@@ -222,9 +236,13 @@ export default function AdminUsers() {
                       <td style={{ padding:'12px 14px' }}><span style={badge(u.status)}>{u.status==='pending'?'Chờ duyệt':u.status==='approved'?'Đã duyệt':u.status==='rejected'?'Từ chối':'Admin'}</span></td>
                       <td style={{ padding:'12px 14px', whiteSpace:'nowrap' }}>
                         {u.status==='pending'&&<><button style={btn('green')} onClick={()=>setStatus(u.id,'approved')}>✓ Duyệt</button><button style={btn('red')} onClick={()=>setStatus(u.id,'rejected')}>✗ Từ chối</button></>}
-                        {u.status==='approved'&&<button style={btn('red')} onClick={()=>setStatus(u.id,'rejected')}>✗ Thu hồi</button>}
+                        {u.status==='approved'&&<>
+                          <button style={btn('red')} onClick={()=>setStatus(u.id,'rejected')}>✗ Thu hồi</button>
+                          <button style={{...btn('blue'), background:'#f59e0b'}} onClick={()=>promoteAdmin(u.id)}>👑 Admin</button>
+                        </>}
                         {u.status==='rejected'&&<button style={btn('green')} onClick={()=>setStatus(u.id,'approved')}>✓ Duyệt lại</button>}
-                        <button style={{...btn('gray'), marginLeft:4}} onClick={()=>deleteUser(u.id, u.username||u.name||u.id)}>🗑️</button>
+                        {u.status==='admin'&&u.username!=='hoangductu'&&<button style={{...btn('red')}} onClick={()=>revokeAdmin(u.id,u.username)}>👑 Thu hồi</button>}
+                        {u.status!=='admin'&&<button style={{...btn('gray'), marginLeft:4}} onClick={()=>deleteUser(u.id, u.username||u.name||u.id)}>🗑️</button>}
                       </td>
                     </tr>
                   ))}
