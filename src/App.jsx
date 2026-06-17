@@ -225,6 +225,17 @@ function AppInner() {
 
   const [tab,         setTab]         = useState('docs')
   const [search,      setSearch]      = useState('')
+  const [searchDebounced, setSearchDebounced] = useState('')
+
+  const handleSearchChange = (val) => {
+    setSearch(val)
+    // Nếu xóa hết → reset ngay
+    if (!val.trim()) setSearchDebounced('')
+  }
+
+  const handleSearchEnter = (e) => {
+    if (e.key === 'Enter') setSearchDebounced(search)
+  }
   const [filter,      setFilter]      = useState('all')
   const [modal,       setModal]       = useState(null)
   const [editDoc,     setEditDoc]     = useState(null)
@@ -278,7 +289,7 @@ function AppInner() {
 
   const safeDocs = docs || []
   const filtered = safeDocs.filter(d => {
-    const q = search.toLowerCase()
+    const q = searchDebounced.toLowerCase()
     const matchS = !q || (d.code||'').toLowerCase().includes(q) || (d.subject||'').toLowerCase().includes(q) || (d.org||'').toLowerCase().includes(q) || (d.docType||'').toLowerCase().includes(q) || (d.detail||'').toLowerCase().includes(q)
     return matchS && (filter === 'all' || d.status === filter)
   })
@@ -564,7 +575,7 @@ ${memCtx}`
                 <div style={{ display:'flex', gap:10, marginBottom:16 }}>
                   <div style={{ flex:1, position:'relative' }}>
                     <span style={{ position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', color:'#aaa' }}>🔍</span>
-                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm văn bản..."
+                    <input value={search} onChange={e => handleSearchChange(e.target.value)} onKeyDown={handleSearchEnter} placeholder="Tìm văn bản..."
                       style={{ width:'100%', padding:'9px 12px 9px 36px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', boxSizing:'border-box' }}/>
                   </div>
                   <select value={filter} onChange={e => setFilter(e.target.value)}
