@@ -290,7 +290,8 @@ function AppInner() {
   const safeDocs = docs || []
   const filtered = safeDocs.filter(d => {
     const q = searchDebounced.toLowerCase()
-    const matchS = !q || (d.code||'').toLowerCase().includes(q) || (d.subject||'').toLowerCase().includes(q) || (d.org||'').toLowerCase().includes(q) || (d.docType||'').toLowerCase().includes(q) || (d.detail||'').toLowerCase().includes(q)
+    const toStr = v => Array.isArray(v) ? v.join(' ') : (v || '')
+    const matchS = !q || toStr(d.code).toLowerCase().includes(q) || toStr(d.subject).toLowerCase().includes(q) || toStr(d.org).toLowerCase().includes(q) || toStr(d.docType).toLowerCase().includes(q) || toStr(d.detail).toLowerCase().includes(q)
     return matchS && (filter === 'all' || d.status === filter)
   })
   const stats = {
