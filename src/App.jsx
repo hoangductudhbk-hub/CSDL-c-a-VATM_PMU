@@ -593,7 +593,7 @@ ${memCtx}`
                   <thead>
                     <tr style={{ borderBottom:'0.5px solid #e5e4e0' }}>
                       {['Số hiệu văn bản','Ngày','Loại','Nội dung / Về việc','Trạng thái',''].map(h => (
-                        <th key={h} style={{ textAlign:'left', padding:'8px 12px', fontSize:11, color:'#888', fontWeight:500 }}>{h}</th>
+                        <th key={h} style={{ textAlign:'left', padding:'8px 12px', fontSize:14, color:'#888', fontWeight:500 }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -604,13 +604,13 @@ ${memCtx}`
                         style={{ borderBottom:'0.5px solid #f0f0ec', cursor:'pointer' }}
                         onMouseEnter={e => e.currentTarget.style.background='#fafaf8'}
                         onMouseLeave={e => e.currentTarget.style.background=''}>
-                        <td style={{ padding:'10px 12px', fontSize:13, fontWeight:600, whiteSpace:'nowrap' }}>{d.code||'—'}</td>
-                        <td style={{ padding:'10px 12px', fontSize:12, color:'#888', whiteSpace:'nowrap' }}>{normDate(d.date)}</td>
-                        <td style={{ padding:'10px 12px' }}><span style={{ fontSize:11, padding:'3px 8px', borderRadius:12, background:'#f0f0ec', color:'#555' }}>{d.docType||'Khác'}</span></td>
-                        <td style={{ padding:'10px 12px', fontSize:13, maxWidth:320 }}>
+                        <td style={{ padding:'10px 12px', fontSize:15, fontWeight:700, whiteSpace:'nowrap' }}>{d.code||'—'}</td>
+                        <td style={{ padding:'10px 12px', fontSize:14, color:'#888', whiteSpace:'nowrap' }}>{normDate(d.date)}</td>
+                        <td style={{ padding:'10px 12px' }}><span style={{ fontSize:13, padding:'4px 10px', borderRadius:12, background:'#f0f0ec', color:'#555' }}>{d.docType||'Khác'}</span></td>
+                        <td style={{ padding:'10px 12px', fontSize:15, maxWidth:320 }}>
                           <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>{d.subject||''}</span>
                           {(d.fileUrl||d.downloadUrl) && (
-                            <span style={{ fontSize:10, color:'#2563eb', display:'block', marginTop:2 }}>
+                            <span style={{ fontSize:12, color:'#2563eb', display:'block', marginTop:2 }}>
                               📎 {d.fileName||'file'}{fmtSize(d.fileSize)}
                             </span>
                           )}
