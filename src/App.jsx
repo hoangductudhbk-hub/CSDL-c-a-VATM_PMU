@@ -607,10 +607,20 @@ ${memCtx}`
                         <td style={{ padding:'10px 12px', fontSize:15, fontWeight:700, whiteSpace:'nowrap' }}>{d.code||'—'}</td>
                         <td style={{ padding:'10px 12px', fontSize:14, color:'#888', whiteSpace:'nowrap' }}>{normDate(d.date)}</td>
                         <td style={{ padding:'10px 12px' }}><span style={{ fontSize:13, padding:'4px 10px', borderRadius:12, background:'#f0f0ec', color:'#555' }}>{d.docType||'Khác'}</span></td>
-                        <td style={{ padding:'10px 12px', fontSize:15, maxWidth:320 }}>
+                        <td style={{ padding:'10px 12px', fontSize:15, maxWidth:320, position:'relative' }}>
                           <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', display:'block' }}>{d.subject||''}</span>
                           {(d.fileUrl||d.downloadUrl) && (
-                            <span style={{ fontSize:12, color:'#2563eb', display:'block', marginTop:2 }}>
+                            {d.chunksCount > 0
+  ? <span style={{ display:'inline-flex', alignItems:'center', gap:3, fontSize:10, padding:'1px 6px', borderRadius:8, background:'#dcfce7', color:'#15803d', marginBottom:3, fontWeight:600 }}>
+      ✅ Đã đọc sâu · {d.chunksCount} chunks
+    </span>
+  : d.extractedText
+    ? <span style={{ display:'inline-flex', alignItems:'center', gap:3, fontSize:10, padding:'1px 6px', borderRadius:8, background:'#fef9c3', color:'#854d0e', marginBottom:3 }}>
+        ⚡ Text cũ
+      </span>
+    : null
+}
+<span style={{ fontSize:12, color:'#2563eb', display:'block', marginTop:2 }}>
                               📎 {d.fileName||'file'}{fmtSize(d.fileSize)}
                             </span>
                           )}
