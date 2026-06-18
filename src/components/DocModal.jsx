@@ -21,38 +21,19 @@ const extractPdfText = async (buf) => {
   }
   return text.trim().replace(/\s+/g,' ').slice(0,8000)
 }
-// ── Gemini đọc PDF native → Markdown (giữ bảng, heading, số liệu) ──
-const extractPdfWithGemini = async (buf, fileName = '', onStatus = null) => {
-  const gemKeys = [
-    import.meta.env.VITE_GEMINI_API_KEY,
-    import.meta.env.VITE_GEMINI_API_KEY_2,
-    import.meta.env.VITE_GEMINI_API_KEY_3,
-  ].filter(Boolean)
-  if (!gemKeys.length) return null
-
-  // Convert ArrayBuffer → base64
+// ── Helper: ArrayBuffer → base64 ────────────────────────────────
+const bufToBase64 = (buf) => {
   const bytes = new Uint8Array(buf)
   let binary = ''
-  const chunkSize = 8192
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
-  }
-  const base64 = btoa(binary)
+  for (let i = 0; i < bytes.length; i += 8192)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
+  return btoa(binary)
+}
 
-  const prompt = `Trích xuất TOÀN BỘ nội dung file PDF này sang định dạng Markdown chuẩn.
-Tên file: ${fileName}
-Yêu cầu bắt buộc:
-- Giữ nguyên 100% câu chữ, số liệu, tên người, ngày tháng
-- Chuyển bảng biểu sang Markdown table (| cột | cột |)
-- Giữ heading theo cấp độ (# ## ###)
-- Giữ danh sách có thứ tự và không thứ tự
-- Giữ điều khoản, khoản mục (Điều 1, Khoản 2...)
-- KHÔNG tóm tắt, KHÔNG bỏ bất kỳ thông tin nào
-- Chỉ trả về nội dung Markdown thuần túy, không giải thích thêm`
-
+// ── Gọi Gemini với 1 PDF (toàn bộ file, base64) ─────────────────
+const callGeminiPdf = async (base64, prompt, gemKeys) => {
   for (let i = 0; i < gemKeys.length; i++) {
     try {
-      if (onStatus) onStatus(`🤖 Gemini đang đọc PDF${i > 0 ? ` (key ${i+1})` : ''}...`)
       const res = await fetch(
         `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${gemKeys[i]}`,
         {
@@ -67,25 +48,94 @@ Yêu cầu bắt buộc:
           })
         }
       )
-      if (res.status === 429) {
-        if (i < gemKeys.length - 1) { await new Promise(r => setTimeout(r, 2000)); continue }
-        return null // rate limit toàn bộ key → fallback pdfjs
-      }
+      if (res.status === 429) { await new Promise(r => setTimeout(r, 2000)); continue }
       if (!res.ok) continue
       const text = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
-      if (text.length > 100) {
-        if (onStatus) onStatus(`✅ Gemini đọc xong ${text.length.toLocaleString()} ký tự`)
-        return text.slice(0, 100000)
-      }
+      if (text.length > 50) return text
     } catch { continue }
   }
   return null
 }
 
-// ── Fallback: pdfjs đọc text thô (dùng khi Gemini không có key / rate limit) ──
+// ── Gemini đọc PDF theo nhóm trang, lưu chunks vào Firestore ─────
+// pageGroup: 30 trang/lần → tối đa 200 trang = 7 lần gọi
+const extractPdfWithGemini = async (buf, fileName = '', docId = null, onStatus = null) => {
+  const gemKeys = [
+    import.meta.env.VITE_GEMINI_API_KEY,
+    import.meta.env.VITE_GEMINI_API_KEY_2,
+    import.meta.env.VITE_GEMINI_API_KEY_3,
+  ].filter(Boolean)
+  if (!gemKeys.length) return null
+
+  // Đọc số trang bằng pdfjs (nhanh, không cần nội dung)
+  const lib = await loadPdfJs()
+  const pdf = await lib.getDocument({ data: buf.slice(0) }).promise
+  const totalPages = pdf.numPages
+  const PAGE_GROUP = 30 // trang/lần gọi Gemini
+
+  if (onStatus) onStatus(`📄 PDF có ${totalPages} trang · Đang chia thành nhóm ${PAGE_GROUP} trang...`)
+
+  const base64 = bufToBase64(buf)
+  const allChunks = []
+  let allText = ''
+
+  const groups = Math.ceil(totalPages / PAGE_GROUP)
+  for (let g = 0; g < groups; g++) {
+    const fromPage = g * PAGE_GROUP + 1
+    const toPage = Math.min((g + 1) * PAGE_GROUP, totalPages)
+    if (onStatus) onStatus(`🤖 Gemini đọc trang ${fromPage}–${toPage} / ${totalPages}...`)
+
+    const prompt = `Trích xuất nội dung từ trang ${fromPage} đến trang ${toPage} của PDF: "${fileName}".
+Yêu cầu:
+- Giữ nguyên 100% câu chữ, số liệu, tên người, ngày tháng
+- Chuyển bảng biểu sang Markdown table (| cột | cột |)  
+- Giữ heading (# ## ###), điều khoản (Điều 1, Khoản 2...)
+- Bắt đầu bằng dòng: ## Trang ${fromPage}–${toPage}
+- KHÔNG tóm tắt, chỉ trả về Markdown thuần túy`
+
+    const chunkText = await callGeminiPdf(base64, prompt, gemKeys)
+    if (chunkText) {
+      allChunks.push({ fromPage, toPage, text: chunkText, index: g })
+      allText += chunkText + '\n\n'
+      if (onStatus) onStatus(`✅ Xong trang ${fromPage}–${toPage} (${chunkText.length.toLocaleString()} ký tự)`)
+    } else {
+      if (onStatus) onStatus(`⚠️ Bỏ qua trang ${fromPage}–${toPage} (rate limit)`)
+    }
+
+    // Delay giữa các nhóm tránh rate limit
+    if (g < groups - 1) await new Promise(r => setTimeout(r, 1500))
+  }
+
+  // Lưu chunks vào Firestore nếu có docId
+  if (docId && allChunks.length > 0) {
+    try {
+      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore')
+      const { db } = await import('../firebase')
+      for (const chunk of allChunks) {
+        await addDoc(collection(db, 'documentChunks'), {
+          docId,
+          fileName,
+          fromPage: chunk.fromPage,
+          toPage: chunk.toPage,
+          chunkIndex: chunk.index,
+          text: chunk.text,
+          createdAt: serverTimestamp()
+        })
+      }
+      if (onStatus) onStatus(`💾 Đã lưu ${allChunks.length} chunks vào Firestore`)
+    } catch(e) {
+      console.warn('Lưu chunks lỗi:', e.message)
+    }
+  }
+
+  if (onStatus) onStatus(`✅ Hoàn thành! Đọc ${totalPages} trang · ${allText.length.toLocaleString()} ký tự`)
+  return allText.slice(0, 200000) // lưu 200K vào extractedText
+}
+
+// ── Fallback: pdfjs đọc text thô ─────────────────────────────────
 const extractPdfTextFull = async (buf) => {
   const lib = await loadPdfJs()
-  const pdf = await lib.getDocument({data: buf}).promise
+  const pdf = await lib.getDocument({ data: buf }).promise
   let text = ''
   for(let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i)
@@ -96,12 +146,10 @@ const extractPdfTextFull = async (buf) => {
 }
 
 // ── Hàm chính: Gemini trước, pdfjs fallback ──────────────────────
-const extractPdfFull = async (buf, fileName = '', onStatus = null) => {
-  // Thử Gemini trước
-  const gemResult = await extractPdfWithGemini(buf.slice(0), fileName, onStatus)
+const extractPdfFull = async (buf, fileName = '', docId = null, onStatus = null) => {
+  const gemResult = await extractPdfWithGemini(buf.slice(0), fileName, docId, onStatus)
   if (gemResult) return gemResult
-  // Fallback pdfjs
-  if (onStatus) onStatus('📄 Dùng pdfjs đọc text...')
+  if (onStatus) onStatus('📄 Gemini không khả dụng · Dùng pdfjs fallback...')
   return await extractPdfTextFull(buf.slice(0))
 }
 
@@ -205,7 +253,7 @@ export default function DocModal({ doc, onSave, onClose }) {
         const buf = await file.arrayBuffer()
         if (ext === 'pdf') {
           setSt('⏳ Đang đọc PDF...')
-          rawExtracted = await extractPdfFull(buf.slice(0), file.name, setSt)
+          rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, setSt)
           result = isRealContent(rawExtracted)
             ? await analyzeText(rawExtracted.slice(0, 8000), file.name)
             : await (async () => { setSt('⏳ PDF scan — đang dùng vision AI...'); const imgs = await renderPdfToImages(buf.slice(0)); return await analyzeImages(imgs, file.name) })()
@@ -243,7 +291,7 @@ export default function DocModal({ doc, onSave, onClose }) {
         let batchExtracted = ''
         const bBuf = await file.arrayBuffer()
         if (ext==='pdf') {
-          batchExtracted = await extractPdfFull(bBuf.slice(0), file.name, (msg) => { queue[i].status=msg; setFQ([...queue]) })
+          batchExtracted = await extractPdfFull(bBuf.slice(0), file.name, null, (msg) => { queue[i].status=msg; setFQ([...queue]) })
           result = isRealContent(batchExtracted) ? await analyzeText(batchExtracted.slice(0,8000),file.name) : await processOnePdf(bBuf,file.name)
         } else if (['doc','docx'].includes(ext)) {
           batchExtracted = (await extractDocxText(bBuf)).slice(0,100000)
