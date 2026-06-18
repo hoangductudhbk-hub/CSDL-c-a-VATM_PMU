@@ -467,19 +467,39 @@ ${memCtx}`
           })()}
         </div>
 
-        <div style={{ padding:'12px 16px', borderTop:'0.5px solid #e5e4e0', flexShrink:0, background:'#fff' }}>
-          <div style={{ fontSize:12, fontWeight:700, color:'#0a2342' }}>{userDoc?.name || 'Người dùng'}</div>
-          <div style={{ fontSize:11, color:'#888' }}>@{userDoc?.username}</div>
-          {userDoc?.email && <div style={{ fontSize:10, color:'#aaa', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{userDoc.email}</div>}
-          {isAdmin && <div style={{ fontSize:10, color:'#92400e', background:'#fef3c7', padding:'2px 8px', borderRadius:10, display:'inline-block', marginBottom:6 }}>👑 Admin</div>}
-          <br/>
-          <button onClick={() => setShowChangePw(true)} style={{ fontSize:11, color:'#0a2342', background:'none', border:'0.5px solid #0a2342', borderRadius:6, cursor:'pointer', padding:'4px 10px', marginBottom:6, width:'100%' }}>
-            🔑 Đổi mật khẩu
-          </button>
-          <button onClick={() => { logLogout().then(() => logout()) }} style={{ fontSize:11, color:'#888', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', padding:'4px 10px', width:'100%' }}>
-            Đăng xuất
-          </button>
-        </div>
+        {(() => {
+          const [showUserMenu, setShowUserMenu] = React.useState(false)
+          return (
+            <div style={{ padding:'12px 16px', borderTop:'0.5px solid #e5e4e0', flexShrink:0, background:'#fff', position:'relative' }}>
+              {/* Menu ẩn hiện khi click */}
+              {showUserMenu && (
+                <>
+                  <div onClick={() => setShowUserMenu(false)} style={{ position:'fixed', inset:0, zIndex:10 }}/>
+                  <div style={{ position:'absolute', bottom:'100%', left:12, right:12, background:'#fff', borderRadius:10, boxShadow:'0 4px 20px rgba(0,0,0,.12)', border:'0.5px solid #e5e4e0', padding:8, zIndex:11, marginBottom:4 }}>
+                    <button onClick={() => { setShowChangePw(true); setShowUserMenu(false) }}
+                      style={{ width:'100%', padding:'8px 12px', fontSize:12, color:'#0a2342', background:'none', border:'none', borderRadius:8, cursor:'pointer', textAlign:'left', fontWeight:600 }}>
+                      🔑 Đổi mật khẩu
+                    </button>
+                    <button onClick={() => { logLogout().then(() => logout()); setShowUserMenu(false) }}
+                      style={{ width:'100%', padding:'8px 12px', fontSize:12, color:'#e53e3e', background:'none', border:'none', borderRadius:8, cursor:'pointer', textAlign:'left', fontWeight:600 }}>
+                      🚪 Đăng xuất
+                    </button>
+                  </div>
+                </>
+              )}
+              {/* Thông tin tài khoản — nhấn để mở menu */}
+              <div onClick={() => setShowUserMenu(v => !v)}
+                style={{ cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'space-between', borderRadius:8, padding:'4px 6px', background: showUserMenu ? '#f5f5f3' : 'transparent' }}>
+                <div style={{ minWidth:0 }}>
+                  <div style={{ fontSize:12, fontWeight:700, color:'#0a2342' }}>{userDoc?.name || 'Người dùng'}</div>
+                  <div style={{ fontSize:11, color:'#888' }}>@{userDoc?.username}</div>
+                  {isAdmin && <div style={{ fontSize:10, color:'#92400e', background:'#fef3c7', padding:'1px 6px', borderRadius:8, display:'inline-block', marginTop:2 }}>👑 Admin</div>}
+                </div>
+                <span style={{ fontSize:10, color:'#bbb', marginLeft:6 }}>{showUserMenu ? '▲' : '▼'}</span>
+              </div>
+            </div>
+          )
+        })()}
       </div>
 
       {/* ── Main ── */}
