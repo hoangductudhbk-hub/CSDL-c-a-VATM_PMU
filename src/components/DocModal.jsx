@@ -21,7 +21,68 @@ const extractPdfText = async (buf) => {
   }
   return text.trim().replace(/\s+/g,' ').slice(0,8000)
 }
-// ── Đọc TOÀN BỘ text để lưu cache Firestore (giới hạn 100K ký tự) ──
+// ── Gemini đọc PDF native → Markdown (giữ bảng, heading, số liệu) ──
+const extractPdfWithGemini = async (buf, fileName = '', onStatus = null) => {
+  const gemKeys = [
+    import.meta.env.VITE_GEMINI_API_KEY,
+    import.meta.env.VITE_GEMINI_API_KEY_2,
+    import.meta.env.VITE_GEMINI_API_KEY_3,
+  ].filter(Boolean)
+  if (!gemKeys.length) return null
+
+  // Convert ArrayBuffer → base64
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  const chunkSize = 8192
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  const base64 = btoa(binary)
+
+  const prompt = `Trích xuất TOÀN BỘ nội dung file PDF này sang định dạng Markdown chuẩn.
+Tên file: ${fileName}
+Yêu cầu bắt buộc:
+- Giữ nguyên 100% câu chữ, số liệu, tên người, ngày tháng
+- Chuyển bảng biểu sang Markdown table (| cột | cột |)
+- Giữ heading theo cấp độ (# ## ###)
+- Giữ danh sách có thứ tự và không thứ tự
+- Giữ điều khoản, khoản mục (Điều 1, Khoản 2...)
+- KHÔNG tóm tắt, KHÔNG bỏ bất kỳ thông tin nào
+- Chỉ trả về nội dung Markdown thuần túy, không giải thích thêm`
+
+  for (let i = 0; i < gemKeys.length; i++) {
+    try {
+      if (onStatus) onStatus(`🤖 Gemini đang đọc PDF${i > 0 ? ` (key ${i+1})` : ''}...`)
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${gemKeys[i]}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { inline_data: { mime_type: 'application/pdf', data: base64 } },
+              { text: prompt }
+            ]}],
+            generationConfig: { temperature: 0, maxOutputTokens: 8192 }
+          })
+        }
+      )
+      if (res.status === 429) {
+        if (i < gemKeys.length - 1) { await new Promise(r => setTimeout(r, 2000)); continue }
+        return null // rate limit toàn bộ key → fallback pdfjs
+      }
+      if (!res.ok) continue
+      const text = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
+      if (text.length > 100) {
+        if (onStatus) onStatus(`✅ Gemini đọc xong ${text.length.toLocaleString()} ký tự`)
+        return text.slice(0, 100000)
+      }
+    } catch { continue }
+  }
+  return null
+}
+
+// ── Fallback: pdfjs đọc text thô (dùng khi Gemini không có key / rate limit) ──
 const extractPdfTextFull = async (buf) => {
   const lib = await loadPdfJs()
   const pdf = await lib.getDocument({data: buf}).promise
@@ -32,6 +93,16 @@ const extractPdfTextFull = async (buf) => {
     text += c.items.map(it => it.str).join(' ') + '\n'
   }
   return text.trim().replace(/\s+/g, ' ').slice(0, 100000)
+}
+
+// ── Hàm chính: Gemini trước, pdfjs fallback ──────────────────────
+const extractPdfFull = async (buf, fileName = '', onStatus = null) => {
+  // Thử Gemini trước
+  const gemResult = await extractPdfWithGemini(buf.slice(0), fileName, onStatus)
+  if (gemResult) return gemResult
+  // Fallback pdfjs
+  if (onStatus) onStatus('📄 Dùng pdfjs đọc text...')
+  return await extractPdfTextFull(buf.slice(0))
 }
 
 const renderPdfToImages = async (buf,max=3) => {
@@ -133,7 +204,8 @@ export default function DocModal({ doc, onSave, onClose }) {
         let rawExtracted = ''
         const buf = await file.arrayBuffer()
         if (ext === 'pdf') {
-          rawExtracted = await extractPdfTextFull(buf.slice(0))
+          setSt('⏳ Đang đọc PDF...')
+          rawExtracted = await extractPdfFull(buf.slice(0), file.name, setSt)
           result = isRealContent(rawExtracted)
             ? await analyzeText(rawExtracted.slice(0, 8000), file.name)
             : await (async () => { setSt('⏳ PDF scan — đang dùng vision AI...'); const imgs = await renderPdfToImages(buf.slice(0)); return await analyzeImages(imgs, file.name) })()
@@ -171,7 +243,7 @@ export default function DocModal({ doc, onSave, onClose }) {
         let batchExtracted = ''
         const bBuf = await file.arrayBuffer()
         if (ext==='pdf') {
-          batchExtracted = await extractPdfTextFull(bBuf.slice(0))
+          batchExtracted = await extractPdfFull(bBuf.slice(0), file.name, (msg) => { queue[i].status=msg; setFQ([...queue]) })
           result = isRealContent(batchExtracted) ? await analyzeText(batchExtracted.slice(0,8000),file.name) : await processOnePdf(bBuf,file.name)
         } else if (['doc','docx'].includes(ext)) {
           batchExtracted = (await extractDocxText(bBuf)).slice(0,100000)
