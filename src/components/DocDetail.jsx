@@ -188,6 +188,47 @@ const fmtDate = (ts) => {
   return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' })
 }
 
+// ── Load chunks từ Firestore theo docId ──────────────────────────
+const loadDocChunks = async (docId) => {
+  try {
+    const { collection, query, where, orderBy, getDocs } = await import('firebase/firestore')
+    const { db } = await import('../firebase')
+    const q = query(
+      collection(db, 'documentChunks'),
+      where('docId', '==', docId),
+      orderBy('chunkIndex', 'asc')
+    )
+    const snap = await getDocs(q)
+    return snap.docs.map(d => d.data())
+  } catch { return [] }
+}
+
+// ── RAG trên chunks Firestore (tìm theo trang liên quan) ──────────
+const findRelevantChunksFromFirestore = (chunks, question) => {
+  const stopWords = new Set(['là','gì','có','của','và','các','cho','trong','được','không','về','này','đó','với','những','theo','từ','khi','hay','hoặc','như','thì','mà','để','tôi','bạn','hãy','cần','phải','làm','nào','ai','bao','nhiêu','sao'])
+  const keywords = question.toLowerCase()
+    .replace(/[?.,!;:""\'\`()\[\]]/g, ' ')
+    .split(/\s+/)
+    .filter(w => w.length > 1 && !stopWords.has(w))
+
+  if (!keywords.length) return chunks.slice(0, 3).map(c => c.text).join('\n\n')
+
+  const scored = chunks.map(chunk => {
+    const lower = (chunk.text || '').toLowerCase()
+    let score = keywords.reduce((s, kw) => s + (lower.includes(kw) ? 3 : 0), 0)
+    return { ...chunk, score }
+  })
+
+  const top = scored
+    .filter(c => c.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4)
+    .sort((a, b) => a.chunkIndex - b.chunkIndex)
+
+  if (!top.length) return chunks.slice(0, 2).map(c => c.text).join('\n\n')
+  return top.map(c => `### Trang ${c.fromPage}–${c.toPage}\n${c.text}`).join('\n\n').slice(0, 6000)
+}
+
 export default function DocDetail({ doc, onEdit, onClose }) {
   if (!doc) return null
 
@@ -195,6 +236,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   const { memory, loading: memLoading, saveMemory } = useDocMemory(doc.id)
 
   const [analyzing,   setAnalyzing]   = useState(false)
+  const [docChunks,   setDocChunks]   = useState([]) // chunks từ Firestore
   const [analyzeStep, setAnalyzeStep] = useState('')
   const [countdown,   setCountdown]   = useState(0)  // giây còn lại trước khi retry
   const [showChat,    setShowChat]    = useState(false)
@@ -205,6 +247,15 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   useEffect(() => {
     if (showChat) setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
   }, [chat, showChat])
+
+  // Load chunks từ Firestore khi mở
+  useEffect(() => {
+    if (doc?.id) {
+      loadDocChunks(doc.id).then(chunks => {
+        if (chunks.length > 0) setDocChunks(chunks)
+      })
+    }
+  }, [doc?.id])
 
   const code     = get(doc, 'code')
   const date     = get(doc, 'date')
@@ -292,11 +343,17 @@ export default function DocDetail({ doc, onEdit, onClose }) {
 
       let fullText = docMeta
 
-      // Bước 2: Kiểm tra extractedText — ưu tiên: doc → memory → proxy
+      // Bước 2: Kiểm tra nguồn text — ưu tiên: chunks → doc.extractedText → memory → proxy
       let extractedText = ''
 
-      if (doc.extractedText?.length > 100) {
-        // 🟢 Tốt nhất: text lưu ngay lúc upload, không cần fetch
+      if (docChunks.length > 0) {
+        // 🟢 Tốt nhất: chunks Firestore — đọc đầy đủ 100-200 trang
+        extractedText = docChunks.map(c => `### Trang ${c.fromPage}–${c.toPage}\n${c.text}`).join('\n\n')
+        setAnalyzeStep(`⚡ Dùng ${docChunks.length} chunks Firestore (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
+        fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE (CHUNKS) ===\n' + extractedText.slice(0, 80000)
+
+      } else if (doc.extractedText?.length > 100) {
+        // 🟡 Thứ 2: text lưu ngay lúc upload
         extractedText = doc.extractedText
         setAnalyzeStep(`⚡ Dùng text đã lưu sẵn (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
         fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + extractedText
@@ -379,11 +436,14 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     setChatInput('')
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 50)
     try {
-      // RAG: Tìm đoạn văn bản gốc liên quan đến câu hỏi
-      const rawText = memory?.extractedText || ''
-      const relevantText = rawText.length > 100
-        ? findRelevantChunks(rawText, q)
-        : ''
+      // RAG: Ưu tiên chunks Firestore, fallback memory.extractedText
+      let relevantText = ''
+      if (docChunks.length > 0) {
+        relevantText = findRelevantChunksFromFirestore(docChunks, q)
+      } else {
+        const rawText = memory?.extractedText || doc?.extractedText || ''
+        relevantText = rawText.length > 100 ? findRelevantChunks(rawText, q) : ''
+      }
       const answer = await askDeep(q, memory, chat, relevantText)
       setChat(c => [...c, { role:'ai', content: answer }])
     } catch(e) {
@@ -479,6 +539,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                       <div style={{ fontSize:12, fontWeight:600, color:'#15803d' }}>
                         🧠 Đã ghi nhớ · {fmtDate(memory.analyzedAt)}
                         {memory.readChars > 500 && <span style={{ fontWeight:400, color:'#888' }}> · {(memory.readChars/1000).toFixed(0)}K ký tự</span>}
+                        {docChunks.length > 0 && <span style={{ marginLeft:6, fontSize:10, padding:'1px 6px', borderRadius:8, background:'#dbeafe', color:'#1d4ed8' }}>📦 {docChunks.length} chunks</span>}
                       </div>
                       <div style={{ display:'flex', gap:6 }}>
                         <button onClick={() => setShowChat(v => !v)}
