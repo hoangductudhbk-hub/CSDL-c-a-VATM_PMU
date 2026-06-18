@@ -129,10 +129,7 @@ Yêu cầu:
   }
 
   if (onStatus) onStatus(`✅ Hoàn thành! Đọc ${totalPages} trang · ${allText.length.toLocaleString()} ký tự`)
-  // Gắn chunksCount vào result để caller lưu vào document
-  const result = allText.slice(0, 200000)
-  result._chunksCount = allChunks.length
-  return result
+  return allText.slice(0, 200000) // lưu 200K vào extractedText
 }
 
 // ── Fallback: pdfjs đọc text thô ─────────────────────────────────
