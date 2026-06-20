@@ -13,13 +13,146 @@ const loadPdfJs = () => new Promise((res,rej) => {
 })
 const extractPdfText = async (buf) => {
   const lib=await loadPdfJs(); const pdf=await lib.getDocument({data:buf}).promise
+  const maxPages = buf.byteLength > 10*1024*1024 ? 3 : Math.min(pdf.numPages, 15)
   let text=''
-  for(let i=1;i<=Math.min(pdf.numPages,15);i++){
+  for(let i=1;i<=maxPages;i++){
     const page=await pdf.getPage(i); const c=await page.getTextContent()
     text+=c.items.map(it=>it.str).join(' ')+'\n'
   }
   return text.trim().replace(/\s+/g,' ').slice(0,8000)
 }
+// ── Helper: ArrayBuffer → base64 ────────────────────────────────
+const bufToBase64 = (buf) => {
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 8192)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
+  return btoa(binary)
+}
+
+// ── Gọi Gemini với 1 PDF (toàn bộ file, base64) ─────────────────
+const callGeminiPdf = async (base64, prompt, gemKeys) => {
+  for (let i = 0; i < gemKeys.length; i++) {
+    try {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${gemKeys[i]}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { inline_data: { mime_type: 'application/pdf', data: base64 } },
+              { text: prompt }
+            ]}],
+            generationConfig: { temperature: 0, maxOutputTokens: 8192 }
+          })
+        }
+      )
+      if (res.status === 429) { await new Promise(r => setTimeout(r, 2000)); continue }
+      if (!res.ok) continue
+      const text = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
+      if (text.length > 50) return text
+    } catch { continue }
+  }
+  return null
+}
+
+// ── Gemini đọc PDF theo nhóm trang, lưu chunks vào Firestore ─────
+// pageGroup: 30 trang/lần → tối đa 200 trang = 7 lần gọi
+const extractPdfWithGemini = async (buf, fileName = '', docId = null, onStatus = null) => {
+  const gemKeys = [
+    import.meta.env.VITE_GEMINI_API_KEY,
+    import.meta.env.VITE_GEMINI_API_KEY_2,
+    import.meta.env.VITE_GEMINI_API_KEY_3,
+  ].filter(Boolean)
+  if (!gemKeys.length) return null
+
+  // Đọc số trang bằng pdfjs (nhanh, không cần nội dung)
+  const lib = await loadPdfJs()
+  const pdf = await lib.getDocument({ data: buf.slice(0) }).promise
+  const totalPages = pdf.numPages
+  const PAGE_GROUP = 30 // trang/lần gọi Gemini
+
+  if (onStatus) onStatus(`📄 PDF có ${totalPages} trang · Đang chia thành nhóm ${PAGE_GROUP} trang...`)
+
+  const base64 = bufToBase64(buf)
+  const allChunks = []
+  let allText = ''
+
+  const groups = Math.ceil(totalPages / PAGE_GROUP)
+  for (let g = 0; g < groups; g++) {
+    const fromPage = g * PAGE_GROUP + 1
+    const toPage = Math.min((g + 1) * PAGE_GROUP, totalPages)
+    if (onStatus) onStatus(`🤖 Gemini đọc trang ${fromPage}–${toPage} / ${totalPages}...`)
+
+    const prompt = `Trích xuất nội dung từ trang ${fromPage} đến trang ${toPage} của PDF: "${fileName}".
+Yêu cầu:
+- Giữ nguyên 100% câu chữ, số liệu, tên người, ngày tháng
+- Chuyển bảng biểu sang Markdown table (| cột | cột |)  
+- Giữ heading (# ## ###), điều khoản (Điều 1, Khoản 2...)
+- Bắt đầu bằng dòng: ## Trang ${fromPage}–${toPage}
+- KHÔNG tóm tắt, chỉ trả về Markdown thuần túy`
+
+    const chunkText = await callGeminiPdf(base64, prompt, gemKeys)
+    if (chunkText) {
+      allChunks.push({ fromPage, toPage, text: chunkText, index: g })
+      allText += chunkText + '\n\n'
+      if (onStatus) onStatus(`✅ Xong trang ${fromPage}–${toPage} (${chunkText.length.toLocaleString()} ký tự)`)
+    } else {
+      if (onStatus) onStatus(`⚠️ Bỏ qua trang ${fromPage}–${toPage} (rate limit)`)
+    }
+
+    // Delay giữa các nhóm tránh rate limit
+    if (g < groups - 1) await new Promise(r => setTimeout(r, 1500))
+  }
+
+  // Lưu chunks vào Firestore nếu có docId
+  if (docId && allChunks.length > 0) {
+    try {
+      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore')
+      const { db } = await import('../firebase')
+      for (const chunk of allChunks) {
+        await addDoc(collection(db, 'documentChunks'), {
+          docId,
+          fileName,
+          fromPage: chunk.fromPage,
+          toPage: chunk.toPage,
+          chunkIndex: chunk.index,
+          text: chunk.text,
+          createdAt: serverTimestamp()
+        })
+      }
+      if (onStatus) onStatus(`💾 Đã lưu ${allChunks.length} chunks vào Firestore`)
+    } catch(e) {
+      console.warn('Lưu chunks lỗi:', e.message)
+    }
+  }
+
+  if (onStatus) onStatus(`✅ Hoàn thành! Đọc ${totalPages} trang · ${allText.length.toLocaleString()} ký tự`)
+  return allText.slice(0, 200000) // lưu 200K vào extractedText
+}
+
+// ── Fallback: pdfjs đọc text thô ─────────────────────────────────
+const extractPdfTextFull = async (buf) => {
+  const lib = await loadPdfJs()
+  const pdf = await lib.getDocument({ data: buf }).promise
+  let text = ''
+  for(let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i)
+    const c = await page.getTextContent()
+    text += c.items.map(it => it.str).join(' ') + '\n'
+  }
+  return text.trim().replace(/\s+/g, ' ').slice(0, 100000)
+}
+
+// ── Hàm chính: Gemini trước, pdfjs fallback ──────────────────────
+const extractPdfFull = async (buf, fileName = '', docId = null, onStatus = null) => {
+  const gemResult = await extractPdfWithGemini(buf.slice(0), fileName, docId, onStatus)
+  if (gemResult) return gemResult
+  if (onStatus) onStatus('📄 Gemini không khả dụng · Dùng pdfjs fallback...')
+  return await extractPdfTextFull(buf.slice(0))
+}
+
 const renderPdfToImages = async (buf,max=3) => {
   const lib=await loadPdfJs(); const pdf=await lib.getDocument({data:buf}).promise
   const pages=Math.min(pdf.numPages,max); const imgs=[]
@@ -47,22 +180,39 @@ const extractXlsxText = async (buf) => {
 }
 const parseJ = (s) => { try{const m=s.match(/\{[\s\S]*\}/);return JSON.parse(m?m[0]:s.replace(/```json|```/g,'').trim())}catch{return null} }
 
+// ── Lưu Markdown lên Firestore documentMarkdown ──────────────────
+const saveMarkdownToFirestore = async (markdown, fileName) => {
+  try {
+    const { collection, addDoc, serverTimestamp } = await import('firebase/firestore')
+    const { db } = await import('../firebase')
+    const mdDoc = await addDoc(collection(db, 'documentMarkdown'), {
+      fileName,
+      markdown,
+      charCount: markdown.length,
+      createdAt: serverTimestamp()
+    })
+    return mdDoc.id
+  } catch(e) {
+    console.warn('Lưu markdown lỗi:', e.message)
+    return null
+  }
+}
+
 export default function DocModal({ doc, onSave, onClose }) {
   const isEdit = Boolean(doc?.id)
   const { ask, analyzeText, analyzeImages, getKey, saveKey, isReal } = useAI()
   const { uploadFile, uploading, getCloudName, saveCloudName } = useCloudinaryStorage()
 
   const [form, setForm] = useState({ code:'',date:'',org:'',subject:'',docType:'Công văn',status:'prep',detail:'',note:'', ...(doc||{}) })
-  const [mode, setMode]     = useState('manual')
+  const [mode, setMode]     = useState('ai')
   const [aiTab, setAiTab]   = useState('file')
   const [rawText, setRaw]   = useState('')
   const [status, setSt]     = useState('')
   const [loading, setLoad]  = useState(false)
   const [fileQueue, setFQ]  = useState([])
   const [processing, setProc] = useState(false)
-  const [showKey, setShowKey] = useState(false)
-  const [keyInput, setKeyIn]  = useState('')
   const [pendingFile, setPF]  = useState(null)
+  const [extractedText, setExtractedText] = useState('')
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
@@ -71,16 +221,21 @@ export default function DocModal({ doc, onSave, onClose }) {
 
   const handleSave = async () => {
     if (!form.subject?.trim()) return alert('Nhập nội dung văn bản')
-    let final = {...form}
+    let final = {...form, ...(extractedText ? { extractedText: extractedText.slice(0, 100000) } : {})}
     if (pendingFile) {
-      setSt('⏳ Đang upload lên Cloudinary...')
+      setSt('⏳ Đang upload file...')
       setLoad(true)
       try {
-        const fi = await uploadFile(pendingFile)
-        final = {...final, ...fi}
+        const fi = await uploadFile(pendingFile, pct => setSt(`⏳ Đang upload... ${pct}%`))
+        if (!fi?.fileUrl) throw new Error('Không nhận được URL')
+        // Lưu thêm tên file và kích thước
+        final = {...final, ...fi, fileName: pendingFile.name, fileSize: pendingFile.size}
         setSt('✅ Upload xong!')
+        await new Promise(r => setTimeout(r, 400))
       } catch(e) {
-        setSt('⚠️ Upload lỗi: ' + e.message + ' — vẫn lưu văn bản')
+        alert('❌ Upload thất bại: ' + (e.message||'Lỗi không xác định'))
+        setLoad(false)
+        return
       } finally {
         setLoad(false)
       }
@@ -112,17 +267,39 @@ export default function DocModal({ doc, onSave, onClose }) {
       setLoad(true); setSt('⏳ Đang xử lý...')
       try {
         let result = ''
-        if (ext === 'pdf') result = await processOnePdf(await file.arrayBuffer(), file.name)
-        else if (['doc','docx'].includes(ext)) result = await analyzeText(await extractDocxText(await file.arrayBuffer()), file.name)
-        else if (['xls','xlsx'].includes(ext)) result = await analyzeText(await extractXlsxText(await file.arrayBuffer()), file.name)
-        else if (ext === 'txt') { const t=await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,8000));rd.readAsText(file,'utf-8')}); setRaw(t); setSt('✅ Đọc xong — nhấn AI phân tích'); setLoad(false); return }
-        else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
+        let rawExtracted = ''
+        const buf = await file.arrayBuffer()
+        if (ext === 'pdf') {
+          setSt('⏳ Đang đọc PDF...')
+          rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, setSt)
+          result = isRealContent(rawExtracted)
+            ? await analyzeText(rawExtracted.slice(0, 8000), file.name)
+            : await (async () => { setSt('⏳ PDF scan — đang dùng vision AI...'); const imgs = await renderPdfToImages(buf.slice(0)); return await analyzeImages(imgs, file.name) })()
+        } else if (['doc','docx'].includes(ext)) {
+          rawExtracted = await extractDocxText(buf)
+          result = await analyzeText(rawExtracted.slice(0, 8000), file.name)
+          rawExtracted = rawExtracted.slice(0, 100000)
+        } else if (['xls','xlsx'].includes(ext)) {
+          rawExtracted = await extractXlsxText(buf)
+          result = await analyzeText(rawExtracted.slice(0, 8000), file.name)
+          rawExtracted = rawExtracted.slice(0, 100000)
+        } else if (ext === 'txt') {
+          const t = await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,100000));rd.readAsText(file,'utf-8')})
+          setRaw(t.slice(0, 8000)); setExtractedText(t); setSt('✅ Đọc xong — nhấn AI phân tích'); setLoad(false); return
+        } else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
+        setExtractedText(rawExtracted)
+        // Lưu markdown lên Firestore ngay (không cần docId)
+        if (rawExtracted.length > 100) {
+          saveMarkdownToFirestore(rawExtracted, file.name).then(ref => {
+            if (ref) setForm(f => ({...f, markdownRef: ref}))
+          })
+        }
         const p = parseJ(result)
         if (p) { setForm(f=>({...f,...p,fileName:file.name})); setMode('manual'); setSt('✅ AI điền xong!') }
         else setSt('⚠️ Không phân tích được. Điền thủ công.')
       } catch(e) {
         if (e.message==='NO_KEY') alert('Chưa có API key!')
-        else setSt('❌ Lỗi: '+e.message)
+        else setSt(e.message === 'AI_QUOTA' ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!' : '❌ Lỗi: '+e.message)
       } finally { setLoad(false) }
       return
     }
@@ -135,16 +312,35 @@ export default function DocModal({ doc, onSave, onClose }) {
       queue[i].status='🔄 Đang xử lý...'; setFQ([...queue])
       try {
         let result=''
-        if (ext==='pdf') result=await processOnePdf(await file.arrayBuffer(),file.name)
-        else if (['doc','docx'].includes(ext)) result=await analyzeText(await extractDocxText(await file.arrayBuffer()),file.name)
-        else if (['xls','xlsx'].includes(ext)) result=await analyzeText(await extractXlsxText(await file.arrayBuffer()),file.name)
-        else { queue[i].status='⚠️ Không hỗ trợ'; setFQ([...queue]); continue }
+        let batchExtracted = ''
+        const bBuf = await file.arrayBuffer()
+        if (ext==='pdf') {
+          batchExtracted = await extractPdfFull(bBuf.slice(0), file.name, null, (msg) => { queue[i].status=msg; setFQ([...queue]) })
+          result = isRealContent(batchExtracted) ? await analyzeText(batchExtracted.slice(0,8000),file.name) : await processOnePdf(bBuf,file.name)
+        } else if (['doc','docx'].includes(ext)) {
+          batchExtracted = (await extractDocxText(bBuf)).slice(0,100000)
+          result = await analyzeText(batchExtracted.slice(0,8000),file.name)
+        } else if (['xls','xlsx'].includes(ext)) {
+          batchExtracted = (await extractXlsxText(bBuf)).slice(0,100000)
+          result = await analyzeText(batchExtracted.slice(0,8000),file.name)
+        } else { queue[i].status='⚠️ Không hỗ trợ'; setFQ([...queue]); continue }
         const p=parseJ(result)
         if (p) {
-          queue[i].status='⏳ Upload Firebase...'; setFQ([...queue])
+          queue[i].status='⏳ Đang upload... 0%'; setFQ([...queue])
           let fi={}
-          try { fi=await uploadFile(file) } catch(ue) { console.warn('Upload err:', ue.message) }
-          onSave({...p,fileName:file.name,...fi},true)
+          try {
+            fi = await uploadFile(file, pct => { queue[i].status=`⏳ Đang upload... ${pct}%`; setFQ([...queue]) })
+          } catch(ue) {
+            console.warn('Upload err:', ue.message)
+            queue[i].status='⚠️ Lưu văn bản (không có file)'
+          }
+          // Lưu tên file, kích thước và extractedText
+          // Lưu markdown lên Firestore cho batch
+          let markdownRef = null
+          if (batchExtracted.length > 100) {
+            markdownRef = await saveMarkdownToFirestore(batchExtracted, file.name)
+          }
+          onSave({...p, fileName:file.name, fileSize:file.size, extractedText: batchExtracted, ...(markdownRef ? {markdownRef} : {}), ...fi}, true)
           queue[i].status='✅ Xong'
         } else queue[i].status='⚠️ Không đọc được'
       } catch(e) { queue[i].status='❌ '+(e.message||'Lỗi') }
@@ -160,7 +356,7 @@ export default function DocModal({ doc, onSave, onClose }) {
       const r=await analyzeText(rawText); const p=parseJ(r)
       if (p) { setForm(f=>({...f,...p})); setMode('manual'); setSt('✅ Xong!') }
       else setSt('⚠️ Không phân tích được')
-    } catch(e) { if(e.message==='NO_KEY') alert('Chưa có key!'); else setSt('❌ Lỗi: '+e.message) }
+    } catch(e) { if(e.message==='NO_KEY') alert('Chưa có key!'); else setSt(e.message === 'AI_QUOTA' ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!' : '❌ Lỗi: '+e.message) }
     finally { setLoad(false) }
   }
 
@@ -178,7 +374,6 @@ export default function DocModal({ doc, onSave, onClose }) {
           ))}
         </div>}
 
-        {/* Batch progress */}
         {fileQueue.length > 1 && (
           <div>
             <div style={{fontSize:13,fontWeight:600,marginBottom:10}}>{processing?'⏳ Đang xử lý hàng loạt...':'📋 Kết quả:'}</div>
@@ -190,12 +385,20 @@ export default function DocModal({ doc, onSave, onClose }) {
                 </div>
               ))}
             </div>
-            {!processing&&<div style={{marginTop:12,display:'flex',justifyContent:'flex-end'}}><button onClick={onClose} style={sBtn}>✓ Đóng</button></div>}
+            {!processing&&(
+              <div style={{marginTop:12}}>
+                <div style={{padding:'10px 14px',borderRadius:8,background:'#f0fdf4',border:'0.5px solid #bbf7d0',fontSize:13,color:'#15803d',marginBottom:10,textAlign:'center'}}>
+                  ✅ Tất cả văn bản đã được <strong>lưu tự động</strong> vào hệ thống
+                </div>
+                <div style={{display:'flex',justifyContent:'flex-end'}}>
+                  <button onClick={onClose} style={sBtn}>✓ Đóng</button>
+                </div>
+              </div>
+            )}
             {status&&<div style={{marginTop:10,padding:'9px 12px',borderRadius:8,fontSize:12,background:sBg,color:sColor}}>{status}</div>}
           </div>
         )}
 
-        {/* AI mode */}
         {mode==='ai'&&fileQueue.length<=1&&!processing&&(
           <div>
             <div style={{display:'flex',gap:0,marginBottom:14,border:'0.5px solid #ddd',borderRadius:8,overflow:'hidden'}}>
@@ -215,7 +418,6 @@ export default function DocModal({ doc, onSave, onClose }) {
           </div>
         )}
 
-        {/* Manual mode */}
         {mode==='manual'&&!processing&&fileQueue.length<=1&&(
           <div>
             {status&&<div style={{marginBottom:12,padding:'9px 12px',borderRadius:8,fontSize:12,background:sBg,color:sColor}}>{status}</div>}
@@ -234,12 +436,11 @@ export default function DocModal({ doc, onSave, onClose }) {
                 {ST.map(s=><button key={s.value} onClick={()=>set('status',s.value)} style={{padding:'6px 14px',borderRadius:20,fontSize:12,border:form.status===s.value?'2px solid #1a1a1a':'0.5px solid #ddd',background:form.status===s.value?'#1a1a1a':'#fff',color:form.status===s.value?'#fff':'#555',cursor:'pointer'}}>{s.label}</button>)}
               </div>
             </div>
-            {/* Upload file trong chế độ thủ công */}
             <div style={{marginBottom:16}}>
               <label style={lSt}>📎 Đính kèm file (PDF, Word, Excel...)</label>
               {pendingFile ? (
                 <div style={{padding:'10px 12px',borderRadius:8,background:'#eff6ff',border:'0.5px solid #bfdbfe',fontSize:12,color:'#1d4ed8',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                  <span>📎 {pendingFile.name} ({(pendingFile.size/1024).toFixed(0)} KB)</span>
+                  <span>📎 {pendingFile.name} ({(pendingFile.size/1024/1024).toFixed(1)} MB)</span>
                   <button onClick={()=>setPF(null)} style={{background:'none',border:'none',cursor:'pointer',color:'#e53e3e',fontSize:14}}>✕</button>
                 </div>
               ) : (
@@ -256,17 +457,6 @@ export default function DocModal({ doc, onSave, onClose }) {
             </div>
           </div>
         )}
-
-        <div style={{marginTop:16,borderTop:'0.5px solid #f0f0ec',paddingTop:12,display:'flex',alignItems:'center',gap:8}}>
-          <span style={{fontSize:11,color:'#9b9b9b'}}>🤖 Groq Llama · Miễn phí</span>
-          <button onClick={()=>setShowKey(v=>!v)} style={{fontSize:11,color:'#378ADD',background:'none',border:'none',cursor:'pointer'}}>
-            {getKey()?'✅ Đã cài key':'⚙️ Cài key AI'}
-          </button>
-        </div>
-        {showKey&&<div style={{marginTop:8,display:'flex',gap:8}}>
-          <input value={keyInput} onChange={e=>setKeyIn(e.target.value)} placeholder="Groq API key (gsk_...)" style={{...iSt,flex:1,fontSize:12}}/>
-          <button onClick={()=>{saveKey(keyInput.trim());setShowKey(false);setKeyIn('')}} style={{padding:'8px 14px',background:'#378ADD',color:'#fff',border:'none',borderRadius:8,cursor:'pointer',fontSize:12}}>Lưu</button>
-        </div>}
       </div>
     </div>
   )
