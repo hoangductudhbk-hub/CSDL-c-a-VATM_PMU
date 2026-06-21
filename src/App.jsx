@@ -386,79 +386,88 @@ ${memCtx}`
           )}
         </div>
 
-        {/* Danh sách dự án + gói thầu */}
+        {/* Danh sách dự án theo 3 nhóm: Dự án / Quy định / Biểu mẫu */}
         <div style={{ padding:'0 8px', borderTop:'0.5px solid #f0f0ec', marginTop:4, flex:1, overflowY:'auto' }}>
-          <div style={{ fontSize:12, color:'#555', padding:'8px 8px 4px', fontWeight:800, letterSpacing:'0.05em' }}>DỰ ÁN</div>
           {(() => {
-            const PAGE = 5
-            const totalPages = Math.ceil(projects.length / PAGE)
-            const paginated  = projects.slice(projPage * PAGE, projPage * PAGE + PAGE)
-            return <>
-              {paginated.map(p => {
-                const pkgsForProj = packages.filter(pkg => pkg.projectId === p.id)
-                const isExpanded  = expandedProjs.has(p.id)
-                const isProjSel   = proj?.id === p.id
+            // Dự án cũ chưa có field category → suy luận theo tên để không mất dữ liệu
+            const getCategory = (p) => {
+              if (p.category) return p.category
+              if (/quy định|quy trình/i.test(p.name)) return 'regulation'
+              if (/biểu mẫu/i.test(p.name)) return 'form'
+              return 'project'
+            }
 
-                return (
-                  <div key={p.id} style={{ marginBottom:2 }}>
-                    {/* Dòng dự án */}
-                    <div style={{ display:'flex', alignItems:'center', borderRadius:8, background: isProjSel && !selPkg ? '#f0f0ec' : 'transparent' }}>
-                      {/* Nút expand */}
-                      <button onClick={() => toggleExpand(p.id)}
-                        style={{ padding:'4px 4px 4px 6px', background:'none', border:'none', cursor:'pointer', color:'#aaa', fontSize:9, flexShrink:0, lineHeight:1 }}>
-                        {isExpanded ? '▼' : '▶'}
-                      </button>
-                      <button onClick={() => selectProject(p.id)}
-                        style={{ flex:1, textAlign:'left', padding:'6px 4px', border:'none', cursor:'pointer', background:'transparent', color:'#1a1a1a', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:4, minWidth:0 }}>
-                        <span style={{ fontSize:13, flexShrink:0 }}>📋</span>
-                        <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</span>
-                      </button>
-                      <button onClick={() => { setRenameInput(p.name); setRenameTarget({ type:'project', id:p.id, currentName:p.name }) }}
-                          style={{ padding:'4px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:11, flexShrink:0 }} title="Đổi tên">✎</button>
-                      <button onClick={() => { if (confirm('Xóa dự án "'+p.name+'"?')) { deleteProject(p.id); logDeleteProj(p.name); if (selProj===p.id) { setSelProj('home'); setSelPkg(null) } } }}
-                          style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:11, flexShrink:0 }}>✕</button>
-                    </div>
+            const renderProjectRow = (p) => {
+              const pkgsForProj = packages.filter(pkg => pkg.projectId === p.id)
+              const isExpanded  = expandedProjs.has(p.id)
+              const isProjSel   = proj?.id === p.id
 
-                    {/* Gói thầu (khi mở rộng) */}
-                    {isExpanded && (
-                      <div style={{ paddingLeft:22, paddingBottom:4 }}>
-                        {pkgsForProj.map(pkg => (
-                          <div key={pkg.id} style={{ display:'flex', alignItems:'center', borderRadius:6, marginBottom:1, background: selPkg===pkg.id ? '#e8f0fe' : 'transparent' }}>
-                            <button onClick={() => selectPackage(p.id, pkg.id)}
-                              style={{ flex:1, textAlign:'left', padding:'5px 6px', border:'none', cursor:'pointer', background:'transparent', color: selPkg===pkg.id ? '#1a56db' : '#444', fontSize:12, fontWeight: selPkg===pkg.id ? 600 : 400, display:'flex', alignItems:'center', gap:4, minWidth:0 }}>
-                              <span style={{ fontSize:12 }}>📁</span>
-                              <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{pkg.name}</span>
-                            </button>
-                            <button onClick={() => { setRenameInput(pkg.name); setRenameTarget({ type:'package', id:pkg.id, currentName:pkg.name }) }}
-                                style={{ padding:'2px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:10, flexShrink:0 }} title="Đổi tên">✎</button>
-                            <button onClick={() => { if (confirm('Xóa gói thầu "'+pkg.name+'"?')) { deletePackage(pkg.id); if (selPkg===pkg.id) setSelPkg(null) } }}
-                                style={{ padding:'2px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:10, flexShrink:0 }}>✕</button>
-                          </div>
-                        ))}
-                        {/* Nút thêm gói thầu */}
-                        <button onClick={() => setShowAddPkg(p.id)}
-                          style={{ fontSize:11, color:'#888', background:'none', border:'none', cursor:'pointer', padding:'4px 6px', width:'100%', textAlign:'left' }}>
-                          + Thêm gói thầu
-                        </button>
-                      </div>
-                    )}
+              return (
+                <div key={p.id} style={{ marginBottom:2 }}>
+                  {/* Dòng dự án */}
+                  <div style={{ display:'flex', alignItems:'center', borderRadius:8, background: isProjSel && !selPkg ? '#f0f0ec' : 'transparent' }}>
+                    {/* Nút expand */}
+                    <button onClick={() => toggleExpand(p.id)}
+                      style={{ padding:'4px 4px 4px 6px', background:'none', border:'none', cursor:'pointer', color:'#aaa', fontSize:9, flexShrink:0, lineHeight:1 }}>
+                      {isExpanded ? '▼' : '▶'}
+                    </button>
+                    <button onClick={() => selectProject(p.id)}
+                      style={{ flex:1, textAlign:'left', padding:'6px 4px', border:'none', cursor:'pointer', background:'transparent', color:'#1a1a1a', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:4, minWidth:0 }}>
+                      <span style={{ fontSize:13, flexShrink:0 }}>📋</span>
+                      <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.name}</span>
+                    </button>
+                    <button onClick={() => { setRenameInput(p.name); setRenameTarget({ type:'project', id:p.id, currentName:p.name }) }}
+                        style={{ padding:'4px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:11, flexShrink:0 }} title="Đổi tên">✎</button>
+                    <button onClick={() => { if (confirm('Xóa dự án "'+p.name+'"?')) { deleteProject(p.id); logDeleteProj(p.name); if (selProj===p.id) { setSelProj('home'); setSelPkg(null) } } }}
+                        style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:11, flexShrink:0 }}>✕</button>
                   </div>
-                )
-              })}
-              {totalPages > 1 && (
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'4px 8px', marginTop:4 }}>
-                  <button onClick={() => setProjPage(p => Math.max(0,p-1))} disabled={projPage===0}
-                    style={{ fontSize:11, padding:'3px 8px', border:'0.5px solid #ddd', borderRadius:6, cursor:projPage===0?'not-allowed':'pointer', background:'#fff', color:projPage===0?'#ccc':'#555' }}>← Trước</button>
-                  <span style={{ fontSize:10, color:'#aaa' }}>{projPage+1}/{totalPages}</span>
-                  <button onClick={() => setProjPage(p => Math.min(totalPages-1,p+1))} disabled={projPage===totalPages-1}
-                    style={{ fontSize:11, padding:'3px 8px', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', background:'#fff', color:'#555' }}>Tiếp →</button>
+
+                  {/* Gói thầu (khi mở rộng) */}
+                  {isExpanded && (
+                    <div style={{ paddingLeft:22, paddingBottom:4 }}>
+                      {pkgsForProj.map(pkg => (
+                        <div key={pkg.id} style={{ display:'flex', alignItems:'center', borderRadius:6, marginBottom:1, background: selPkg===pkg.id ? '#e8f0fe' : 'transparent' }}>
+                          <button onClick={() => selectPackage(p.id, pkg.id)}
+                            style={{ flex:1, textAlign:'left', padding:'5px 6px', border:'none', cursor:'pointer', background:'transparent', color: selPkg===pkg.id ? '#1a56db' : '#444', fontSize:12, fontWeight: selPkg===pkg.id ? 600 : 400, display:'flex', alignItems:'center', gap:4, minWidth:0 }}>
+                            <span style={{ fontSize:12 }}>📁</span>
+                            <span style={{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{pkg.name}</span>
+                          </button>
+                          <button onClick={() => { setRenameInput(pkg.name); setRenameTarget({ type:'package', id:pkg.id, currentName:pkg.name }) }}
+                              style={{ padding:'2px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:10, flexShrink:0 }} title="Đổi tên">✎</button>
+                          <button onClick={() => { if (confirm('Xóa gói thầu "'+pkg.name+'"?')) { deletePackage(pkg.id); if (selPkg===pkg.id) setSelPkg(null) } }}
+                              style={{ padding:'2px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:10, flexShrink:0 }}>✕</button>
+                        </div>
+                      ))}
+                      {/* Nút thêm gói thầu */}
+                      <button onClick={() => setShowAddPkg(p.id)}
+                        style={{ fontSize:11, color:'#888', background:'none', border:'none', cursor:'pointer', padding:'4px 6px', width:'100%', textAlign:'left' }}>
+                        + Thêm gói thầu
+                      </button>
+                    </div>
+                  )}
                 </div>
-              )}
-              <button onClick={() => setShowAddProj(true)}
-                style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:'#888', fontSize:12, marginTop:4, fontWeight:600 }}>
-                + Thêm dự án
-              </button>
-            </>
+              )
+            }
+
+            const groups = [
+              { key:'project',    label:'DỰ ÁN',    addLabel:'+ Thêm dự án' },
+              { key:'regulation', label:'QUY ĐỊNH', addLabel:'+ Thêm quy định' },
+              { key:'form',       label:'BIỂU MẪU', addLabel:'+ Thêm biểu mẫu' },
+            ]
+
+            return groups.map(g => {
+              const catProjects = projects.filter(p => getCategory(p) === g.key)
+              return (
+                <div key={g.key} style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:12, color:'#555', padding:'8px 8px 4px', fontWeight:800, letterSpacing:'0.05em' }}>{g.label}</div>
+                  {catProjects.map(renderProjectRow)}
+                  <button onClick={() => setShowAddProj(g.key)}
+                    style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:'#888', fontSize:12, marginTop:2, fontWeight:600 }}>
+                    {g.addLabel}
+                  </button>
+                </div>
+              )
+            })
           })()}
         </div>
 
@@ -692,14 +701,16 @@ ${memCtx}`
       {showAddProj && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}>
           <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:400, boxShadow:'0 8px 32px rgba(0,0,0,.15)' }}>
-            <h3 style={{ fontSize:15, fontWeight:600, marginBottom:16 }}>Thêm dự án mới</h3>
-            <input value={newProjName} onChange={e => setNewProjName(e.target.value)} placeholder="Tên dự án" autoFocus
+            <h3 style={{ fontSize:15, fontWeight:600, marginBottom:16 }}>
+              Thêm {showAddProj==='regulation'?'quy định':showAddProj==='form'?'biểu mẫu':'dự án'} mới
+            </h3>
+            <input value={newProjName} onChange={e => setNewProjName(e.target.value)} placeholder="Tên" autoFocus
               style={{ width:'100%', padding:'9px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', marginBottom:12, boxSizing:'border-box' }}/>
             <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
               <button onClick={() => setShowAddProj(false)} style={{ padding:'8px 16px', border:'0.5px solid #ddd', borderRadius:8, cursor:'pointer', background:'#fff', fontSize:13 }}>Hủy</button>
               <button onClick={async () => {
                 if (newProjName.trim()) {
-                  await addProject({ name:newProjName.trim(), code:'', budget:'Đang lập', period:'2026–2030', address:'' })
+                  await addProject({ name:newProjName.trim(), code:'', budget:'Đang lập', period:'2026–2030', address:'', category: showAddProj })
                   logAddProj(newProjName.trim()); setNewProjName(''); setShowAddProj(false)
                 }
               }} style={{ padding:'8px 16px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13 }}>Thêm</button>
