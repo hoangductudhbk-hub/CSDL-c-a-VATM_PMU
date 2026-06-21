@@ -155,6 +155,49 @@ const callOpenRouter = async (prompt, maxTokens = 1000) => {
   return null
 }
 
+// ── Gọi Mistral (client-side) ───────────────────────────────────
+const getMistralKey = () =>
+  import.meta.env.VITE_MISTRAL_API_KEY || localStorage.getItem('mistral_key') || ''
+
+const callMistral = async (prompt, maxTokens = 1000) => {
+  const key = getMistralKey()
+  if (!key) return null
+  try {
+    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: 'mistral-small-latest',
+        max_tokens: maxTokens, temperature: 0.1,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    })
+    if (!res.ok) return null
+    return (await res.json()).choices?.[0]?.message?.content || null
+  } catch { return null }
+}
+
+const callMistralVision = async (base64Images, textPrompt, maxTokens = 1000) => {
+  const key = getMistralKey()
+  if (!key) return null
+  try {
+    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: 'pixtral-12b-2409',
+        max_tokens: maxTokens, temperature: 0.05,
+        messages: [{ role: 'user', content: [
+          ...base64Images.slice(0, 3).map(b64 => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } })),
+          { type: 'text', text: textPrompt }
+        ]}],
+      }),
+    })
+    if (!res.ok) return null
+    return (await res.json()).choices?.[0]?.message?.content || null
+  } catch { return null }
+}
+
 // ── Gọi AI: OpenRouter → Gemini → Groq ────────────────────────
 const callAI = async (prompt, maxTokens = 1000) => {
   // OpenRouter trước — không bị 429 như Gemini
@@ -296,10 +339,13 @@ export function useAI() {
     const clean = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{3,}/g, ' ').slice(0, 6000)
     const prompt = `${SYSTEM}\n\nPhân tích văn bản:${hint}\n---\n${clean}\n---`
     try {
-      // Groq trước cho analyzeText — nhanh hơn khi thêm nhiều văn bản cùng lúc
+      // Groq trước — nhanh nhất
       const groq = await callGroq(prompt, 1000, SYSTEM)
       if (groq) return groq
-      // Gemini fallback khi Groq 429
+      // Mistral fallback khi Groq 429
+      const mistral = await callMistral(prompt, 1000)
+      if (mistral) return mistral
+      // Gemini cuối cùng
       return await callGemini(prompt, 1000) || ''
     } finally { setLoading(false) }
   }
@@ -309,8 +355,12 @@ export function useAI() {
     setLoading(true)
     resetIdxIfNewDay()
     const hint = fileName ? ` (${fileName})` : ''
+    const visionPrompt = `${SYSTEM}\n\nĐọc ảnh scan văn bản Việt Nam${hint} và trả về JSON duy nhất.`
     try {
-      // Groq Vision
+      // 1. Mistral Pixtral — tốt nhất cho scan tiếng Việt
+      const mistralResult = await callMistralVision(base64Images, visionPrompt, 1000)
+      if (mistralResult) return mistralResult
+      // 2. Groq Vision fallback
       const keys = getGroqKeys()
       for (const key of keys) {
         try {
@@ -321,7 +371,7 @@ export function useAI() {
               model: GROQ_VISION_MODEL, max_tokens: 1000, temperature: 0.05,
               messages: [{ role: 'user', content: [
                 ...base64Images.slice(0, 3).map(b64 => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } })),
-                { type: 'text', text: `${SYSTEM}\n\nĐọc ảnh scan văn bản Việt Nam${hint} và trả về JSON.` }
+                { type: 'text', text: visionPrompt }
               ]}],
             }),
           })
@@ -330,12 +380,8 @@ export function useAI() {
           if (result) return result
         } catch { continue }
       }
-      // Gemini fallback
-      const parts = [
-        { text: `${SYSTEM}\n\nĐọc ảnh scan văn bản Việt Nam${hint} và trả về JSON.` },
-        ...base64Images.slice(0, 3).map(b64 => ({ inline_data: { mime_type: 'image/jpeg', data: b64 } }))
-      ]
-      return await callGemini(parts.map(p => p.text || '').join('\n'), 1000) || ''
+      // 3. Gemini fallback cuối cùng
+      return await callGemini(visionPrompt, 1000) || ''
     } finally { setLoading(false) }
   }
 
