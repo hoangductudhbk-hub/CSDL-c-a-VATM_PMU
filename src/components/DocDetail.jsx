@@ -705,8 +705,8 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                     'Các điểm quan trọng cần lưu ý là gì?',
                     'Căn cứ pháp lý được viện dẫn?',
                     'Có rủi ro hoặc điểm bất thường gì không?',
-                    memory.requirements ? 'Yêu cầu kỹ thuật cụ thể là gì?' : null,
-                    memory.legalBasis ? 'Các văn bản pháp lý liên quan?' : null,
+                    memory?.requirements ? 'Yêu cầu kỹ thuật cụ thể là gì?' : null,
+                    memory?.legalBasis ? 'Các văn bản pháp lý liên quan?' : null,
                   ].filter(Boolean).map(q => (
                     <button key={q} onClick={() => handleAsk(q)}
                       style={{ textAlign:'left', padding:'7px 10px', borderRadius:8, fontSize:12, background:'#f5f5f3', border:'0.5px solid #e5e4e0', cursor:'pointer', color:'#444' }}>
