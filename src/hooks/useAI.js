@@ -12,11 +12,11 @@ const OPENROUTER_MODELS = [
 ]
 const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
-// Format cũ AIzaSy... dùng ?key=, format mới AQ.... dùng x-goog-api-key header
+// Format cũ AIzaSy... dùng ?key= trên v1, format mới AQ.... dùng x-goog-api-key header trên v1beta
 const GEM_URL = (model, key) =>
   key.startsWith('AIzaSy')
     ? `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`
-    : `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
 const GEM_HEADERS = (key) => {
   const h = { 'Content-Type': 'application/json' }
   if (!key.startsWith('AIzaSy')) h['x-goog-api-key'] = key

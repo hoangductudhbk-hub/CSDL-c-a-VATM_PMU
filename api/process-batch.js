@@ -1,6 +1,6 @@
 // api/process-batch.js
 // OCR/extract PDF → Groq format markdown → lưu vào Firestore
-// Hỗ trợ: PDF text-based (pdf-parse) + PDF scan (Mistral nếu có key)
+// Hỗ trợ: PDF text-based (pdf-parse) + PDF scan (Gemini OCR)
 //
 // Request: { docId, fileUrl, fileName, fromPage, toPage, batchIndex }
 // Response: { ok, text, docId, batchIndex, fromPage, toPage, charCount }
@@ -14,8 +14,11 @@ const getGroqKeys = () => [
   process.env.VITE_GROQ_API_KEY_3,
 ].filter(Boolean)
 
-const getMistralKey = () =>
-  process.env.VITE_MISTRAL_API_KEY || process.env.MISTRAL_API_KEY || ''
+const getGeminiKeys = () => [
+  process.env.VITE_GEMINI_API_KEY,
+  process.env.VITE_GEMINI_API_KEY_2,
+  process.env.VITE_GEMINI_API_KEY_3,
+].filter(Boolean)
 
 const getGhToken = () =>
   process.env.VITE_GH_TOKEN || process.env.GH_TOKEN || ''
@@ -60,28 +63,52 @@ ${text.slice(0, 6000)}
   return null
 }
 
-// ── Mistral OCR (cho PDF scan, nếu có key) ───────────────────────
-const callMistralOCR = async (base64Pdf, fileName, fromPage, toPage, apiKey) => {
-  try {
-    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: 'pixtral-12b-2409',
-        max_tokens: 2000,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'document_url', document_url: `data:application/pdf;base64,${base64Pdf}` },
-            { type: 'text', text: `Trích xuất toàn bộ nội dung trang ${fromPage}–${toPage} của "${fileName}". Trả về Markdown, giữ nguyên 100% nội dung.` }
-          ]
-        }],
-      })
-    })
-    if (!res.ok) return null
-    const data = await res.json()
-    return data.choices?.[0]?.message?.content || null
-  } catch { return null }
+// ── Gemini OCR (cho PDF scan) ─────────────────────────────────────
+// Hỗ trợ cả 2 định dạng key, đồng bộ với src/hooks/useAI.js:
+// - Key cũ "AIzaSy..." → gửi qua query param ?key=
+// - Key mới "AQ...." (Authorization key, Google đang chuyển sang từ 6/2026)
+//   → gửi qua header x-goog-api-key
+const geminiUrl = (model, key) =>
+  key.startsWith('AIzaSy')
+    ? `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`
+    : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
+
+const geminiHeaders = (key) => {
+  const h = { 'Content-Type': 'application/json' }
+  if (!key.startsWith('AIzaSy')) h['x-goog-api-key'] = key
+  return h
+}
+
+const callGeminiOCR = async (base64Pdf, fileName, fromPage, toPage) => {
+  const keys = getGeminiKeys()
+  const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
+  for (const key of keys) {
+    for (const model of models) {
+      try {
+        const res = await fetch(geminiUrl(model, key), {
+          method: 'POST',
+          headers: geminiHeaders(key),
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { inline_data: { mime_type: 'application/pdf', data: base64Pdf } },
+                { text: `Trích xuất TOÀN BỘ nội dung trang ${fromPage}-${toPage} của file PDF này (file "${fileName}").
+Giữ nguyên 100% câu chữ, số liệu, tên người, bảng biểu, điều khoản. Giữ cấu trúc tiêu đề/điều/khoản.
+KHÔNG tóm tắt, KHÔNG bỏ thông tin. Chỉ trả về nội dung dạng Markdown thuần.` },
+              ],
+            }],
+            generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+          }),
+        })
+        if (res.status === 429) continue
+        if (!res.ok) continue
+        const data = await res.json()
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+        if (text.length > 30) return text
+      } catch { continue }
+    }
+  }
+  return null
 }
 
 // ── Handler chính ────────────────────────────────────────────────
@@ -156,17 +183,17 @@ export default async function handler(req, res) {
     })
   }
 
-  // ── PDF scan → thử Mistral OCR ───────────────────────────────
-  const mistralKey = getMistralKey()
-  if (mistralKey) {
+  // ── PDF scan → Gemini OCR (đã có key sẵn, không cần đăng ký mới) ─
+  const geminiKeys = getGeminiKeys()
+  if (geminiKeys.length) {
     const base64Pdf = pdfBuffer.toString('base64')
-    const ocrText = await callMistralOCR(base64Pdf, fileName || 'document', fromPage, toPage, mistralKey)
+    const ocrText = await callGeminiOCR(base64Pdf, fileName || 'document', fromPage, toPage)
     if (ocrText) {
       return res.status(200).json({
         ok: true, docId,
         batchIndex: batchIndex ?? 0, fromPage, toPage,
         text: ocrText, charCount: ocrText.length,
-        method: 'mistral-ocr',
+        method: 'gemini-ocr',
       })
     }
   }
@@ -179,13 +206,12 @@ export default async function handler(req, res) {
       batchIndex: batchIndex ?? 0, fromPage, toPage,
       text: fallback, charCount: fallback.length,
       method: 'raw-text',
-      warning: 'PDF scan — OCR không khả dụng. Thêm VITE_MISTRAL_API_KEY để OCR tốt hơn.',
+      warning: 'PDF scan — Gemini OCR không trả kết quả (kiểm tra key/quota). Dùng tạm text thô.',
     })
   }
 
   return res.status(422).json({
-    error: 'PDF scan không OCR được. Cần VITE_MISTRAL_API_KEY trong Vercel env.',
+    error: 'PDF scan không OCR được — Gemini không trả kết quả. Kiểm tra VITE_GEMINI_API_KEY trên Vercel (đúng định dạng AIzaSy...) và quota.',
     isScan: true, batchIndex: batchIndex ?? 0, fromPage, toPage,
-    hint: 'Lấy key miễn phí tại https://console.mistral.ai/api-keys',
   })
 }
