@@ -757,9 +757,9 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                     {analyzeStep && (
                       <div style={{ fontSize:12, color:'#1d4ed8', marginBottom:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
                     )}
-                    <button onClick={handleAnalyze} disabled={analyzing || autoPipeStarted}
-                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background: (analyzing || autoPipeStarted) ? '#9ca3af' : '#0a2342', color:'#fff', border:'none', cursor: (analyzing || autoPipeStarted) ? 'not-allowed' : 'pointer' }}>
-                      {autoPipeStarted ? (analyzeStep || '⏳ Đang tự động xử lý...') : analyzing ? (analyzeStep || '⏳ Đang phân tích...') : '🧠 Phân tích & Ghi nhớ tài liệu'}
+                    <button onClick={handleAnalyze} disabled={analyzing || autoPipeStarted || countdown > 0}
+                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background: (analyzing || autoPipeStarted || countdown > 0) ? '#9ca3af' : '#0a2342', color:'#fff', border:'none', cursor: (analyzing || autoPipeStarted || countdown > 0) ? 'not-allowed' : 'pointer' }}>
+                      {autoPipeStarted ? (analyzeStep || '⏳ Đang tự động xử lý...') : (analyzing || countdown > 0) ? (analyzeStep || '⏳ Đang phân tích...') : '🧠 Phân tích & Ghi nhớ tài liệu'}
                     </button>
                   </>
                 )}
