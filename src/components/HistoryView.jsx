@@ -86,7 +86,7 @@ export default function HistoryView({ user }) {
   }
 
   const deleteAllLogs = async () => {
-    if (!confirm('Xóa toàn bộ lịch sử truy cập? Hành động này không thể hoàn tác!')) return
+    if (!confirm('Xác nhận xóa?')) return
     setDeleting(true)
     try {
       const snap = await getDocs(collection(db, 'activityLogs'))

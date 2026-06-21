@@ -106,7 +106,7 @@ export default function AdminUsers() {
   }, [])
 
   const setStatus  = (uid, status) => updateDoc(doc(db,'users',uid),{status})
-  const deleteUser = (id, name)    => { if(confirm('Xóa hoàn toàn tài khoản '+name+'? Không thể hoàn tác!')) deleteDoc(doc(db,'users',id)) }
+  const deleteUser = (id, name)    => { if(confirm('Xác nhận xóa?')) deleteDoc(doc(db,'users',id)) }
 
   const approveReset = async (r) => {
     if (!confirm('Đồng ý và gửi mật khẩu tạm cho @'+r.username+'?')) return

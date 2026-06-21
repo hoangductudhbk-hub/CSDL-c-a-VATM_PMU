@@ -448,7 +448,7 @@ ${memCtx}`
                     </button>
                     <button onClick={() => { setRenameInput(p.name); setRenameTarget({ type:'project', id:p.id, currentName:p.name }) }}
                         style={{ padding:'4px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:11, flexShrink:0 }} title="Đổi tên">✎</button>
-                    <button onClick={() => { if (confirm('Xóa dự án "'+p.name+'"?')) { deleteProject(p.id); logDeleteProj(p.name); if (selProj===p.id) { setSelProj('home'); setSelPkg(null) } } }}
+                    <button onClick={() => { if (confirm('Xác nhận xóa?')) { deleteProject(p.id); logDeleteProj(p.name); if (selProj===p.id) { setSelProj('home'); setSelPkg(null) } } }}
                         style={{ padding:'4px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:11, flexShrink:0 }}>✕</button>
                   </div>
 
@@ -466,7 +466,7 @@ ${memCtx}`
                               style={{ padding:'2px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:10, flexShrink:0 }} title="Đổi tên">✎</button>
                           <button onClick={() => promotePackageToProject(pkg, p.id)}
                               style={{ padding:'2px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:10, flexShrink:0 }} title="Tách thành mục lớn riêng">⬆</button>
-                          <button onClick={() => { if (confirm('Xóa gói thầu "'+pkg.name+'"?')) { deletePackage(pkg.id); if (selPkg===pkg.id) setSelPkg(null) } }}
+                          <button onClick={() => { if (confirm('Xác nhận xóa?')) { deletePackage(pkg.id); if (selPkg===pkg.id) setSelPkg(null) } }}
                               style={{ padding:'2px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:10, flexShrink:0 }}>✕</button>
                         </div>
                       ))}
@@ -672,7 +672,7 @@ ${memCtx}`
                         </td>
                         <td style={{ padding:'10px 8px', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
                           <button onClick={() => { setEditDoc(d); setModal('edit') }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#888' }}>✏️</button>
-                          <button onClick={() => { if(confirm('Xóa văn bản này?')) { deleteFile(d); deleteDocument(d.id); logDeleteDoc(d.code, d.subject, proj?.name) } }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#e53e3e' }}>🗑️</button>
+                          <button onClick={() => { if(confirm('Xác nhận xóa?')) { deleteFile(d); deleteDocument(d.id); logDeleteDoc(d.code, d.subject, proj?.name) } }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#e53e3e' }}>🗑️</button>
                         </td>
                       </tr>
                     ))}
