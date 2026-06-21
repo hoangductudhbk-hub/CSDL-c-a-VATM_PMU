@@ -263,25 +263,34 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   const [chat,             setChat]             = useState([])
   const [chatInput,        setChatInput]        = useState('')
   const [autoPipeStarted,  setAutoPipeStarted]  = useState(false)
+  const [jobDone,          setJobDone]          = useState(false)
   const chatEndRef = useRef(null)
 
   useEffect(() => {
     if (showChat) setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
   }, [chat, showChat])
 
-  // Load chunks từ Firestore khi mở
+  // Load chunks + kiểm tra processingJobs khi mở
   useEffect(() => {
-    if (doc?.id) {
-      loadDocChunks(doc.id).then(chunks => {
-        if (chunks.length > 0) setDocChunks(chunks)
-      })
-    }
+    if (!doc?.id) return
+    loadDocChunks(doc.id).then(chunks => {
+      if (chunks.length > 0) setDocChunks(chunks)
+    })
+    // Kiểm tra pipeline đã chạy xong chưa
+    import('firebase/firestore').then(({ doc: fsDoc, getDoc }) =>
+      import('../firebase').then(({ db }) =>
+        getDoc(fsDoc(db, 'processingJobs', doc.id)).then(snap => {
+          if (snap.exists() && snap.data().stage === 'done') setJobDone(true)
+        }).catch(() => {})
+      )
+    )
   }, [doc?.id])
 
   // Auto-pipeline: khi mở văn bản PDF chưa có memory và chưa có chunks
   useEffect(() => {
     if (memLoading) return                        // đợi load memory xong
     if (memory) return                            // đã có memory → bỏ qua
+    if (jobDone) return                           // pipeline đã chạy xong → không auto lại
     if (autoPipeStarted) return                   // đã trigger rồi
     const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
     const isPdf   = doc?.fileName?.toLowerCase().endsWith('.pdf') ||
@@ -302,7 +311,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     }, 1500)
 
     return () => clearTimeout(timer)
-  }, [memLoading, memory, doc?.id, docChunks.length, autoPipeStarted])
+  }, [memLoading, memory, jobDone, doc?.id, docChunks.length, autoPipeStarted])
 
   const code     = get(doc, 'code')
   const date     = get(doc, 'date')
@@ -655,6 +664,14 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                       <div style={{ fontSize:12, color:'#1d4ed8', marginBottom:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
                     )}
                   </>
+                ) : jobDone ? (
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div style={{ fontSize:12, color:'#1d4ed8' }}>✅ Pipeline đã xử lý xong</div>
+                    <button onClick={() => setShowChat(v => !v)}
+                      style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
+                      {showChat ? '✕ Đóng chat' : '💬 Hỏi đáp'}
+                    </button>
+                  </div>
                 ) : (
                   <>
                     <div style={{ fontSize:12, color:'#92400e', marginBottom:10 }}>
@@ -678,7 +695,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
           </div>
 
           {/* Cột phải: Chat */}
-          {showChat && (memory || docChunks.length > 0) && (
+          {showChat && (memory || docChunks.length > 0 || jobDone) && (
             <div style={{ display:'flex', flexDirection:'column', borderLeft:'0.5px solid #e5e4e0', paddingLeft:20, minHeight:400 }}>
               <div style={{ fontSize:13, fontWeight:600, color:'#0a2342', marginBottom:12 }}>💬 Hỏi đáp sâu về tài liệu</div>
               {chat.length === 0 && (
