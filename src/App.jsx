@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import React from 'react'
+import { collection, query, where, getDocs, updateDoc, doc as fsDoc } from 'firebase/firestore'
+import { db } from './firebase'
 
 // Dự án cũ chưa có field category → suy luận theo tên để không mất dữ liệu
 const getCategory = (p) => {
@@ -205,6 +207,28 @@ function StatusCell({ doc, updateDocument, admin }) {
 function AppInner() {
   const { user, userDoc, status, isAdmin, isApproved, logout } = useAuth()
   const { projects, loading: pLoad, addProject, deleteProject } = useProjects(user?.uid)
+
+  // Tách 1 mục con (gói thầu/văn bản) thành 1 mục lớn riêng, cùng nhóm với mục cha,
+  // tự chuyển hết văn bản đang gắn trong đó theo — không mất dữ liệu.
+  const promotePackageToProject = async (pkg, parentProjectId) => {
+    if (!confirm(`Tách "${pkg.name}" thành 1 mục lớn riêng? Toàn bộ văn bản trong đó sẽ tự chuyển theo.`)) return
+    const parent = projects.find(p => p.id === parentProjectId)
+    const cat = parent ? getCategory(parent) : 'project'
+
+    const newProjRef = await addProject({ name: pkg.name, code:'', budget:'Đang lập', period:'2026–2030', address:'', category: cat })
+
+    const snap = await getDocs(query(
+      collection(db, 'documents'),
+      where('projectId', '==', parentProjectId),
+      where('packageId', '==', pkg.id),
+    ))
+    await Promise.all(snap.docs.map(d =>
+      updateDoc(fsDoc(db, 'documents', d.id), { projectId: newProjRef.id, packageId: null })
+    ))
+
+    await deletePackage(pkg.id)
+    alert(`✅ Đã tách "${pkg.name}" — chuyển ${snap.docs.length} văn bản theo.`)
+  }
   const { packages, addPackage, deletePackage } = usePackages()
   const { logLogin, logLogout, logViewDoc, logAddDoc, logEditDoc, logDeleteDoc,
           logAddProj, logDeleteProj, logExportReport } = useActivityLog(user, userDoc)
@@ -439,6 +463,8 @@ ${memCtx}`
                           </button>
                           <button onClick={() => { setRenameInput(pkg.name); setRenameTarget({ type:'package', id:pkg.id, currentName:pkg.name }) }}
                               style={{ padding:'2px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:10, flexShrink:0 }} title="Đổi tên">✎</button>
+                          <button onClick={() => promotePackageToProject(pkg, p.id)}
+                              style={{ padding:'2px 4px', background:'none', border:'none', cursor:'pointer', color:'#bbb', fontSize:10, flexShrink:0 }} title="Tách thành mục lớn riêng">⬆</button>
                           <button onClick={() => { if (confirm('Xóa gói thầu "'+pkg.name+'"?')) { deletePackage(pkg.id); if (selPkg===pkg.id) setSelPkg(null) } }}
                               style={{ padding:'2px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:10, flexShrink:0 }}>✕</button>
                         </div>
