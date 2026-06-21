@@ -698,14 +698,13 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                   <>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
                       <div style={{ fontSize:12, fontWeight:600, color:'#15803d' }}>
-                        🧠 Đã ghi nhớ · {fmtDate(memory.analyzedAt)}
+                        ✅ Tài liệu đã được phân tích · {fmtDate(memory.analyzedAt)}
                         {memory.readChars > 500 && <span style={{ fontWeight:400, color:'#888' }}> · {(memory.readChars/1000).toFixed(0)}K ký tự</span>}
-                        {docChunks.length > 0 && <span style={{ marginLeft:6, fontSize:10, padding:'1px 6px', borderRadius:8, background:'#dbeafe', color:'#1d4ed8' }}>📦 {docChunks.length} chunks</span>}
                       </div>
                       <div style={{ display:'flex', gap:6 }}>
                         <button onClick={() => setShowChat(v => !v)}
                           style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
-                          {showChat ? '✕ Đóng chat' : '💬 Hỏi đáp sâu'}
+                          💬 Hỏi đáp tài liệu
                         </button>
                         <button onClick={handleAnalyze} disabled={analyzing}
                           style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff', border:'0.5px solid #ddd', color:'#888', cursor:'pointer' }}
@@ -725,36 +724,24 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                       </div>
                     )}
                   </>
-                ) : docChunks.length > 0 ? (
-                  <>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
-                      <div style={{ fontSize:12, fontWeight:600, color:'#1d4ed8' }}>
-                        📦 {docChunks.length} chunks · Pipeline đã xử lý xong
-                      </div>
-                      <button onClick={() => setShowChat(v => !v)}
-                        style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
-                        {showChat ? '✕ Đóng chat' : '💬 Hỏi đáp sâu'}
-                      </button>
-                    </div>
-                    {analyzeStep && (
-                      <div style={{ fontSize:12, color:'#1d4ed8', marginBottom:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
-                    )}
-                  </>
-                ) : jobDone ? (
+                ) : (docChunks.length > 0 || jobDone) ? (
                   <div>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                      <div style={{ fontSize:12, color:'#1d4ed8' }}>✅ Pipeline đã xử lý xong</div>
+                      <div style={{ fontSize:12, fontWeight:600, color:'#1d4ed8' }}>✅ Tài liệu đã được phân tích</div>
                       <div style={{ display:'flex', gap:6 }}>
                         <button onClick={loadMdPreview} disabled={mdLoading}
-                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff', border:'0.5px solid #ddd', color:'#555', cursor:'pointer' }}>
-                          {mdLoading ? '⏳' : mdPreviewOpen ? '🔽 Ẩn nội dung' : '👁 Xem nội dung đã đọc'}
+                          style={{ padding:'5px 10px', borderRadius:7, fontSize:12, fontWeight:600, background:'#fff', border:'0.5px solid #ddd', color:'#374151', cursor:'pointer' }}>
+                          {mdLoading ? '⏳' : '📊 Phân tích tài liệu'}
                         </button>
                         <button onClick={() => setShowChat(v => !v)}
                           style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
-                          {showChat ? '✕ Đóng chat' : '💬 Hỏi đáp'}
+                          💬 Hỏi đáp tài liệu
                         </button>
                       </div>
                     </div>
+                    {analyzeStep && (
+                      <div style={{ fontSize:12, color:'#1d4ed8', marginTop:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
+                    )}
                     {mdPreviewOpen && mdPreview && (
                       <div style={{ marginTop:10 }}>
                         {mdPreview.error ? (
@@ -782,7 +769,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                               background:'#fafafa', border:'0.5px solid #e5e7eb', borderRadius:6, padding:10,
                               whiteSpace:'pre-wrap', color:'#374151',
                             }}>
-                              {mdPreview.text ? mdPreview.text.slice(0, 5000) + (mdPreview.text.length > 5000 ? '\n\n... (còn nữa, đã cắt để hiển thị)' : '') : '(Không có nội dung markdown — pipeline có thể chưa lưu được gì)'}
+                              {mdPreview.text ? mdPreview.text.slice(0, 5000) + (mdPreview.text.length > 5000 ? '\n\n... (còn nữa, đã cắt để hiển thị)' : '') : '(Không có nội dung — pipeline có thể chưa lưu được gì)'}
                             </div>
                           </>
                         )}
@@ -792,7 +779,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                 ) : (
                   <>
                     <div style={{ fontSize:12, color:'#92400e', marginBottom:10 }}>
-                      🧠 <b>Chưa có bộ nhớ</b> — Phân tích 1 lần, hỏi đáp mãi mãi!
+                      📋 <b>Tài liệu chưa phân tích</b> — Phân tích 1 lần, hỏi đáp mãi mãi!
                       {hasFile && <span style={{ color:'#555', fontWeight:400 }}> AI sẽ đọc toàn bộ {(fileSize/1024/1024).toFixed(1)}MB file.</span>}
                     </div>
                     {analyzeStep && (
