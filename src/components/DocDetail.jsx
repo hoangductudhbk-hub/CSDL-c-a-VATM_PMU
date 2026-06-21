@@ -622,6 +622,21 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                       </div>
                     )}
                   </>
+                ) : docChunks.length > 0 ? (
+                  <>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                      <div style={{ fontSize:12, fontWeight:600, color:'#1d4ed8' }}>
+                        📦 {docChunks.length} chunks · Pipeline đã xử lý xong
+                      </div>
+                      <button onClick={() => setShowChat(v => !v)}
+                        style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
+                        {showChat ? '✕ Đóng chat' : '💬 Hỏi đáp sâu'}
+                      </button>
+                    </div>
+                    {analyzeStep && (
+                      <div style={{ fontSize:12, color:'#1d4ed8', marginBottom:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
+                    )}
+                  </>
                 ) : (
                   <>
                     <div style={{ fontSize:12, color:'#92400e', marginBottom:10 }}>
@@ -645,7 +660,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
           </div>
 
           {/* Cột phải: Chat */}
-          {showChat && memory && (
+          {showChat && (memory || docChunks.length > 0) && (
             <div style={{ display:'flex', flexDirection:'column', borderLeft:'0.5px solid #e5e4e0', paddingLeft:20, minHeight:400 }}>
               <div style={{ fontSize:13, fontWeight:600, color:'#0a2342', marginBottom:12 }}>💬 Hỏi đáp sâu về tài liệu</div>
               {chat.length === 0 && (
