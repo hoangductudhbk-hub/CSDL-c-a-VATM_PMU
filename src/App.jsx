@@ -505,7 +505,7 @@ ${memCtx}`
                     onClick={() => setExpandedCats(s => { const n=new Set(s); n.has(g.key)?n.delete(g.key):n.add(g.key); return n })}
                     style={{ width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:6, padding:'8px 8px 4px', background:'none', border:'none', cursor:'pointer' }}>
                     <span style={{ fontSize:9, color:'#aaa' }}>{catOpen ? '▼' : '▶'}</span>
-                    <span style={{ fontSize:12, color:'#555', fontWeight:800, letterSpacing:'0.05em' }}>{g.label}</span>
+                    <span style={{ fontSize:13, color:'#1a1a1a', fontWeight:600 }}>{g.label}</span>
                   </button>
                   {catOpen && <>
                     {catProjects.map(p => renderProjectRow(p, g.key))}
