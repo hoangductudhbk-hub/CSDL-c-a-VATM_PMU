@@ -1,5 +1,6 @@
 {
   "functions": {
+    "api/test-keys.js": { "maxDuration": 15 },
     "api/process-batch.js": {
       "maxDuration": 60
     },
