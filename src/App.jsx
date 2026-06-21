@@ -371,13 +371,7 @@ ${memCtx}`
 
       {/* ── Sidebar ── */}
       <div style={{ width:220, background:'#fff', borderRight:'0.5px solid #e5e4e0', display:'flex', flexDirection:'column', flexShrink:0, height:'100vh', overflow:'hidden' }}>
-        <div style={{ padding:'16px 16px 12px', borderBottom:'0.5px solid #e5e4e0', textAlign:'center' }}>
-          <img src="/vatm-logo.png" alt="VATM" style={{ width:72, height:72, borderRadius:'50%', objectFit:'cover', display:'block', margin:'0 auto 8px' }}/>
-          <div style={{ fontSize:13, fontWeight:700, color:'#1a1a1a' }}>VATM-PMU</div>
-          <div style={{ fontSize:10, color:'#888', fontWeight:600 }}>QUẢN LÝ CÁC DỰ ÁN</div>
-        </div>
-
-        <div style={{ padding:'0 8px', flex:'none' }}>
+        <div style={{ padding:'0 8px', flex:'none', marginTop:12 }}>
           {[['home','🏠','Trang chủ','docs'],['home','📖','Hướng dẫn sử dụng','guide'],['home','📋','Lịch sử truy cập','history']].map(([p_,icon,label,t]) => (
             <button key={label} onClick={() => { setSelProj(p_); setSelPkg(null); setTab(t) }}
               style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:tab===t&&selProj==='home'?'#f0f0ec':'transparent', color:'#1a1a1a', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
