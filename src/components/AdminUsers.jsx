@@ -1,6 +1,6 @@
 // src/components/AdminUsers.jsx
 import { useEffect, useState } from 'react'
-import { collection, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore'
+import { collection, onSnapshot, doc, updateDoc, deleteDoc, getDocs } from 'firebase/firestore'
 import { db } from '../firebase'
 import emailjs from '@emailjs/browser'
 
@@ -93,6 +93,48 @@ export default function AdminUsers() {
   const [filter,  setFilter]  = useState('pending')
   const [mainTab, setMainTab] = useState('users')
   const [sending, setSending] = useState(null)
+  const [cleaning, setCleaning] = useState(false)
+
+  // Dọn dữ liệu rác — chỉ xoá phần KHÔNG còn văn bản gốc tương ứng,
+  // không động tới văn bản đang dùng thật.
+  const cleanupOrphanedData = async () => {
+    if (!confirm('Quét và xoá dữ liệu rác (không còn văn bản gốc) trong Firestore?\nKhông ảnh hưởng văn bản đang dùng.')) return
+    setCleaning(true)
+    try {
+      const docsSnap = await getDocs(collection(db, 'documents'))
+      const validIds = new Set(docsSnap.docs.map(d => d.id))
+      const validMdRefs = new Set(docsSnap.docs.map(d => d.data().markdownRef).filter(Boolean))
+      const removed = { memory: 0, markdown: 0, chunks: 0, jobs: 0 }
+
+      const memSnap = await getDocs(collection(db, 'documentMemory'))
+      for (const m of memSnap.docs) {
+        if (!validIds.has(m.id)) { await deleteDoc(doc(db, 'documentMemory', m.id)); removed.memory++ }
+      }
+
+      const jobSnap = await getDocs(collection(db, 'processingJobs'))
+      for (const j of jobSnap.docs) {
+        if (!validIds.has(j.id)) { await deleteDoc(doc(db, 'processingJobs', j.id)); removed.jobs++ }
+      }
+
+      const mdSnap = await getDocs(collection(db, 'documentMarkdown'))
+      for (const md of mdSnap.docs) {
+        if (!validMdRefs.has(md.id)) { await deleteDoc(doc(db, 'documentMarkdown', md.id)); removed.markdown++ }
+      }
+
+      const chunkSnap = await getDocs(collection(db, 'documentChunks'))
+      for (const c of chunkSnap.docs) {
+        const parentId = c.data().docId
+        if (!parentId || !validIds.has(parentId)) { await deleteDoc(doc(db, 'documentChunks', c.id)); removed.chunks++ }
+      }
+
+      alert(`✅ Đã dọn xong:\n- Bộ nhớ AI rác: ${removed.memory}\n- Markdown rác: ${removed.markdown}\n- Chunks rác: ${removed.chunks}\n- Job xử lý rác: ${removed.jobs}`)
+    } catch (e) {
+      alert('❌ Lỗi khi dọn: ' + e.message)
+    } finally {
+      setCleaning(false)
+    }
+  }
+
 
   useEffect(() => {
     const u1 = onSnapshot(collection(db, 'users'), snap =>
@@ -166,11 +208,18 @@ export default function AdminUsers() {
     <div style={{ padding:24, maxWidth:960, margin:'0 auto' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
         <div style={{ fontSize:20, fontWeight:700, color:'#0a2342' }}>👥 Quản lý người dùng</div>
-        <button
-          onClick={() => exportUsersWord(users)}
-          style={{ padding:'8px 18px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
-          📊 Thống kê người dùng
-        </button>
+        <div style={{ display:'flex', gap:8 }}>
+          <button
+            onClick={cleanupOrphanedData} disabled={cleaning}
+            style={{ padding:'8px 18px', background:cleaning?'#9ca3af':'#dc2626', color:'#fff', border:'none', borderRadius:8, cursor:cleaning?'not-allowed':'pointer', fontSize:13, fontWeight:600 }}>
+            {cleaning ? '⏳ Đang dọn...' : '🧹 Dọn dữ liệu rác'}
+          </button>
+          <button
+            onClick={() => exportUsersWord(users)}
+            style={{ padding:'8px 18px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
+            📊 Thống kê người dùng
+          </button>
+        </div>
       </div>
       <p style={{ fontSize:13, color:'#888', marginBottom:20 }}>Duyệt tài khoản và xử lý yêu cầu đặt lại mật khẩu</p>
 
