@@ -263,6 +263,32 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   const [chat,             setChat]             = useState([])
   const [chatInput,        setChatInput]        = useState('')
   const [autoPipeStarted,  setAutoPipeStarted]  = useState(false)
+  // ── Xem trực tiếp nội dung đã đọc — để biết "đã xong" có thật không ──
+  const [mdPreview,    setMdPreview]    = useState(null)   // {text, charCount, totalPages}
+  const [mdPreviewOpen, setMdPreviewOpen] = useState(false)
+  const [mdLoading,    setMdLoading]    = useState(false)
+
+  const loadMdPreview = async () => {
+    if (mdPreview) { setMdPreviewOpen(v => !v); return } // đã tải rồi, chỉ toggle hiện/ẩn
+    setMdLoading(true)
+    try {
+      const { doc: fsDoc, getDoc } = await import('firebase/firestore')
+      const { db } = await import('../firebase')
+      let text = '', charCount = 0
+      if (doc?.markdownRef) {
+        const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.markdownRef))
+        if (mdSnap.exists()) { text = mdSnap.data().markdown || ''; charCount = mdSnap.data().charCount || text.length }
+      }
+      let totalPages = null
+      const jobSnap = await getDoc(fsDoc(db, 'processingJobs', doc.id))
+      if (jobSnap.exists()) totalPages = jobSnap.data().totalPages || null
+      setMdPreview({ text, charCount, totalPages })
+      setMdPreviewOpen(true)
+    } catch (e) {
+      setMdPreview({ text: '', charCount: 0, totalPages: null, error: e.message })
+      setMdPreviewOpen(true)
+    } finally { setMdLoading(false) }
+  }
   const [jobDone,          setJobDone]          = useState(false)
   const chatEndRef = useRef(null)
 
@@ -674,12 +700,53 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                     )}
                   </>
                 ) : jobDone ? (
-                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                    <div style={{ fontSize:12, color:'#1d4ed8' }}>✅ Pipeline đã xử lý xong</div>
-                    <button onClick={() => setShowChat(v => !v)}
-                      style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
-                      {showChat ? '✕ Đóng chat' : '💬 Hỏi đáp'}
-                    </button>
+                  <div>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                      <div style={{ fontSize:12, color:'#1d4ed8' }}>✅ Pipeline đã xử lý xong</div>
+                      <div style={{ display:'flex', gap:6 }}>
+                        <button onClick={loadMdPreview} disabled={mdLoading}
+                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff', border:'0.5px solid #ddd', color:'#555', cursor:'pointer' }}>
+                          {mdLoading ? '⏳' : mdPreviewOpen ? '🔽 Ẩn nội dung' : '👁 Xem nội dung đã đọc'}
+                        </button>
+                        <button onClick={() => setShowChat(v => !v)}
+                          style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
+                          {showChat ? '✕ Đóng chat' : '💬 Hỏi đáp'}
+                        </button>
+                      </div>
+                    </div>
+                    {mdPreviewOpen && mdPreview && (
+                      <div style={{ marginTop:10 }}>
+                        {mdPreview.error ? (
+                          <div style={{ fontSize:12, color:'#b91c1c' }}>❌ Không tải được: {mdPreview.error}</div>
+                        ) : (
+                          <>
+                            {(() => {
+                              const avgPerPage = mdPreview.totalPages ? Math.round(mdPreview.charCount / mdPreview.totalPages) : null
+                              const looksThin = avgPerPage != null && avgPerPage < 100
+                              return (
+                                <div style={{
+                                  fontSize:12, marginBottom:8, padding:'6px 10px', borderRadius:6,
+                                  background: looksThin ? '#fef2f2' : '#f0fdf4',
+                                  color:      looksThin ? '#b91c1c' : '#15803d',
+                                }}>
+                                  {looksThin ? '⚠️ ' : '✅ '}
+                                  {mdPreview.charCount.toLocaleString()} ký tự
+                                  {mdPreview.totalPages ? ` / ${mdPreview.totalPages} trang (~${avgPerPage} ký tự/trang)` : ''}
+                                  {looksThin && ' — quá ít so với số trang, có thể đã đọc thiếu, kiểm tra lại bên dưới.'}
+                                </div>
+                              )
+                            })()}
+                            <div style={{
+                              maxHeight:240, overflowY:'auto', fontSize:12, lineHeight:1.6,
+                              background:'#fafafa', border:'0.5px solid #e5e7eb', borderRadius:6, padding:10,
+                              whiteSpace:'pre-wrap', color:'#374151',
+                            }}>
+                              {mdPreview.text ? mdPreview.text.slice(0, 5000) + (mdPreview.text.length > 5000 ? '\n\n... (còn nữa, đã cắt để hiển thị)' : '') : '(Không có nội dung markdown — pipeline có thể chưa lưu được gì)'}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -690,9 +757,9 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                     {analyzeStep && (
                       <div style={{ fontSize:12, color:'#1d4ed8', marginBottom:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
                     )}
-                    <button onClick={handleAnalyze} disabled={analyzing}
-                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background: analyzing ? '#9ca3af' : '#0a2342', color:'#fff', border:'none', cursor: analyzing ? 'not-allowed' : 'pointer' }}>
-                      {analyzing ? analyzeStep || '⏳ Đang phân tích...' : '🧠 Phân tích & Ghi nhớ tài liệu'}
+                    <button onClick={handleAnalyze} disabled={analyzing || autoPipeStarted}
+                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background: (analyzing || autoPipeStarted) ? '#9ca3af' : '#0a2342', color:'#fff', border:'none', cursor: (analyzing || autoPipeStarted) ? 'not-allowed' : 'pointer' }}>
+                      {autoPipeStarted ? (analyzeStep || '⏳ Đang tự động xử lý...') : analyzing ? (analyzeStep || '⏳ Đang phân tích...') : '🧠 Phân tích & Ghi nhớ tài liệu'}
                     </button>
                   </>
                 )}
