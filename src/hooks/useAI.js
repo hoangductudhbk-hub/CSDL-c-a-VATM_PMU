@@ -12,8 +12,16 @@ const OPENROUTER_MODELS = [
 ]
 const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
+// Format cũ AIzaSy... dùng ?key=, format mới AQ.... dùng x-goog-api-key header
 const GEM_URL = (model, key) =>
-  `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`
+  key.startsWith('AIzaSy')
+    ? `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`
+    : `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent`
+const GEM_HEADERS = (key) => {
+  const h = { 'Content-Type': 'application/json' }
+  if (!key.startsWith('AIzaSy')) h['x-goog-api-key'] = key
+  return h
+}
 
 // ── Lấy keys ────────────────────────────────────────────────────
 const getGroqKeys = () => {
@@ -79,7 +87,7 @@ const callGemini = async (prompt, maxTokens = 1000) => {
       try {
         const res = await fetch(GEM_URL(model, key), {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: GEM_HEADERS(key),
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens },

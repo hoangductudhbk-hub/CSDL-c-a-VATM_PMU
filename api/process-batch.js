@@ -32,33 +32,35 @@ const getGeminiKeys = () =>
 const getGhToken = () => process.env.VITE_GH_TOKEN || process.env.GH_TOKEN || ''
 
 // ── Gọi Gemini với PDF inline ────────────────────────────────────────
+// Hỗ trợ cả 2 format key:
+//   AIzaSy... → ?key= URL param (format cũ)
+//   AQ....    → x-goog-api-key header (format mới của AI Studio)
 const callGemini = async (base64Pdf, prompt, keys) => {
-  const GEMINI_URL = (key) =>
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`
+  const GEMINI_BASE = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
+
+  const bodyJson = JSON.stringify({
+    contents: [{
+      parts: [
+        { inline_data: { mime_type: 'application/pdf', data: base64Pdf } },
+        { text: prompt }
+      ]
+    }],
+    generationConfig: { temperature: 0, maxOutputTokens: 8192 }
+  })
 
   for (const key of keys) {
+    // Chọn auth method theo format key
+    const isOldFormat = key.startsWith('AIzaSy')
+    const url      = isOldFormat ? `${GEMINI_BASE}?key=${key}` : GEMINI_BASE
+    const headers  = { 'Content-Type': 'application/json' }
+    if (!isOldFormat) headers['x-goog-api-key'] = key
+
     try {
-      const res = await fetchWithRetry(
-        GEMINI_URL(key),
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { inline_data: { mime_type: 'application/pdf', data: base64Pdf } },
-                { text: prompt }
-              ]
-            }],
-            generationConfig: { temperature: 0, maxOutputTokens: 8192 }
-          })
-        },
-        2 // chỉ retry 2 lần per key rồi thử key tiếp
-      )
+      const res = await fetchWithRetry(url, { method: 'POST', headers, body: bodyJson }, 2)
 
       if (!res.ok) {
-        const body = await res.text()
-        console.error(`[process-batch] Gemini key ${key.slice(0, 12)}... HTTP ${res.status}: ${body.slice(0, 300)}`)
+        const errBody = await res.text()
+        console.error(`[process-batch] Gemini key ${key.slice(0, 12)}... HTTP ${res.status}: ${errBody.slice(0, 400)}`)
         continue
       }
 
