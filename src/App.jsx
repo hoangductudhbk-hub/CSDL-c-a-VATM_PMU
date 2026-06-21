@@ -237,6 +237,7 @@ function AppInner() {
   const [selProj, setSelProj]         = useState('home')
   const [selPkg,  setSelPkg]          = useState(null)
   const [expandedProjs, setExpandedProjs] = useState(new Set())
+  const [expandedCats,  setExpandedCats]  = useState(new Set()) // mặc định ẩn hết, bấm vào tên nhóm mới hiện
 
   const proj = selProj === 'home' ? null : (projects.find(p => p.id === selProj) || null)
   const selPkgObj = selPkg ? packages.find(p => p.id === selPkg) : null
@@ -486,16 +487,27 @@ ${memCtx}`
               { key:'form',       label:'BIỂU MẪU', addLabel:'+ Thêm biểu mẫu' },
             ]
 
-            return groups.map(g => {
+            return groups.map((g, idx) => {
               const catProjects = projects.filter(p => getCategory(p) === g.key)
+              const catOpen = expandedCats.has(g.key)
               return (
-                <div key={g.key} style={{ marginBottom:10 }}>
-                  <div style={{ fontSize:12, color:'#555', padding:'8px 8px 4px', fontWeight:800, letterSpacing:'0.05em' }}>{g.label}</div>
-                  {catProjects.map(p => renderProjectRow(p, g.key))}
-                  <button onClick={() => setShowAddProj(g.key)}
-                    style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:'#888', fontSize:12, marginTop:2, fontWeight:600 }}>
-                    {g.addLabel}
+                <div key={g.key} style={{
+                  marginBottom:10, paddingTop: idx>0?10:0,
+                  borderTop: idx>0 ? '1px solid #e5e4e0' : 'none',
+                }}>
+                  <button
+                    onClick={() => setExpandedCats(s => { const n=new Set(s); n.has(g.key)?n.delete(g.key):n.add(g.key); return n })}
+                    style={{ width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:6, padding:'8px 8px 4px', background:'none', border:'none', cursor:'pointer' }}>
+                    <span style={{ fontSize:9, color:'#aaa' }}>{catOpen ? '▼' : '▶'}</span>
+                    <span style={{ fontSize:12, color:'#555', fontWeight:800, letterSpacing:'0.05em' }}>{g.label}</span>
                   </button>
+                  {catOpen && <>
+                    {catProjects.map(p => renderProjectRow(p, g.key))}
+                    <button onClick={() => setShowAddProj(g.key)}
+                      style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:'#888', fontSize:12, marginTop:2, fontWeight:600 }}>
+                      {g.addLabel}
+                    </button>
+                  </>}
                 </div>
               )
             })
