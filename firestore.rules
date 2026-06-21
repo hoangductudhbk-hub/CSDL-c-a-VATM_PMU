@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    match /users/{userId} {
+      allow read:   if isAuth();
+      allow write:  if isAuth() && request.auth.uid == userId;
+    }
+
+    match /projects/{projectId} {
+      allow read, write: if isAuth();
+    }
+
+    match /packages/{packageId} {
+      allow read, write: if isAuth();
+    }
+
+    match /documents/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // AI memory — client ghi sau khi phân tích
+    match /documentMemory/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // Markdown đầy đủ của từng văn bản — client ghi từ DocModal
+    match /documentMarkdown/{docId} {
+      allow read, write: if isAuth();
+    }
+
+    // Chunks PDF theo từng nhóm trang — client ghi từ DocModal (Gemini OCR)
+    match /documentChunks/{chunkId} {
+      allow read, write: if isAuth();
+    }
+
+    // Jobs xử lý tự động (Bước 2) — client tạo job, serverless cập nhật stage
+    match /processingJobs/{jobId} {
+      allow read, write: if isAuth();
+    }
+
+    match /activityLogs/{logId} {
+      allow read:           if isAuth();
+      allow create:         if isAuth();
+      allow update, delete: if false;
+    }
+
+    // Public — cần để reset password không cần đăng nhập
+    match /resetRequests/{reqId} {
+      allow read, write: if true;
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "api/process-batch.js": {
+      "maxDuration": 60
+    },
+    "api/process-document.js": {
+      "maxDuration": 10
+    },
+    "api/delete-file.js": {
+      "maxDuration": 15
+    },
+    "api/read-file.js": {
+      "maxDuration": 30
+    }
+  }
+}
