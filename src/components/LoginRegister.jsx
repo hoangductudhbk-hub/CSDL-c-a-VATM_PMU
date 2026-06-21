@@ -61,7 +61,7 @@ function LoginForm({ onSwitch, onForgot, login }) {
   }
 
   return (
-    <div>
+    <div style={{ fontFamily:'Times New Roman,serif' }}>
       <input type="text" style={{ display:'none' }} autoComplete="username"/>
       <input type="password" style={{ display:'none' }} autoComplete="current-password"/>
       <h3 style={{ fontSize:18, fontWeight:700, color:'#0a2342', marginBottom:20, textAlign:'center' }}>Chào mừng trở lại!</h3>
