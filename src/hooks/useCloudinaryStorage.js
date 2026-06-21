@@ -117,7 +117,6 @@ export function useCloudinaryStorage() {
       try { errMsg = JSON.parse(xhr.responseText)?.message || errMsg } catch {}
 
       if (xhr.status === 401 || xhr.status === 403) {
-        // Log rõ token nào đang dùng để debug
         const isEnvToken = Boolean(import.meta.env.VITE_GH_TOKEN)
         const tokenSrc   = isEnvToken ? 'Vercel env var' : 'localStorage'
         console.error(`[GitHub 401] Token từ ${tokenSrc}: ${token.slice(0, 10)}...`)
