@@ -529,11 +529,61 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   }
 
   // ── Hỏi đáp sâu dùng bộ nhớ ──
+  // ── Tìm câu trả lời trong dữ liệu đã trích xuất sẵn (keyPoints, legal,
+  // deadlines, technicalSpecs, financial, members, otherData, requirements,
+  // risks) — TRƯỚC khi gọi AI. Có rồi thì trả lời ngay, không tốn 1 lượt AI. ──
+  const searchStructuredMemory = (mem, question) => {
+    if (!mem) return null
+    const stopWords = new Set(['là','gì','có','của','và','các','cho','trong','được','không','về','này','đó','với','những','theo','từ','khi','hay','hoặc','như','thì','mà','để','tôi','bạn','hãy','cần','phải','làm','nào','ai','quy','định'])
+    const keywords = question.toLowerCase().replace(/[?.,!;:]/g, ' ').split(/\s+/)
+      .filter(w => w.length > 2 && !stopWords.has(w))
+    if (!keywords.length) return null
+
+    const arrayFields = ['keyPoints', 'legal', 'deadlines', 'technicalSpecs', 'financial', 'members', 'otherData']
+    const matches = []
+    for (const field of arrayFields) {
+      const arr = mem[field]
+      if (!Array.isArray(arr)) continue
+      for (const item of arr) {
+        if (!item) continue
+        const lower = String(item).toLowerCase()
+        const score = keywords.reduce((s, kw) => s + (lower.includes(kw) ? 1 : 0), 0)
+        if (score > 0) matches.push({ item, score })
+      }
+    }
+    for (const field of ['requirements', 'risks']) {
+      const text = mem[field]
+      if (text && typeof text === 'string') {
+        const lower = text.toLowerCase()
+        const score = keywords.reduce((s, kw) => s + (lower.includes(kw) ? 1 : 0), 0)
+        if (score > 0) matches.push({ item: text, score })
+      }
+    }
+
+    if (!matches.length) return null
+    matches.sort((a, b) => b.score - a.score)
+    const topScore = matches[0].score
+    // Chỉ chắc ăn khi khớp ít nhất 2 từ khóa, hoặc 1 từ khóa nhưng không còn lựa chọn nào khác có điểm cao hơn
+    if (topScore < (keywords.length > 1 ? 2 : 1)) return null
+
+    const best = matches.filter(m => m.score === topScore).slice(0, 5)
+    return best.map(m => `• ${m.item}`).join('\n')
+  }
+
   const handleAsk = async (q) => {
     if (!q.trim() || aiLoading) return
     setChat(c => [...c, { role:'user', content:q }])
     setChatInput('')
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 50)
+
+    // ── Ưu tiên 1: có sẵn trong dữ liệu đã trích xuất → trả lời ngay, không gọi AI ──
+    const directAnswer = searchStructuredMemory(memory, q)
+    if (directAnswer) {
+      setChat(c => [...c, { role:'ai', content: `📋 Tìm thấy trong dữ liệu đã trích xuất (không cần gọi AI):\n\n${directAnswer}` }])
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
+      return
+    }
+
     try {
       // RAG: Ưu tiên chunks Firestore, fallback memory.extractedText, fallback metadata
       let relevantText = ''
