@@ -6,6 +6,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return isAuth() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'admin';
+    }
+
     match /users/{userId} {
       allow read:   if isAuth();
       allow write:  if isAuth() && request.auth.uid == userId;
@@ -46,7 +51,8 @@ service cloud.firestore {
     match /activityLogs/{logId} {
       allow read:           if isAuth();
       allow create:         if isAuth();
-      allow update, delete: if false;
+      allow update:         if false;
+      allow delete:         if isAdmin();
     }
 
     // Public — cần để reset password không cần đăng nhập

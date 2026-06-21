@@ -162,7 +162,7 @@ export default function HistoryView({ user }) {
             <h3 style={{ fontSize:15, fontWeight:600, margin:'0 0 4px' }}>📋 Lịch sử truy cập</h3>
             <p style={{ fontSize:12, color:'#888', margin:0 }}>
               {filtered.length} bản ghi &nbsp;·&nbsp;
-              <span style={{ color:'#b91c1c' }}>Chỉ đọc — không thể xóa</span>
+              {!isAdmin && <span style={{ color:'#b91c1c' }}>Chỉ đọc — không thể xóa</span>}
             </p>
           </div>
           <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
