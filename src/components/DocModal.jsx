@@ -57,7 +57,7 @@ const callGeminiPdf = async (base64, prompt, gemKeys) => {
   return null
 }
 
-// ── Gemini đọc PDF theo nhóm trang, lưu chunks vào Firestore ─────
+// ── Gemini đọc PDF theo nhóm trang ────────────────────────────────
 // pageGroup: 30 trang/lần → tối đa 200 trang = 7 lần gọi
 const extractPdfWithGemini = async (buf, fileName = '', docId = null, onStatus = null) => {
   const gemKeys = [
@@ -67,23 +67,21 @@ const extractPdfWithGemini = async (buf, fileName = '', docId = null, onStatus =
   ].filter(Boolean)
   if (!gemKeys.length) return null
 
+  if (onStatus) onStatus('📄 Đang đọc văn bản...')
+
   // Đọc số trang bằng pdfjs (nhanh, không cần nội dung)
   const lib = await loadPdfJs()
   const pdf = await lib.getDocument({ data: buf.slice(0) }).promise
   const totalPages = pdf.numPages
   const PAGE_GROUP = 30 // trang/lần gọi Gemini
 
-  if (onStatus) onStatus(`📄 PDF có ${totalPages} trang · Đang chia thành nhóm ${PAGE_GROUP} trang...`)
-
   const base64 = bufToBase64(buf)
-  const allChunks = []
   let allText = ''
 
   const groups = Math.ceil(totalPages / PAGE_GROUP)
   for (let g = 0; g < groups; g++) {
     const fromPage = g * PAGE_GROUP + 1
     const toPage = Math.min((g + 1) * PAGE_GROUP, totalPages)
-    if (onStatus) onStatus(`🤖 Gemini đọc trang ${fromPage}–${toPage} / ${totalPages}...`)
 
     const prompt = `Trích xuất nội dung từ trang ${fromPage} đến trang ${toPage} của PDF: "${fileName}".
 Yêu cầu:
@@ -94,41 +92,12 @@ Yêu cầu:
 - KHÔNG tóm tắt, chỉ trả về Markdown thuần túy`
 
     const chunkText = await callGeminiPdf(base64, prompt, gemKeys)
-    if (chunkText) {
-      allChunks.push({ fromPage, toPage, text: chunkText, index: g })
-      allText += chunkText + '\n\n'
-      if (onStatus) onStatus(`✅ Xong trang ${fromPage}–${toPage} (${chunkText.length.toLocaleString()} ký tự)`)
-    } else {
-      if (onStatus) onStatus(`⚠️ Bỏ qua trang ${fromPage}–${toPage} (rate limit)`)
-    }
+    if (chunkText) allText += chunkText + '\n\n'
 
     // Delay giữa các nhóm tránh rate limit
     if (g < groups - 1) await new Promise(r => setTimeout(r, 1500))
   }
 
-  // Lưu chunks vào Firestore nếu có docId
-  if (docId && allChunks.length > 0) {
-    try {
-      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore')
-      const { db } = await import('../firebase')
-      for (const chunk of allChunks) {
-        await addDoc(collection(db, 'documentChunks'), {
-          docId,
-          fileName,
-          fromPage: chunk.fromPage,
-          toPage: chunk.toPage,
-          chunkIndex: chunk.index,
-          text: chunk.text,
-          createdAt: serverTimestamp()
-        })
-      }
-      if (onStatus) onStatus(`💾 Đã lưu ${allChunks.length} chunks vào Firestore`)
-    } catch(e) {
-      console.warn('Lưu chunks lỗi:', e.message)
-    }
-  }
-
-  if (onStatus) onStatus(`✅ Hoàn thành! Đọc ${totalPages} trang · ${allText.length.toLocaleString()} ký tự`)
   return allText.slice(0, 200000) // lưu 200K vào extractedText
 }
 
@@ -149,7 +118,6 @@ const extractPdfTextFull = async (buf) => {
 const extractPdfFull = async (buf, fileName = '', docId = null, onStatus = null) => {
   const gemResult = await extractPdfWithGemini(buf.slice(0), fileName, docId, onStatus)
   if (gemResult) return gemResult
-  if (onStatus) onStatus('📄 Gemini không khả dụng · Dùng pdfjs fallback...')
   return await extractPdfTextFull(buf.slice(0))
 }
 
