@@ -4,8 +4,24 @@
 //
 // Request: { docId, fileUrl, fileName, fromPage, toPage, batchIndex }
 // Response: { ok, text, docId, batchIndex, fromPage, toPage, charCount }
+//
+// SỬA 22/6/2026 — 3 lỗi gốc tìm thấy khi soát lại dữ liệu thật trong Firestore:
+// 1. gemini-2.0-flash / gemini-2.0-flash-lite đã bị Google khai tử 1/6/2026.
+//    Mọi lệnh gọi Gemini OCR đều lỗi từ đó tới nay, không ai biết vì lỗi bị
+//    nuốt âm thầm (continue) rồi rơi xuống nhánh "text thô" — nhìn ngoài cứ
+//    tưởng là rate-limit. -> đổi sang gemini-2.5-flash / gemini-2.5-flash-lite.
+// 2. callGeminiOCR cũ gửi NGUYÊN file PDF cho mỗi lô (8-10 trang), kèm câu
+//    chữ "trích xuất trang X-Y" — chỉ là hướng dẫn bằng lời, không phải file
+//    đã cắt đúng. Gemini có thể trả lời đúng là "không có nội dung ở phạm vi
+//    này" nếu hiểu sai/lố phạm vi. -> dùng pdf-lib cắt đúng fromPage..toPage
+//    thành 1 PDF con trước khi gửi, Gemini chỉ thấy đúng phần cần đọc.
+// 3. Điều kiện nhận kết quả cũ chỉ là `text.length > 30` — câu Gemini từ
+//    chối ("không có nội dung nào...") cũng dài hơn 30 ký tự nên được nhận
+//    làm nội dung hợp lệ luôn. -> thêm cổng kiểm tra (isLikelyInvalid) trước
+//    khi chấp nhận, không lưu lời từ chối làm markdown chính thức.
 
 import { createRequire } from 'module'
+import { PDFDocument } from 'pdf-lib'
 const require = createRequire(import.meta.url)
 
 const getGroqKeys = () => [
@@ -63,11 +79,32 @@ ${text.slice(0, 6000)}
   return null
 }
 
+// ── Cắt đúng trang fromPage..toPage thành 1 PDF con ───────────────
+// Lý do tồn tại: gửi nguyên file PDF mỗi lô vừa lãng phí (1 file 125 trang
+// chia 13 lô = tải lên Gemini 13 lần), vừa làm Gemini phải tự đoán phạm vi
+// trang chỉ qua câu chữ trong prompt — dễ đoán nhầm/đoán lố. Cắt đúng trang
+// trước thì Gemini chỉ thấy đúng phần cần đọc, không phải tự đoán.
+const extractPageRange = async (pdfBuffer, fromPage, toPage) => {
+  const srcDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true })
+  const totalPages = srcDoc.getPageCount()
+  const start = Math.max(0, fromPage - 1)
+  const end = Math.min(totalPages, toPage) // toPage là 1-indexed, inclusive
+  if (start >= end) throw new Error(`Phạm vi trang không hợp lệ: ${fromPage}-${toPage} (file có ${totalPages} trang)`)
+
+  const indices = []
+  for (let i = start; i < end; i++) indices.push(i)
+
+  const newDoc = await PDFDocument.create()
+  const copiedPages = await newDoc.copyPages(srcDoc, indices)
+  copiedPages.forEach(p => newDoc.addPage(p))
+  const bytes = await newDoc.save()
+  return { buffer: Buffer.from(bytes), totalPages }
+}
+
 // ── Gemini OCR (cho PDF scan) ─────────────────────────────────────
-// Hỗ trợ cả 2 định dạng key, đồng bộ với src/hooks/useAI.js:
+// Hỗ trợ cả 2 định dạng key:
 // - Key cũ "AIzaSy..." → gửi qua query param ?key=
-// - Key mới "AQ...." (Authorization key, Google đang chuyển sang từ 6/2026)
-//   → gửi qua header x-goog-api-key
+// - Key mới "AQ...." (Authorization key) → gửi qua header x-goog-api-key
 const geminiUrl = (model, key) =>
   key.startsWith('AIzaSy')
     ? `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`
@@ -79,11 +116,30 @@ const geminiHeaders = (key) => {
   return h
 }
 
-const callGeminiOCR = async (base64Pdf, fileName, fromPage, toPage) => {
+// gemini-2.0-flash / gemini-2.0-flash-lite đã bị Google khai tử 1/6/2026.
+// Dùng gemini-2.5-flash / gemini-2.5-flash-lite (free tier vẫn có).
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+
+// ── Cổng kiểm tra chất lượng — chặn rác trước khi cho phép lưu ────
+// Không tin tuyệt đối vào bất cứ thứ Gemini trả về. Kiểm tra rẻ, không cần
+// gọi AI thêm lần nào: regex câu từ chối/hội thoại + mật độ chữ quá thấp.
+const REFUSAL_PATTERNS = /không có nội dung|không thấy nội dung|không tìm thấy nội dung|không có thông tin nào|vui lòng cung cấp|tôi không thể|xin lỗi[, ].{0,30}(không|chưa)|i (cannot|don't|do not|can't) (see|find|have)|please provide/i
+
+const isLikelyInvalid = (text, pageCount) => {
+  if (!text || text.trim().length < 20) return true
+  if (REFUSAL_PATTERNS.test(text)) return true
+  const avgCharsPerPage = text.length / Math.max(pageCount, 1)
+  if (avgCharsPerPage < 50) return true // văn bản hành chính thật luôn nhiều hơn mức này
+  return false
+}
+
+const callGeminiOCR = async (pageBuffer, fileName, fromPage, toPage) => {
   const keys = getGeminiKeys()
-  const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
+  const pageCount = toPage - fromPage + 1
+  const base64Pdf = pageBuffer.toString('base64')
+
   for (const key of keys) {
-    for (const model of models) {
+    for (const model of GEMINI_MODELS) {
       try {
         const res = await fetch(geminiUrl(model, key), {
           method: 'POST',
@@ -92,20 +148,29 @@ const callGeminiOCR = async (base64Pdf, fileName, fromPage, toPage) => {
             contents: [{
               parts: [
                 { inline_data: { mime_type: 'application/pdf', data: base64Pdf } },
-                { text: `Trích xuất TOÀN BỘ nội dung trang ${fromPage}-${toPage} của file PDF này (file "${fileName}").
+                { text: `Đây là ${pageCount} trang trích từ tài liệu "${fileName}" (tương ứng trang ${fromPage}-${toPage} của bản gốc).
+Trích xuất TOÀN BỘ nội dung các trang này.
 Giữ nguyên 100% câu chữ, số liệu, tên người, bảng biểu, điều khoản. Giữ cấu trúc tiêu đề/điều/khoản.
-KHÔNG tóm tắt, KHÔNG bỏ thông tin. Chỉ trả về nội dung dạng Markdown thuần.` },
+KHÔNG tóm tắt, KHÔNG bỏ thông tin. Chỉ trả về nội dung dạng Markdown thuần — không bình luận, không giải thích.` },
               ],
             }],
             generationConfig: { temperature: 0, maxOutputTokens: 8192 },
           }),
         })
         if (res.status === 429) continue
-        if (!res.ok) continue
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '')
+          console.error(`[process-batch] Gemini ${model} HTTP ${res.status}: ${errText.slice(0, 300)}`)
+          continue
+        }
         const data = await res.json()
         const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-        if (text.length > 30) return text
-      } catch { continue }
+        if (!isLikelyInvalid(text, pageCount)) return { text, model }
+        console.error(`[process-batch] Gemini ${model} trả nội dung không hợp lệ (rỗng/từ chối/quá ngắn) cho trang ${fromPage}-${toPage}: "${text.slice(0, 150)}"`)
+      } catch (e) {
+        console.error(`[process-batch] lỗi gọi Gemini ${model}:`, e.message)
+        continue
+      }
     }
   }
   return null
@@ -184,22 +249,36 @@ export default async function handler(req, res) {
     })
   }
 
-  // ── PDF scan → Gemini OCR (đã có key sẵn, không cần đăng ký mới) ─
+  // ── PDF scan → cắt đúng trang rồi gửi Gemini OCR ─────────────
   const geminiKeys = getGeminiKeys()
   if (geminiKeys.length) {
-    const base64Pdf = pdfBuffer.toString('base64')
-    const ocrText = await callGeminiOCR(base64Pdf, fileName || 'document', fromPage, toPage)
-    if (ocrText) {
-      return res.status(200).json({
-        ok: true, docId,
-        batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
-        text: ocrText, charCount: ocrText.length,
-        method: 'gemini-ocr',
+    try {
+      const { buffer: pageBuffer, totalPages: realTotalPages } = await extractPageRange(pdfBuffer, fromPage, toPage)
+      if (realTotalPages) totalPages = realTotalPages
+
+      const ocrResult = await callGeminiOCR(pageBuffer, fileName || 'document', fromPage, toPage)
+      if (ocrResult) {
+        return res.status(200).json({
+          ok: true, docId,
+          batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
+          text: ocrResult.text, charCount: ocrResult.text.length,
+          method: 'gemini-ocr', model: ocrResult.model,
+        })
+      }
+    } catch (e) {
+      // Lỗi cắt trang (file hỏng, mã hoá...) — báo rõ, không âm thầm gửi nguyên file
+      console.error('[process-batch] Lỗi cắt trang PDF:', e.message)
+      return res.status(422).json({
+        error: 'Không cắt được trang PDF để OCR: ' + e.message,
+        isScan: true, batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
       })
     }
   }
 
-  // ── Không OCR được → trả text thô (dù ít) ──────────────────
+  // ── Không OCR được hoặc Gemini chỉ trả nội dung không hợp lệ ─
+  // Đánh dấu needsReview=true — KHÔNG để client/Firestore coi đây là dữ liệu
+  // đã đọc xong đáng tin. Trước đây nhánh này lưu thẳng text thô (có thể là
+  // chữ méo font cũ) làm nội dung chính thức, không ai biết tới khi tự kiểm.
   if (extractedText.length > 20) {
     const fallback = `## Trang ${fromPage}–${toPage}\n\n${extractedText}`
     return res.status(200).json({
@@ -207,12 +286,14 @@ export default async function handler(req, res) {
       batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
       text: fallback, charCount: fallback.length,
       method: 'raw-text',
-      warning: 'PDF scan — Gemini OCR không trả kết quả (kiểm tra key/quota). Dùng tạm text thô.',
+      needsReview: true,
+      warning: 'PDF scan/font lỗi — Gemini OCR không trả được nội dung hợp lệ. Đây là text thô (có thể sai/méo), CẦN người kiểm tra lại, không nên coi là đã đọc xong.',
     })
   }
 
   return res.status(422).json({
-    error: 'PDF scan không OCR được — Gemini không trả kết quả. Kiểm tra VITE_GEMINI_API_KEY trên Vercel (đúng định dạng AIzaSy...) và quota.',
-    isScan: true, batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
+    error: 'Không đọc được nội dung trang này — pdf-parse không có text, Gemini OCR không trả kết quả hợp lệ. Kiểm tra VITE_GEMINI_API_KEY trên Vercel và log Vercel Functions để xem lỗi cụ thể.',
+    isScan: true, needsReview: true,
+    batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
   })
 }

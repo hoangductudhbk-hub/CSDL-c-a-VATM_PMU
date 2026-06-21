@@ -3,6 +3,10 @@
 // từ trình duyệt (CORS/bảo mật) — bắt buộc phải gọi từ server. File này nhận
 // yêu cầu từ client, gọi Gemini ở server, trả kết quả về — không expose key
 // ra trình duyệt nữa (đúng khuyến nghị bảo mật chính thức của Google).
+//
+// SỬA 22/6/2026: gemini-2.0-flash và gemini-2.0-flash-lite đã bị Google khai
+// tử 1/6/2026 — mọi request qua model cũ đều lỗi từ đó tới nay. Đổi sang
+// gemini-2.5-flash / gemini-2.5-flash-lite.
 
 const getGeminiKeys = () => [
   process.env.VITE_GEMINI_API_KEY,
@@ -34,7 +38,7 @@ export default async function handler(req, res) {
 
   const contentParts = parts || [{ text: prompt }]
   const keys = getGeminiKeys()
-  const models = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
+  const models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
 
   if (!keys.length) {
     return res.status(500).json({ error: 'Server chưa cấu hình VITE_GEMINI_API_KEY' })

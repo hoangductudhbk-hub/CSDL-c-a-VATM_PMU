@@ -2,26 +2,12 @@
 import { useState } from 'react'
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const OPENROUTER_MODELS = [
-  'google/gemma-4-31b-it:free',
-  'google/gemma-4-26b-a4b-it:free',
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
-  'poolside/laguna-m.1:free',
-  'poolside/laguna-xs.2:free',
-]
 const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
-const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite']
-// Format cũ AIzaSy... dùng ?key= trên v1, format mới AQ.... dùng x-goog-api-key header trên v1beta
+// SỬA 22/6/2026: gemini-2.0-flash và gemini-2.0-flash-lite đã bị Google khai
+// tử 1/6/2026 — mọi lệnh gọi qua 2 model này đều lỗi từ đó tới nay.
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
 const GEM_URL = (model, key) =>
-  key.startsWith('AIzaSy')
-    ? `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`
-    : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
-const GEM_HEADERS = (key) => {
-  const h = { 'Content-Type': 'application/json' }
-  if (!key.startsWith('AIzaSy')) h['x-goog-api-key'] = key
-  return h
-}
+  `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`
 
 // ── Lấy keys ────────────────────────────────────────────────────
 const getGroqKeys = () => {
@@ -43,9 +29,6 @@ const getGemKeys = () => {
   if (fromEnv.length) return fromEnv
   return (localStorage.getItem('gemini_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
 }
-
-const getOpenRouterKey = () =>
-  import.meta.env.VITE_OPENROUTER_API_KEY || localStorage.getItem('openrouter_key') || ''
 
 const saveKey = (k) => {
   k = k.trim()
@@ -79,19 +62,28 @@ const SYSTEM = `Bạn là chuyên gia phân tích văn bản hành chính Việt
 - "status": "done" nếu đã ban hành, "prep" nếu chưa
 {"code":"","date":"","org":"","docType":"","subject":"","detail":"","note":"","status":"done"}`
 
-// ── Gọi Gemini — qua proxy server (api/gemini-proxy.js), KHÔNG gọi thẳng
-// từ trình duyệt nữa. Google chặn key dạng "AQ." gọi trực tiếp từ browser. ─
+// ── Gọi Gemini ──────────────────────────────────────────────────
 const callGemini = async (prompt, maxTokens = 1000) => {
-  try {
-    const res = await fetch('/api/gemini-proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, maxTokens }),
-    })
-    if (!res.ok) return null
-    const data = await res.json()
-    return data.text || null
-  } catch { return null }
+  const keys = getGemKeys()
+  for (const key of keys) {
+    for (const model of GEMINI_MODELS) {
+      try {
+        const res = await fetch(GEM_URL(model, key), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens },
+          }),
+        })
+        if (res.status === 429) continue
+        if (!res.ok) continue
+        const result = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
+        if (result) return result
+      } catch { continue }
+    }
+  }
+  return null
 }
 
 // ── Gọi Groq ────────────────────────────────────────────────────
@@ -116,88 +108,12 @@ const callGroq = async (prompt, maxTokens = 1000, system = null) => {
   return null
 }
 
-// ── Gọi OpenRouter ──────────────────────────────────────────────
-const callOpenRouter = async (prompt, maxTokens = 1000) => {
-  const key = getOpenRouterKey()
-  if (!key) return null
-  for (const model of OPENROUTER_MODELS) {
-    try {
-      const res = await fetch(OPENROUTER_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${key}`,
-          'HTTP-Referer': 'https://pmuvatm.vercel.app',
-          'X-Title': 'VATM-PMU',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: maxTokens,
-          temperature: 0.1,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-      })
-      if (res.status === 429) continue
-      if (!res.ok) continue
-      const result = (await res.json()).choices?.[0]?.message?.content || ''
-      if (result) return result
-    } catch { continue }
-  }
-  return null
-}
-
-// ── Gọi Mistral (client-side) ───────────────────────────────────
-const getMistralKey = () =>
-  import.meta.env.VITE_MISTRAL_API_KEY || localStorage.getItem('mistral_key') || ''
-
-const callMistral = async (prompt, maxTokens = 1000) => {
-  const key = getMistralKey()
-  if (!key) return null
-  try {
-    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model: 'mistral-small-latest',
-        max_tokens: maxTokens, temperature: 0.1,
-        messages: [{ role: 'user', content: prompt }],
-      }),
-    })
-    if (!res.ok) return null
-    return (await res.json()).choices?.[0]?.message?.content || null
-  } catch { return null }
-}
-
-const callMistralVision = async (base64Images, textPrompt, maxTokens = 1000) => {
-  const key = getMistralKey()
-  if (!key) return null
-  try {
-    const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model: 'pixtral-12b-2409',
-        max_tokens: maxTokens, temperature: 0.05,
-        messages: [{ role: 'user', content: [
-          ...base64Images.slice(0, 3).map(b64 => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } })),
-          { type: 'text', text: textPrompt }
-        ]}],
-      }),
-    })
-    if (!res.ok) return null
-    return (await res.json()).choices?.[0]?.message?.content || null
-  } catch { return null }
-}
-
-// ── Gọi AI: OpenRouter → Gemini → Groq ────────────────────────
+// ── Gọi AI: Gemini trước, Groq sau (tránh rate limit) ───────────
 const callAI = async (prompt, maxTokens = 1000) => {
-  // OpenRouter trước — không bị 429 như Gemini
-  const or = await callOpenRouter(prompt, maxTokens)
-  if (or) return or
-  // Gemini fallback
+  // Gemini trước — ít rate limit hơn
   const gem = await callGemini(prompt, maxTokens)
   if (gem) return gem
-  // Groq cuối cùng
+  // Groq fallback
   const groq = await callGroq(prompt, maxTokens)
   if (groq) return groq
   const err = new Error('AI_RATE_LIMIT')
@@ -330,14 +246,9 @@ export function useAI() {
     const clean = text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{3,}/g, ' ').slice(0, 6000)
     const prompt = `${SYSTEM}\n\nPhân tích văn bản:${hint}\n---\n${clean}\n---`
     try {
-      // Groq trước — nhanh nhất
-      const groq = await callGroq(prompt, 1000, SYSTEM)
-      if (groq) return groq
-      // Mistral fallback khi Groq 429
-      const mistral = await callMistral(prompt, 1000)
-      if (mistral) return mistral
-      // Gemini cuối cùng
-      return await callGemini(prompt, 1000) || ''
+      const gem = await callGemini(prompt, 1000)
+      if (gem) return gem
+      return await callGroq(prompt, 1000, SYSTEM) || ''
     } finally { setLoading(false) }
   }
 
@@ -346,12 +257,8 @@ export function useAI() {
     setLoading(true)
     resetIdxIfNewDay()
     const hint = fileName ? ` (${fileName})` : ''
-    const visionPrompt = `${SYSTEM}\n\nĐọc ảnh scan văn bản Việt Nam${hint} và trả về JSON duy nhất.`
     try {
-      // 1. Mistral Pixtral — tốt nhất cho scan tiếng Việt
-      const mistralResult = await callMistralVision(base64Images, visionPrompt, 1000)
-      if (mistralResult) return mistralResult
-      // 2. Groq Vision fallback
+      // Groq Vision
       const keys = getGroqKeys()
       for (const key of keys) {
         try {
@@ -362,7 +269,7 @@ export function useAI() {
               model: GROQ_VISION_MODEL, max_tokens: 1000, temperature: 0.05,
               messages: [{ role: 'user', content: [
                 ...base64Images.slice(0, 3).map(b64 => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } })),
-                { type: 'text', text: visionPrompt }
+                { type: 'text', text: `${SYSTEM}\n\nĐọc ảnh scan văn bản Việt Nam${hint} và trả về JSON.` }
               ]}],
             }),
           })
@@ -371,8 +278,12 @@ export function useAI() {
           if (result) return result
         } catch { continue }
       }
-      // 3. Gemini fallback cuối cùng
-      return await callGemini(visionPrompt, 1000) || ''
+      // Gemini fallback
+      const parts = [
+        { text: `${SYSTEM}\n\nĐọc ảnh scan văn bản Việt Nam${hint} và trả về JSON.` },
+        ...base64Images.slice(0, 3).map(b64 => ({ inline_data: { mime_type: 'image/jpeg', data: b64 } }))
+      ]
+      return await callGemini(parts.map(p => p.text || '').join('\n'), 1000) || ''
     } finally { setLoading(false) }
   }
 
@@ -390,18 +301,17 @@ export function useAI() {
     setLoading(true)
     resetIdxIfNewDay()
 
-    const mem = memory || {}
-    const ctx = mem.summary ? `BỘ NHỚ VĂN BẢN:
-📋 Tóm tắt: ${mem.summary || ''}
-📌 Điểm quan trọng: ${(mem.keyPoints || []).join('; ')}
-👥 Thành viên: ${(mem.members || []).join('; ')}
-⚙️ Thông số kỹ thuật: ${(mem.technicalSpecs || []).join('; ')}
-💰 Tài chính: ${(mem.financial || []).join('; ')}
-⚖️ Pháp lý: ${(mem.legal || []).join('; ')}
-📅 Tiến độ: ${(mem.deadlines || []).join('; ')}
-📋 Yêu cầu: ${mem.requirements || ''}
-⚠️ Rủi ro: ${mem.risks || ''}
-📊 Dữ liệu khác: ${(mem.otherData || []).join('; ')}` : ''
+    const ctx = `BỘ NHỚ VĂN BẢN:
+📋 Tóm tắt: ${memory.summary || ''}
+📌 Điểm quan trọng: ${(memory.keyPoints || []).join('; ')}
+👥 Thành viên: ${(memory.members || []).join('; ')}
+⚙️ Thông số kỹ thuật: ${(memory.technicalSpecs || []).join('; ')}
+💰 Tài chính: ${(memory.financial || []).join('; ')}
+⚖️ Pháp lý: ${(memory.legal || []).join('; ')}
+📅 Tiến độ: ${(memory.deadlines || []).join('; ')}
+📋 Yêu cầu: ${memory.requirements || ''}
+⚠️ Rủi ro: ${memory.risks || ''}
+📊 Dữ liệu khác: ${(memory.otherData || []).join('; ')}`
 
     const ragSection = relevantText
       ? `\n📄 ĐOẠN VĂN BẢN GỐC LIÊN QUAN:\n---\n${relevantText}\n---`
@@ -427,9 +337,7 @@ CÂU HỎI: ${question}
 Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
 
     try {
-      // OpenRouter → Gemini → Groq
-      const or = await callOpenRouter(prompt, 2000)
-      if (or) return or
+      // Gemini trước cho chat — nhanh và ít rate limit
       const gem = await callGemini(prompt, 2000)
       if (gem) return gem
       const groq = await callGroq(prompt, 2000)
@@ -446,8 +354,6 @@ Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
     resetIdxIfNewDay()
     const sys = `Bạn là trợ lý quản lý dự án VATM. Trả lời tiếng Việt, chi tiết và hữu ích.${context ? '\n\nDỮ LIỆU DỰ ÁN:\n' + context : ''}`
     try {
-      const or = await callOpenRouter(`${sys}\n\nCâu hỏi: ${question}`, 1200)
-      if (or) return or
       const gem = await callGemini(`${sys}\n\nCâu hỏi: ${question}`, 1200)
       if (gem) return gem
       const groq = await callGroq(question, 1200, sys)
