@@ -1,51 +1,61 @@
 // api/process-batch.js
-// Xử lý 1 lô trang PDF qua Gemini OCR (dùng @google/generative-ai SDK).
-// SDK xử lý đúng auth cho cả key format cũ (AIzaSy) và mới (AQ.).
+// Trích xuất text từ PDF bằng pdf-parse (text-based PDF) + Groq format markdown.
+// Không dùng Gemini Vision (AQ. keys không tương thích với generativelanguage.googleapis.com).
 //
 // Request body: { docId, fileUrl, fileName, fromPage, toPage, batchIndex }
 // Response:     { ok, text, docId, batchIndex, fromPage, toPage, charCount }
 
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { createRequire } from 'module'
+const require = createRequire(import.meta.url)
 
-const getGeminiKeys = () =>
+const getGroqKeys = () =>
   [
-    process.env.VITE_GEMINI_API_KEY,
-    process.env.VITE_GEMINI_API_KEY_2,
-    process.env.VITE_GEMINI_API_KEY_3,
-    process.env.GEMINI_API_KEY,
-    process.env.GEMINI_API_KEY_2,
-    process.env.GEMINI_API_KEY_3,
+    process.env.VITE_GROQ_API_KEY,
+    process.env.VITE_GROQ_API_KEY_2,
+    process.env.VITE_GROQ_API_KEY_3,
+    process.env.GROQ_API_KEY,
+    process.env.GROQ_API_KEY_2,
+    process.env.GROQ_API_KEY_3,
   ].filter(Boolean)
 
 const getGhToken = () => process.env.VITE_GH_TOKEN || process.env.GH_TOKEN || ''
 
-// ── Gọi Gemini qua SDK (hỗ trợ AQ. và AIzaSy format) ────────────────
-const callGeminiSDK = async (base64Pdf, prompt, keys) => {
+// ── Gọi Groq để format text thành markdown sạch ──────────────────────
+const callGroq = async (text, fileName, fromPage, toPage, keys) => {
+  const prompt = `Bạn nhận được text thô trích xuất từ trang ${fromPage}–${toPage} của văn bản "${fileName}".
+Nhiệm vụ: format lại thành Markdown sạch, giữ nguyên 100% nội dung.
+- Bắt đầu bằng: ## Trang ${fromPage}–${toPage}
+- Giữ nguyên câu chữ, số liệu, tên người, ngày tháng
+- Chuyển bảng biểu sang Markdown table nếu nhận ra cấu trúc bảng
+- KHÔNG tóm tắt, KHÔNG thêm thông tin
+- Chỉ trả về Markdown thuần
+
+TEXT THÔ:
+${text.slice(0, 12000)}`
+
   for (const key of keys) {
     try {
-      const genAI = new GoogleGenerativeAI(key)
-      const model = genAI.getGenerativeModel({
-        model: 'gemini-2.0-flash',
-        generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 4096,
+          temperature: 0,
+        })
       })
-
-      const result = await model.generateContent([
-        { inlineData: { mimeType: 'application/pdf', data: base64Pdf } },
-        prompt,
-      ])
-
-      const text = result.response.text() || ''
-      if (text.length > 30) {
-        return { text, keyUsed: key.slice(0, 12) + '...' }
+      if (!res.ok) {
+        const err = await res.text()
+        console.error(`[process-batch] Groq ${key.slice(0,12)} HTTP ${res.status}: ${err.slice(0,200)}`)
+        if (res.status === 429) await new Promise(r => setTimeout(r, 2000))
+        continue
       }
-      console.warn(`[process-batch] Key ${key.slice(0,12)} trả về text quá ngắn: ${text.length} chars`)
-
-    } catch (e) {
-      console.error(`[process-batch] SDK lỗi key ${key.slice(0,12)}...:`, e.message)
-      // 429 → chờ rồi thử key tiếp
-      if (e.message?.includes('429') || e.message?.includes('RESOURCE_EXHAUSTED')) {
-        await new Promise(r => setTimeout(r, 3000))
-      }
+      const data = await res.json()
+      const result = data.choices?.[0]?.message?.content || ''
+      if (result.length > 50) return result
+    } catch(e) {
+      console.error(`[process-batch] Groq exception:`, e.message)
       continue
     }
   }
@@ -66,14 +76,14 @@ export default async function handler(req, res) {
   if (!fileUrl) return res.status(400).json({ error: 'Thiếu fileUrl' })
   if (fromPage == null || toPage == null) return res.status(400).json({ error: 'Thiếu fromPage/toPage' })
 
-  const gemKeys = getGeminiKeys()
-  if (!gemKeys.length) {
-    return res.status(500).json({ error: 'Server chưa có GEMINI_API_KEY. Set trên Vercel → Environment Variables.' })
+  const groqKeys = getGroqKeys()
+  if (!groqKeys.length) {
+    return res.status(500).json({ error: 'Server chưa có GROQ_API_KEY.' })
   }
 
   // ── Bước 1: Tải PDF từ GitHub ──────────────────────────────────────
   const ghToken = getGhToken()
-  let pdfBase64
+  let pdfBuffer
 
   try {
     const pdfRes = await fetch(fileUrl, {
@@ -82,60 +92,69 @@ export default async function handler(req, res) {
         ...(ghToken ? { Authorization: `token ${ghToken}` } : {}),
       }
     })
-
     if (!pdfRes.ok) {
-      return res.status(502).json({
-        error: `Không tải được PDF từ GitHub: HTTP ${pdfRes.status}`,
-        hint: ghToken ? 'Token có thể hết hạn' : 'Thiếu GH_TOKEN trên server',
-      })
+      return res.status(502).json({ error: `Không tải được PDF từ GitHub: HTTP ${pdfRes.status}` })
     }
-
     const buf = await pdfRes.arrayBuffer()
-
-    const MAX_MB = 15
+    const MAX_MB = 20
     if (buf.byteLength > MAX_MB * 1024 * 1024) {
       return res.status(413).json({
-        error: `File quá lớn (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB > ${MAX_MB}MB).`,
+        error: `File quá lớn (${(buf.byteLength/1024/1024).toFixed(1)}MB > ${MAX_MB}MB).`,
         fallback: true,
-        fileSizeMB: (buf.byteLength / 1024 / 1024).toFixed(1),
       })
     }
-
-    pdfBase64 = Buffer.from(buf).toString('base64')
-  } catch (e) {
+    pdfBuffer = Buffer.from(buf)
+  } catch(e) {
     return res.status(502).json({ error: 'Lỗi khi tải PDF: ' + e.message })
   }
 
-  // ── Bước 2: Gọi Gemini OCR qua SDK ──────────────────────────────────
-  const prompt = `Trích xuất toàn bộ nội dung từ trang ${fromPage} đến trang ${toPage} của tài liệu: "${fileName || 'document'}".
+  // ── Bước 2: Extract text bằng pdf-parse ──────────────────────────
+  let extractedText = ''
+  try {
+    const pdfParse = require('pdf-parse')
+    const data = await pdfParse(pdfBuffer, {
+      // Chỉ parse trang fromPage → toPage
+      max: toPage,
+    })
+    // pdf-parse trả về toàn bộ text, ước tính phần thuộc trang fromPage-toPage
+    const allText = data.text || ''
+    const totalPages = data.numpages || 1
+    const charsPerPage = allText.length / totalPages
+    const startChar = Math.floor((fromPage - 1) * charsPerPage)
+    const endChar   = Math.floor(toPage * charsPerPage)
+    extractedText = allText.slice(startChar, endChar).trim()
+  } catch(e) {
+    console.error('[process-batch] pdf-parse lỗi:', e.message)
+    return res.status(502).json({ error: 'Không đọc được text từ PDF (có thể là PDF scan/ảnh): ' + e.message })
+  }
 
-Yêu cầu bắt buộc:
-- Giữ nguyên 100% câu chữ, số liệu, tên người, ngày tháng, ký hiệu văn bản
-- Chuyển bảng biểu sang Markdown table (| cột | cột |)
-- Giữ nguyên heading (# ## ###), điều khoản (Điều 1, Khoản 2...)
-- Bắt đầu output bằng dòng: ## Trang ${fromPage}–${toPage}
-- CHỈ trả về Markdown thuần túy, KHÔNG tóm tắt, KHÔNG giải thích thêm`
-
-  const result = await callGeminiSDK(pdfBase64, prompt, gemKeys)
-
-  if (!result) {
+  if (extractedText.length < 50) {
     return res.status(502).json({
-      error: 'Tất cả Gemini keys đều thất bại (rate limit hoặc key không hợp lệ)',
-      hint: 'Kiểm tra /api/test-keys để debug',
-      batchIndex: batchIndex ?? 0,
-      fromPage,
-      toPage,
+      error: `PDF trang ${fromPage}–${toPage} không có text (PDF scan/ảnh). Cần Gemini Vision để OCR.`,
+      hint: 'Tài liệu này là PDF scan — text extraction không khả dụng.',
+      batchIndex: batchIndex ?? 0, fromPage, toPage,
+    })
+  }
+
+  // ── Bước 3: Groq format thành markdown ──────────────────────────
+  const markdownText = await callGroq(extractedText, fileName || 'document', fromPage, toPage, groqKeys)
+
+  if (!markdownText) {
+    // Groq fail → trả về raw text (vẫn có ích)
+    console.warn('[process-batch] Groq fail, trả raw text')
+    const rawMd = `## Trang ${fromPage}–${toPage}\n\n${extractedText}`
+    return res.status(200).json({
+      ok: true, docId,
+      batchIndex: batchIndex ?? 0, fromPage, toPage,
+      text: rawMd, charCount: rawMd.length,
+      keyUsed: 'raw-text',
     })
   }
 
   return res.status(200).json({
-    ok: true,
-    docId,
-    batchIndex: batchIndex ?? 0,
-    fromPage,
-    toPage,
-    text: result.text,
-    charCount: result.text.length,
-    keyUsed: result.keyUsed,
+    ok: true, docId,
+    batchIndex: batchIndex ?? 0, fromPage, toPage,
+    text: markdownText, charCount: markdownText.length,
+    keyUsed: 'groq',
   })
 }
