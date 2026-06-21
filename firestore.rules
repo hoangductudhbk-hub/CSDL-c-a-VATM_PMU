@@ -52,7 +52,7 @@ service cloud.firestore {
       allow read:           if isAuth();
       allow create:         if isAuth();
       allow update:         if false;
-      allow delete:         if isAdmin();
+      allow delete:         if isAuth();
     }
 
     // Public — cần để reset password không cần đăng nhập

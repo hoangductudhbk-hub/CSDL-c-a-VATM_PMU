@@ -346,10 +346,10 @@ function AppInner() {
   const handleSave = async (data, silent = false) => {
     if (editDoc) {
       await updateDocument(editDoc.id, data)
-      logEditDoc(data.code||editDoc.code, data.subject||editDoc.subject, proj?.name)
+      logEditDoc(data.code||editDoc.code, data.subject||editDoc.subject, proj?.name, editDoc.id)
     } else {
-      await addDocument(data, silent)
-      logAddDoc(data.code, data.subject, proj?.name)
+      const ref = await addDocument(data, silent)
+      logAddDoc(data.code, data.subject, proj?.name, ref?.id)
     }
     if (!silent) { setModal(null); setEditDoc(null) }
   }
@@ -658,7 +658,7 @@ ${memCtx}`
                   <tbody>
                     {filtered.length === 0 && <tr><td colSpan={6} style={{ padding:'40px', textAlign:'center', color:'#888', fontSize:13 }}>Chưa có văn bản nào</td></tr>}
                     {filtered.map(d => (
-                      <tr key={d.id} onClick={() => { setDetailDoc(d); logViewDoc(d.code, d.subject, proj?.name) }}
+                      <tr key={d.id} onClick={() => { setDetailDoc(d); logViewDoc(d.code, d.subject, proj?.name, d.id) }}
                         style={{ borderBottom:'0.5px solid #f0f0ec', cursor:'pointer' }}
                         onMouseEnter={e => e.currentTarget.style.background='#fafaf8'}
                         onMouseLeave={e => e.currentTarget.style.background=''}>
@@ -678,7 +678,14 @@ ${memCtx}`
                         </td>
                         <td style={{ padding:'10px 8px', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
                           <button onClick={() => { setEditDoc(d); setModal('edit') }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#888' }}>✏️</button>
-                          <button onClick={() => { if(confirm('Xác nhận xóa?')) { deleteFile(d); deleteDocument(d.id); logDeleteDoc(d.code, d.subject, proj?.name) } }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#e53e3e' }}>🗑️</button>
+                          <button onClick={async () => {
+                            if (!confirm('Xác nhận xóa?')) return
+                            try {
+                              await deleteDocument(d.id)
+                            } catch (e) {
+                              alert('❌ Xóa thất bại: ' + e.message)
+                            }
+                          }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#e53e3e' }}>🗑️</button>
                         </td>
                       </tr>
                     ))}

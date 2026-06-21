@@ -86,6 +86,14 @@ export function useDocuments(projectId, userId, packageId = null) {
     } catch (e) {
       console.warn('Không xóa được documentChunks:', e.message)
     }
+
+    // Xóa nhật ký hoạt động liên quan tới văn bản này — không giữ lại dấu vết
+    try {
+      const logsSnap = await getDocs(query(collection(db, 'activityLogs'), where('docId', '==', id)))
+      await Promise.all(logsSnap.docs.map(l => deleteDoc(doc(db, 'activityLogs', l.id))))
+    } catch (e) {
+      console.warn('Không xóa được activityLogs:', e.message)
+    }
   }
 
   return { docs, allDocs, loading, addDocument, updateDocument, deleteDocument }

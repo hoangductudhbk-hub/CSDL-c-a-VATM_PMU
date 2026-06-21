@@ -9,7 +9,7 @@ export function useActivityLog(user, userDoc) {
   // Luôn cập nhật ref khi userDoc thay đổi
   useEffect(() => { userDocRef.current = userDoc }, [userDoc])
 
-  const log = async (action, details) => {
+  const log = async (action, details, docId = null) => {
     if (!user?.uid) return
     const doc = userDocRef.current
     try {
@@ -20,6 +20,7 @@ export function useActivityLog(user, userDoc) {
         username:  doc?.username || '',
         action,
         details,
+        docId,
         timestamp: serverTimestamp(),
       })
     } catch (e) {
@@ -38,18 +39,18 @@ export function useActivityLog(user, userDoc) {
     return log('logout', `Đăng xuất — thời gian sử dụng: ${mins} phút`)
   }
 
-  const logViewDoc     = (code, subject, projName) =>
-    log('view_doc',       `Mở đọc văn bản: [${code||'Chưa có số'}] "${subject||'—'}" trong dự án "${projName||'—'}"`)
-  const logAddDoc      = (code, subject, projName) =>
-    log('add_doc',        `Thêm văn bản mới: [${code||'Chưa có số'}] "${subject||'—'}" vào dự án "${projName||'—'}"`)
-  const logEditDoc     = (code, subject, projName) =>
-    log('edit_doc',       `Chỉnh sửa văn bản: [${code||'Chưa có số'}] "${subject||'—'}" trong dự án "${projName||'—'}"`)
-  const logDeleteDoc   = (code, subject, projName) =>
-    log('delete_doc',     `⚠️ Xóa văn bản: [${code||'Chưa có số'}] "${subject||'—'}" khỏi dự án "${projName||'—'}"`)
-  const logStatus      = (code, oldS, newS, projName) =>
-    log('status',         `Đổi trạng thái [${code||'—'}] từ "${oldS}" → "${newS}" trong dự án "${projName||'—'}"`)
-  const logUploadFile  = (code, fileName, projName) =>
-    log('upload_file',    `Upload file: "${fileName||'—'}" cho văn bản [${code||'—'}] trong dự án "${projName||'—'}"`)
+  const logViewDoc     = (code, subject, projName, docId) =>
+    log('view_doc',       `Mở đọc văn bản: [${code||'Chưa có số'}] "${subject||'—'}" trong dự án "${projName||'—'}"`, docId)
+  const logAddDoc      = (code, subject, projName, docId) =>
+    log('add_doc',        `Thêm văn bản mới: [${code||'Chưa có số'}] "${subject||'—'}" vào dự án "${projName||'—'}"`, docId)
+  const logEditDoc     = (code, subject, projName, docId) =>
+    log('edit_doc',       `Chỉnh sửa văn bản: [${code||'Chưa có số'}] "${subject||'—'}" trong dự án "${projName||'—'}"`, docId)
+  const logDeleteDoc   = (code, subject, projName, docId) =>
+    log('delete_doc',     `⚠️ Xóa văn bản: [${code||'Chưa có số'}] "${subject||'—'}" khỏi dự án "${projName||'—'}"`, docId)
+  const logStatus      = (code, oldS, newS, projName, docId) =>
+    log('status',         `Đổi trạng thái [${code||'—'}] từ "${oldS}" → "${newS}" trong dự án "${projName||'—'}"`, docId)
+  const logUploadFile  = (code, fileName, projName, docId) =>
+    log('upload_file',    `Upload file: "${fileName||'—'}" cho văn bản [${code||'—'}] trong dự án "${projName||'—'}"`, docId)
   const logAddProj     = (name) =>
     log('add_project',    `Tạo dự án mới: "${name}"`)
   const logDeleteProj  = (name) =>
