@@ -249,6 +249,7 @@ function AppInner() {
   const [renameTarget,  setRenameTarget]  = useState(null) // { type:'project'|'package', id, currentName }
   const [renameInput,   setRenameInput]   = useState('')
   const [showChangePw,  setShowChangePw]  = useState(false)
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [loggedIn,      setLoggedIn]      = useState(false)
   const [newProjName,   setNewProjName]   = useState('')
   const [newPkgName,    setNewPkgName]    = useState('')
@@ -468,17 +469,23 @@ ${memCtx}`
         </div>
 
         <div style={{ padding:'12px 16px', borderTop:'0.5px solid #e5e4e0', flexShrink:0, background:'#fff' }}>
-          <div style={{ fontSize:12, fontWeight:700, color:'#0a2342' }}>{userDoc?.name || 'Người dùng'}</div>
-          <div style={{ fontSize:11, color:'#888' }}>@{userDoc?.username}</div>
-          {userDoc?.email && <div style={{ fontSize:10, color:'#aaa', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{userDoc.email}</div>}
-          {isAdmin && <div style={{ fontSize:10, color:'#92400e', background:'#fef3c7', padding:'2px 8px', borderRadius:10, display:'inline-block', marginBottom:6 }}>👑 Admin</div>}
-          <br/>
-          <button onClick={() => setShowChangePw(true)} style={{ fontSize:11, color:'#0a2342', background:'none', border:'0.5px solid #0a2342', borderRadius:6, cursor:'pointer', padding:'4px 10px', marginBottom:6, width:'100%' }}>
-            🔑 Đổi mật khẩu
-          </button>
-          <button onClick={() => { logLogout().then(() => logout()) }} style={{ fontSize:11, color:'#888', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', padding:'4px 10px', width:'100%' }}>
-            Đăng xuất
-          </button>
+          <div onClick={() => setAccountMenuOpen(v => !v)} style={{ cursor:'pointer' }}>
+            <div style={{ fontSize:12, fontWeight:700, color:'#0a2342' }}>{userDoc?.name || 'Người dùng'}</div>
+            <div style={{ fontSize:11, color:'#888' }}>@{userDoc?.username}</div>
+            {userDoc?.email && <div style={{ fontSize:10, color:'#aaa', marginBottom:4, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{userDoc.email}</div>}
+            {isAdmin && <div style={{ fontSize:10, color:'#92400e', background:'#fef3c7', padding:'2px 8px', borderRadius:10, display:'inline-block', marginBottom:6 }}>👑 Admin</div>}
+          </div>
+          {accountMenuOpen && (
+            <>
+              <br/>
+              <button onClick={() => setShowChangePw(true)} style={{ fontSize:11, color:'#0a2342', background:'none', border:'0.5px solid #0a2342', borderRadius:6, cursor:'pointer', padding:'4px 10px', marginBottom:6, width:'100%' }}>
+                🔑 Đổi mật khẩu
+              </button>
+              <button onClick={() => { logLogout().then(() => logout()) }} style={{ fontSize:11, color:'#888', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', padding:'4px 10px', width:'100%' }}>
+                Đăng xuất
+              </button>
+            </>
+          )}
         </div>
       </div>
 
