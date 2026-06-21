@@ -79,28 +79,19 @@ const SYSTEM = `Bạn là chuyên gia phân tích văn bản hành chính Việt
 - "status": "done" nếu đã ban hành, "prep" nếu chưa
 {"code":"","date":"","org":"","docType":"","subject":"","detail":"","note":"","status":"done"}`
 
-// ── Gọi Gemini ──────────────────────────────────────────────────
+// ── Gọi Gemini — qua proxy server (api/gemini-proxy.js), KHÔNG gọi thẳng
+// từ trình duyệt nữa. Google chặn key dạng "AQ." gọi trực tiếp từ browser. ─
 const callGemini = async (prompt, maxTokens = 1000) => {
-  const keys = getGemKeys()
-  for (const key of keys) {
-    for (const model of GEMINI_MODELS) {
-      try {
-        const res = await fetch(GEM_URL(model, key), {
-          method: 'POST',
-          headers: GEM_HEADERS(key),
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.1, maxOutputTokens: maxTokens },
-          }),
-        })
-        if (res.status === 429) continue
-        if (!res.ok) continue
-        const result = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
-        if (result) return result
-      } catch { continue }
-    }
-  }
-  return null
+  try {
+    const res = await fetch('/api/gemini-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, maxTokens }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.text || null
+  } catch { return null }
 }
 
 // ── Gọi Groq ────────────────────────────────────────────────────
