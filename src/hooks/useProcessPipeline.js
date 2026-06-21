@@ -193,7 +193,8 @@ export function useProcessPipeline() {
                 createdAt: serverTimestamp(),
               })
             } catch (e) {
-              console.warn('[pipeline] Lưu chunk lỗi:', e.message)
+              console.error('[pipeline] Lưu chunk lỗi:', e.code, e.message)
+              notify(`⚠️ Firestore lỗi (chunk): ${e.code || e.message}`)
             }
           }
 
@@ -203,7 +204,9 @@ export function useProcessPipeline() {
               batchesDone: b + 1,
               updatedAt: serverTimestamp(),
             })
-          } catch {}
+          } catch (e) {
+            console.error('[pipeline] Update job lỗi:', e.code, e.message)
+          }
 
           // Delay nhỏ tránh rate limit
           if (b < totalBatches - 1) await new Promise(r => setTimeout(r, 800))
@@ -243,7 +246,8 @@ export function useProcessPipeline() {
             console.warn('[pipeline] Cập nhật doc với markdownRef thất bại:', e.message)
           }
         } catch (e) {
-          console.warn('[pipeline] Lưu markdown thất bại:', e.message)
+          console.error('[pipeline] Lưu markdown thất bại:', e.code, e.message)
+          notify(`⚠️ Firestore lỗi (markdown): ${e.code || e.message}`)
         }
       }
 
