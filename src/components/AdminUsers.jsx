@@ -98,7 +98,7 @@ export default function AdminUsers() {
   // Dọn dữ liệu rác — chỉ xoá phần KHÔNG còn văn bản gốc tương ứng,
   // không động tới văn bản đang dùng thật.
   const cleanupOrphanedData = async () => {
-    if (!confirm('Quét và xoá dữ liệu rác (không còn văn bản gốc) trong Firestore?\nKhông ảnh hưởng văn bản đang dùng.')) return
+    if (!confirm('Quét và xoá dữ liệu rác (không còn văn bản gốc) trong Firestore.\nRiêng documentChunks (cơ chế cũ) sẽ xoá TOÀN BỘ, không điều kiện.\nKhông ảnh hưởng văn bản đang dùng.')) return
     setCleaning(true)
     try {
       const docsSnap = await getDocs(collection(db, 'documents'))
@@ -121,13 +121,13 @@ export default function AdminUsers() {
         if (!validMdRefs.has(md.id)) { await deleteDoc(doc(db, 'documentMarkdown', md.id)); removed.markdown++ }
       }
 
+      // documentChunks — cơ chế cũ đã bỏ hẳn, xoá TOÀN BỘ không điều kiện
       const chunkSnap = await getDocs(collection(db, 'documentChunks'))
       for (const c of chunkSnap.docs) {
-        const parentId = c.data().docId
-        if (!parentId || !validIds.has(parentId)) { await deleteDoc(doc(db, 'documentChunks', c.id)); removed.chunks++ }
+        await deleteDoc(doc(db, 'documentChunks', c.id)); removed.chunks++
       }
 
-      alert(`✅ Đã dọn xong:\n- Bộ nhớ AI rác: ${removed.memory}\n- Markdown rác: ${removed.markdown}\n- Chunks rác: ${removed.chunks}\n- Job xử lý rác: ${removed.jobs}`)
+      alert(`✅ Đã dọn xong:\n- Bộ nhớ AI rác: ${removed.memory}\n- Markdown rác: ${removed.markdown}\n- Chunks cũ đã xoá hết: ${removed.chunks}\n- Job xử lý rác: ${removed.jobs}`)
     } catch (e) {
       alert('❌ Lỗi khi dọn: ' + e.message)
     } finally {
