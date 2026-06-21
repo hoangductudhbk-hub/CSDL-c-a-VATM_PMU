@@ -24,33 +24,33 @@ export default async function handler(req, res) {
 
   const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent'
 
-  for (const key of gemKeys) {
-    const isOld = key.startsWith('AIzaSy')
-    const url = isOld ? `${GEMINI_BASE}?key=${key}` : GEMINI_BASE
-    const headers = { 'Content-Type': 'application/json' }
-    if (!isOld) headers['x-goog-api-key'] = key
-
-    try {
-      const t0 = Date.now()
-      const r = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Say "OK" in one word.' }] }],
-          generationConfig: { maxOutputTokens: 10 }
-        })
-      })
-      const ms = Date.now() - t0
-      if (r.ok) {
-        const data = await r.json()
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '?'
-        results.gemini.push({ key: key.slice(0,15)+'...', status: r.status, ok: true, response: text.trim(), ms })
-      } else {
-        const body = await r.text()
-        results.gemini.push({ key: key.slice(0,15)+'...', status: r.status, ok: false, error: body.slice(0,300), ms })
+  // Thử 3 cách auth khác nhau với key đầu tiên
+  const testKey = gemKeys[0]
+  if (testKey) {
+    const body = JSON.stringify({
+      contents: [{ parts: [{ text: 'Say "OK".' }] }],
+      generationConfig: { maxOutputTokens: 10 }
+    })
+    const methods = [
+      { name: '?key= param',        url: `${GEMINI_BASE}?key=${testKey}`,  headers: { 'Content-Type': 'application/json' } },
+      { name: 'x-goog-api-key hdr', url: GEMINI_BASE,                      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': testKey } },
+      { name: 'Bearer token',        url: GEMINI_BASE,                      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${testKey}` } },
+      // v1 thay vì v1beta
+      { name: '?key= v1',            url: `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${testKey}`, headers: { 'Content-Type': 'application/json' } },
+    ]
+    for (const m of methods) {
+      try {
+        const t0 = Date.now()
+        const r = await fetch(m.url, { method: 'POST', headers: m.headers, body })
+        const ms = Date.now() - t0
+        const txt = await r.text()
+        let parsed
+        try { parsed = JSON.parse(txt) } catch { parsed = txt.slice(0, 200) }
+        const answer = parsed?.candidates?.[0]?.content?.parts?.[0]?.text || null
+        results.gemini.push({ method: m.name, status: r.status, ok: r.ok, answer, error: r.ok ? null : txt.slice(0, 200), ms })
+      } catch(e) {
+        results.gemini.push({ method: m.name, ok: false, error: e.message })
       }
-    } catch(e) {
-      results.gemini.push({ key: key.slice(0,15)+'...', ok: false, error: e.message })
     }
   }
 
