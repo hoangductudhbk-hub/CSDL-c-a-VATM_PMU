@@ -228,7 +228,6 @@ export default function DocModal({ doc, onSave, onClose }) {
       try {
         const fi = await uploadFile(pendingFile, pct => setSt(`⏳ Đang upload... ${pct}%`))
         if (!fi?.fileUrl) throw new Error('Không nhận được URL')
-        // Lưu thêm tên file và kích thước
         final = {...final, ...fi, fileName: pendingFile.name, fileSize: pendingFile.size}
         setSt('✅ Upload xong!')
         await new Promise(r => setTimeout(r, 400))

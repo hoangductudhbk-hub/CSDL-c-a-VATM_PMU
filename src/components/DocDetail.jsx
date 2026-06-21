@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { useAI } from '../hooks/useAI'
 import { useDocMemory } from '../hooks/useDocMemory'
+import { useProcessPipeline } from '../hooks/useProcessPipeline'
 
 // ── Đọc file qua Vercel proxy (tránh CORS) ──────────────────────
 const loadPdfJs = () => new Promise((res,rej) => {
@@ -234,14 +235,16 @@ export default function DocDetail({ doc, onEdit, onClose }) {
 
   const { analyzeDeepForMemory, askDeep, loading: aiLoading } = useAI()
   const { memory, loading: memLoading, saveMemory } = useDocMemory(doc.id)
+  const { startPipeline, status: pipeStatus, progress: pipeProgress, stage: pipeStage } = useProcessPipeline()
 
-  const [analyzing,   setAnalyzing]   = useState(false)
-  const [docChunks,   setDocChunks]   = useState([]) // chunks từ Firestore
-  const [analyzeStep, setAnalyzeStep] = useState('')
-  const [countdown,   setCountdown]   = useState(0)  // giây còn lại trước khi retry
-  const [showChat,    setShowChat]    = useState(false)
-  const [chat,        setChat]        = useState([])
-  const [chatInput,   setChatInput]   = useState('')
+  const [analyzing,        setAnalyzing]        = useState(false)
+  const [docChunks,        setDocChunks]        = useState([])
+  const [analyzeStep,      setAnalyzeStep]      = useState('')
+  const [countdown,        setCountdown]        = useState(0)
+  const [showChat,         setShowChat]         = useState(false)
+  const [chat,             setChat]             = useState([])
+  const [chatInput,        setChatInput]        = useState('')
+  const [autoPipeStarted,  setAutoPipeStarted]  = useState(false)
   const chatEndRef = useRef(null)
 
   useEffect(() => {
@@ -256,6 +259,32 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       })
     }
   }, [doc?.id])
+
+  // Auto-pipeline: khi mở văn bản PDF chưa có memory và chưa có chunks
+  useEffect(() => {
+    if (memLoading) return                        // đợi load memory xong
+    if (memory) return                            // đã có memory → bỏ qua
+    if (autoPipeStarted) return                   // đã trigger rồi
+    const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
+    const isPdf   = doc?.fileName?.toLowerCase().endsWith('.pdf') ||
+                    fileUrl?.toLowerCase().includes('.pdf')
+    if (!isPdf || !fileUrl) return                // không phải PDF → bỏ qua
+
+    // Delay nhỏ để load chunks trước
+    const timer = setTimeout(async () => {
+      if (docChunks.length > 0) return            // đã có chunks → không cần pipeline
+      setAutoPipeStarted(true)
+      setAnalyzeStep('🚀 Auto-pipeline: đang xử lý PDF...')
+      await startPipeline({
+        docId:    doc.id,
+        fileUrl,
+        fileName: doc.fileName || '',
+        onStatus: setAnalyzeStep,
+      })
+    }, 1500)
+
+    return () => clearTimeout(timer)
+  }, [memLoading, memory, doc?.id, docChunks.length, autoPipeStarted])
 
   const code     = get(doc, 'code')
   const date     = get(doc, 'date')
