@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import {
   collection, query, where,
-  onSnapshot, addDoc, updateDoc, deleteDoc,
+  onSnapshot, addDoc, updateDoc, deleteDoc, getDocs,
   doc, serverTimestamp,
 } from 'firebase/firestore'
 import { db } from '../firebase'
@@ -70,6 +70,22 @@ export function useDocuments(projectId, userId, packageId = null) {
 
     // Xóa bộ nhớ AI trong Firestore
     try { await deleteDoc(doc(db, 'documentMemory', id)) } catch {}
+
+    // Xóa markdown đầy đủ (lưu ở record riêng, tham chiếu qua markdownRef)
+    if (docData?.markdownRef) {
+      try { await deleteDoc(doc(db, 'documentMarkdown', docData.markdownRef)) } catch {}
+    }
+
+    // Xóa job xử lý tự động (nếu còn dở/đã xong)
+    try { await deleteDoc(doc(db, 'processingJobs', id)) } catch {}
+
+    // Xóa các chunk cũ (nếu có, từ pipeline cũ) — query theo docId vì lưu ID tự sinh
+    try {
+      const chunksSnap = await getDocs(query(collection(db, 'documentChunks'), where('docId', '==', id)))
+      await Promise.all(chunksSnap.docs.map(c => deleteDoc(doc(db, 'documentChunks', c.id))))
+    } catch (e) {
+      console.warn('Không xóa được documentChunks:', e.message)
+    }
   }
 
   return { docs, allDocs, loading, addDocument, updateDocument, deleteDocument }
