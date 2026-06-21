@@ -495,9 +495,6 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       if (e.message === 'AI_RATE_LIMIT') {
         const wait = e.waitSeconds || 60
         startCountdownAndRetry(wait)
-      } else if (e.message === 'AI_QUOTA') {
-        setAnalyzeStep('⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!')
-        setTimeout(() => setAnalyzeStep(''), 6000)
       } else {
         setAnalyzeStep('❌ Lỗi: ' + e.message)
         setTimeout(() => setAnalyzeStep(''), 6000)
@@ -544,7 +541,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       const answer = await askDeep(q, memory, chat, relevantText)
       setChat(c => [...c, { role:'ai', content: answer }])
     } catch(e) {
-      const errMsg = e.message === 'AI_QUOTA'
+      const errMsg = e.message === 'AI_RATE_LIMIT'
         ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!'
         : '❌ Lỗi: ' + e.message
       setChat(prev => [...prev, { role:'ai', content: errMsg }])

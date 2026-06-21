@@ -149,13 +149,14 @@ export default async function handler(req, res) {
   // ── Thử pdf-parse trước (text-based PDF) ────────────────────
   let extractedText = ''
   let isScan = false
+  let totalPages = null
   try {
     const pdfParse = require('pdf-parse')
     const data = await pdfParse(pdfBuffer, { max: toPage })
     const rawText = data.text || ''
+    totalPages = data.numpages || 1
 
     // Ước tính phần text từ trang fromPage đến toPage
-    const totalPages = data.numpages || 1
     const charsPerPage = rawText.length / totalPages
     const startChar = Math.floor((fromPage - 1) * charsPerPage)
     const endChar = Math.floor(toPage * charsPerPage)
@@ -177,7 +178,7 @@ export default async function handler(req, res) {
     const finalText = formatted || `## Trang ${fromPage}–${toPage}\n\n${extractedText}`
     return res.status(200).json({
       ok: true, docId,
-      batchIndex: batchIndex ?? 0, fromPage, toPage,
+      batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
       text: finalText, charCount: finalText.length,
       method: 'pdf-parse+groq',
     })
@@ -191,7 +192,7 @@ export default async function handler(req, res) {
     if (ocrText) {
       return res.status(200).json({
         ok: true, docId,
-        batchIndex: batchIndex ?? 0, fromPage, toPage,
+        batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
         text: ocrText, charCount: ocrText.length,
         method: 'gemini-ocr',
       })
@@ -203,7 +204,7 @@ export default async function handler(req, res) {
     const fallback = `## Trang ${fromPage}–${toPage}\n\n${extractedText}`
     return res.status(200).json({
       ok: true, docId,
-      batchIndex: batchIndex ?? 0, fromPage, toPage,
+      batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
       text: fallback, charCount: fallback.length,
       method: 'raw-text',
       warning: 'PDF scan — Gemini OCR không trả kết quả (kiểm tra key/quota). Dùng tạm text thô.',
@@ -212,6 +213,6 @@ export default async function handler(req, res) {
 
   return res.status(422).json({
     error: 'PDF scan không OCR được — Gemini không trả kết quả. Kiểm tra VITE_GEMINI_API_KEY trên Vercel (đúng định dạng AIzaSy...) và quota.',
-    isScan: true, batchIndex: batchIndex ?? 0, fromPage, toPage,
+    isScan: true, batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
   })
 }
