@@ -190,17 +190,35 @@ const fmtDate = (ts) => {
 }
 
 // ── Load chunks từ Firestore theo docId ──────────────────────────
+// Ưu tiên: documentChunks → fallback documentMarkdown (1 chunk)
 const loadDocChunks = async (docId) => {
   try {
-    const { collection, query, where, orderBy, getDocs } = await import('firebase/firestore')
+    const { collection, query, where, orderBy, getDocs, doc, getDoc } = await import('firebase/firestore')
     const { db } = await import('../firebase')
+
+    // 1. Thử load từ documentChunks trước
     const q = query(
       collection(db, 'documentChunks'),
       where('docId', '==', docId),
       orderBy('chunkIndex', 'asc')
     )
     const snap = await getDocs(q)
-    return snap.docs.map(d => d.data())
+    if (!snap.empty) return snap.docs.map(d => d.data())
+
+    // 2. Fallback: tìm trong documentMarkdown theo docId
+    const mdQ = query(
+      collection(db, 'documentMarkdown'),
+      where('docId', '==', docId)
+    )
+    const mdSnap = await getDocs(mdQ)
+    if (!mdSnap.empty) {
+      const mdData = mdSnap.docs[0].data()
+      if (mdData.markdown?.length > 50) {
+        // Wrap markdown thành 1 chunk giả để code downstream dùng được
+        return [{ fromPage: 1, toPage: 99, text: mdData.markdown, chunkIndex: 0, docId }]
+      }
+    }
+    return []
   } catch { return [] }
 }
 
