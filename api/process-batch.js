@@ -1,24 +1,12 @@
 // api/process-batch.js
-// Xử lý 1 lô trang PDF qua Gemini OCR. Client gọi lặp lại cho từng lô.
-// Ưu điểm so với client-side: API key ẩn, resumable khi mạng yếu/gián đoạn.
+// Xử lý 1 lô trang PDF qua Gemini OCR (dùng @google/generative-ai SDK).
+// SDK xử lý đúng auth cho cả key format cũ (AIzaSy) và mới (AQ.).
 //
 // Request body: { docId, fileUrl, fileName, fromPage, toPage, batchIndex }
 // Response:     { ok, text, docId, batchIndex, fromPage, toPage, charCount }
-//               { error, fallback:true } → client tự xử lý (file quá lớn)
 
-// ── Fetch với retry khi 429 ─────────────────────────────────────────
-const fetchWithRetry = async (url, opts, retries = 3, baseDelay = 2000) => {
-  for (let i = 0; i < retries; i++) {
-    const res = await fetch(url, opts)
-    if (res.status !== 429) return res
-    if (i < retries - 1) await new Promise(r => setTimeout(r, baseDelay * (i + 1)))
-  }
-  // Trả về response cuối (429) để caller xử lý
-  return fetch(url, opts)
-}
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
-// ── Lấy Gemini keys từ env (không dùng VITE_ ở server) ─────────────
-// Hỗ trợ cả 2 naming: VITE_GEMINI_API_KEY (Vercel đặt chung) và GEMINI_API_KEY (thuần server)
 const getGeminiKeys = () =>
   [
     process.env.VITE_GEMINI_API_KEY,
@@ -31,45 +19,33 @@ const getGeminiKeys = () =>
 
 const getGhToken = () => process.env.VITE_GH_TOKEN || process.env.GH_TOKEN || ''
 
-// ── Gọi Gemini với PDF inline ────────────────────────────────────────
-// Hỗ trợ cả 2 format key:
-//   AIzaSy... → ?key= URL param (format cũ)
-//   AQ....    → x-goog-api-key header (format mới của AI Studio)
-const callGemini = async (base64Pdf, prompt, keys) => {
-  const GEMINI_BASE = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
-
-  const bodyJson = JSON.stringify({
-    contents: [{
-      parts: [
-        { inline_data: { mime_type: 'application/pdf', data: base64Pdf } },
-        { text: prompt }
-      ]
-    }],
-    generationConfig: { temperature: 0, maxOutputTokens: 8192 }
-  })
-
+// ── Gọi Gemini qua SDK (hỗ trợ AQ. và AIzaSy format) ────────────────
+const callGeminiSDK = async (base64Pdf, prompt, keys) => {
   for (const key of keys) {
-    // Chọn auth method theo format key
-    const isOldFormat = key.startsWith('AIzaSy')
-    const url      = isOldFormat ? `${GEMINI_BASE}?key=${key}` : GEMINI_BASE
-    const headers  = { 'Content-Type': 'application/json' }
-    if (!isOldFormat) headers['x-goog-api-key'] = key
-
     try {
-      const res = await fetchWithRetry(url, { method: 'POST', headers, body: bodyJson }, 2)
+      const genAI = new GoogleGenerativeAI(key)
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.0-flash',
+        generationConfig: { temperature: 0, maxOutputTokens: 8192 },
+      })
 
-      if (!res.ok) {
-        const errBody = await res.text()
-        console.error(`[process-batch] Gemini key ${key.slice(0, 12)}... HTTP ${res.status}: ${errBody.slice(0, 400)}`)
-        continue
+      const result = await model.generateContent([
+        { inlineData: { mimeType: 'application/pdf', data: base64Pdf } },
+        prompt,
+      ])
+
+      const text = result.response.text() || ''
+      if (text.length > 30) {
+        return { text, keyUsed: key.slice(0, 12) + '...' }
       }
-
-      const data = await res.json()
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      if (text.length > 30) return { text, keyUsed: key.slice(0, 12) + '...' }
+      console.warn(`[process-batch] Key ${key.slice(0,12)} trả về text quá ngắn: ${text.length} chars`)
 
     } catch (e) {
-      console.error(`[process-batch] Gemini exception:`, e.message)
+      console.error(`[process-batch] SDK lỗi key ${key.slice(0,12)}...:`, e.message)
+      // 429 → chờ rồi thử key tiếp
+      if (e.message?.includes('429') || e.message?.includes('RESOURCE_EXHAUSTED')) {
+        await new Promise(r => setTimeout(r, 3000))
+      }
       continue
     }
   }
@@ -86,19 +62,16 @@ export default async function handler(req, res) {
 
   const { docId, fileUrl, fileName, fromPage, toPage, batchIndex } = req.body || {}
 
-  // Validate
-  if (!docId) return res.status(400).json({ error: 'Thiếu docId' })
+  if (!docId)   return res.status(400).json({ error: 'Thiếu docId' })
   if (!fileUrl) return res.status(400).json({ error: 'Thiếu fileUrl' })
   if (fromPage == null || toPage == null) return res.status(400).json({ error: 'Thiếu fromPage/toPage' })
 
   const gemKeys = getGeminiKeys()
   if (!gemKeys.length) {
-    return res.status(500).json({
-      error: 'Server chưa có GEMINI_API_KEY. Set trên Vercel → Environment Variables.',
-    })
+    return res.status(500).json({ error: 'Server chưa có GEMINI_API_KEY. Set trên Vercel → Environment Variables.' })
   }
 
-  // ── Bước 1: Tải PDF từ GitHub ──────────────────────────────────
+  // ── Bước 1: Tải PDF từ GitHub ──────────────────────────────────────
   const ghToken = getGhToken()
   let pdfBase64
 
@@ -119,11 +92,10 @@ export default async function handler(req, res) {
 
     const buf = await pdfRes.arrayBuffer()
 
-    // Giới hạn Gemini inline: 20MB. Để an toàn dùng 15MB
     const MAX_MB = 15
     if (buf.byteLength > MAX_MB * 1024 * 1024) {
       return res.status(413).json({
-        error: `File quá lớn (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB > ${MAX_MB}MB). Dùng client-side fallback.`,
+        error: `File quá lớn (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB > ${MAX_MB}MB).`,
         fallback: true,
         fileSizeMB: (buf.byteLength / 1024 / 1024).toFixed(1),
       })
@@ -134,7 +106,7 @@ export default async function handler(req, res) {
     return res.status(502).json({ error: 'Lỗi khi tải PDF: ' + e.message })
   }
 
-  // ── Bước 2: Gọi Gemini OCR ───────────────────────────────────────
+  // ── Bước 2: Gọi Gemini OCR qua SDK ──────────────────────────────────
   const prompt = `Trích xuất toàn bộ nội dung từ trang ${fromPage} đến trang ${toPage} của tài liệu: "${fileName || 'document'}".
 
 Yêu cầu bắt buộc:
@@ -144,19 +116,18 @@ Yêu cầu bắt buộc:
 - Bắt đầu output bằng dòng: ## Trang ${fromPage}–${toPage}
 - CHỈ trả về Markdown thuần túy, KHÔNG tóm tắt, KHÔNG giải thích thêm`
 
-  const result = await callGemini(pdfBase64, prompt, gemKeys)
+  const result = await callGeminiSDK(pdfBase64, prompt, gemKeys)
 
   if (!result) {
     return res.status(502).json({
-      error: 'Tất cả Gemini keys đều thất bại (rate limit hoặc key sai format)',
-      hint: 'Key phải bắt đầu bằng AIzaSy... từ aistudio.google.com',
+      error: 'Tất cả Gemini keys đều thất bại (rate limit hoặc key không hợp lệ)',
+      hint: 'Kiểm tra /api/test-keys để debug',
       batchIndex: batchIndex ?? 0,
       fromPage,
       toPage,
     })
   }
 
-  // ── Thành công ───────────────────────────────────────────────────
   return res.status(200).json({
     ok: true,
     docId,
@@ -165,6 +136,6 @@ Yêu cầu bắt buộc:
     toPage,
     text: result.text,
     charCount: result.text.length,
-    keyUsed: result.keyUsed, // debug: biết key nào đang chạy
+    keyUsed: result.keyUsed,
   })
 }
