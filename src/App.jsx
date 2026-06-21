@@ -492,7 +492,6 @@ ${memCtx}`
           <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:48, background:'linear-gradient(135deg, #e8f4fd 0%, #bdd9f0 100%)', position:'relative' }}>
             <img src="/vatm-logo.png" alt="VATM" style={{ width:200, height:200, borderRadius:'50%', objectFit:'cover', marginBottom:24 }}/>
             <h2 style={{ fontSize:24, fontWeight:700, color:'#0a2342', marginBottom:12 }}>Chào mừng đến VATM-PMU</h2>
-            <p style={{ fontSize:24, color:'#1a5490', textAlign:'center', maxWidth:500 }}>Chọn dự án ở thanh công cụ bên trái để xem và quản lý.</p>
             <p style={{ position:'absolute', bottom:16, right:24, fontSize:11, color:'#333' }}>Mọi ý kiến đóng góp xin gửi về: <a href="mailto:hoangductudhbk@gmail.com" style={{ color:'#0a2342', textDecoration:'none', fontWeight:600 }}>hoangductudhbk@gmail.com</a></p>
           </div>
         )}
