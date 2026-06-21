@@ -353,17 +353,18 @@ export function useAI() {
     setLoading(true)
     resetIdxIfNewDay()
 
-    const ctx = `BỘ NHỚ VĂN BẢN:
-📋 Tóm tắt: ${memory.summary || ''}
-📌 Điểm quan trọng: ${(memory.keyPoints || []).join('; ')}
-👥 Thành viên: ${(memory.members || []).join('; ')}
-⚙️ Thông số kỹ thuật: ${(memory.technicalSpecs || []).join('; ')}
-💰 Tài chính: ${(memory.financial || []).join('; ')}
-⚖️ Pháp lý: ${(memory.legal || []).join('; ')}
-📅 Tiến độ: ${(memory.deadlines || []).join('; ')}
-📋 Yêu cầu: ${memory.requirements || ''}
-⚠️ Rủi ro: ${memory.risks || ''}
-📊 Dữ liệu khác: ${(memory.otherData || []).join('; ')}`
+    const mem = memory || {}
+    const ctx = mem.summary ? `BỘ NHỚ VĂN BẢN:
+📋 Tóm tắt: ${mem.summary || ''}
+📌 Điểm quan trọng: ${(mem.keyPoints || []).join('; ')}
+👥 Thành viên: ${(mem.members || []).join('; ')}
+⚙️ Thông số kỹ thuật: ${(mem.technicalSpecs || []).join('; ')}
+💰 Tài chính: ${(mem.financial || []).join('; ')}
+⚖️ Pháp lý: ${(mem.legal || []).join('; ')}
+📅 Tiến độ: ${(mem.deadlines || []).join('; ')}
+📋 Yêu cầu: ${mem.requirements || ''}
+⚠️ Rủi ro: ${mem.risks || ''}
+📊 Dữ liệu khác: ${(mem.otherData || []).join('; ')}` : ''
 
     const ragSection = relevantText
       ? `\n📄 ĐOẠN VĂN BẢN GỐC LIÊN QUAN:\n---\n${relevantText}\n---`

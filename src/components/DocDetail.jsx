@@ -512,7 +512,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     setChatInput('')
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 50)
     try {
-      // RAG: Ưu tiên chunks Firestore, fallback memory.extractedText
+      // RAG: Ưu tiên chunks Firestore, fallback memory.extractedText, fallback metadata
       let relevantText = ''
       if (docChunks.length > 0) {
         relevantText = findRelevantChunksFromFirestore(docChunks, q)
@@ -527,7 +527,19 @@ export default function DocDetail({ doc, onEdit, onClose }) {
             if (mdSnap.exists()) rawText = mdSnap.data().markdown || ''
           } catch {}
         }
-        relevantText = rawText.length > 100 ? findRelevantChunks(rawText, q) : ''
+        // Fallback: dùng metadata văn bản làm context tối thiểu
+        if (!rawText && (doc?.subject || doc?.detail)) {
+          rawText = [
+            doc.code ? `Số ký hiệu: ${doc.code}` : '',
+            doc.date ? `Ngày ban hành: ${doc.date}` : '',
+            doc.org  ? `Cơ quan ban hành: ${doc.org}` : '',
+            doc.docType ? `Loại văn bản: ${doc.docType}` : '',
+            doc.subject ? `Nội dung/Về việc: ${doc.subject}` : '',
+            doc.detail  ? `Trích yếu: ${doc.detail}` : '',
+            doc.note    ? `Ghi chú: ${doc.note}` : '',
+          ].filter(Boolean).join('\n')
+        }
+        relevantText = rawText.length > 50 ? findRelevantChunks(rawText, q) : rawText
       }
       const answer = await askDeep(q, memory, chat, relevantText)
       setChat(c => [...c, { role:'ai', content: answer }])
