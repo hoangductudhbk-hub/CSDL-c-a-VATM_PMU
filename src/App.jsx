@@ -1,5 +1,18 @@
 import { useState, useEffect, useRef } from 'react'
 import React from 'react'
+
+// Dự án cũ chưa có field category → suy luận theo tên để không mất dữ liệu
+const getCategory = (p) => {
+  if (p.category) return p.category
+  if (/quy định|quy trình/i.test(p.name)) return 'regulation'
+  if (/biểu mẫu/i.test(p.name)) return 'form'
+  return 'project'
+}
+const subItemLabel = (catKey) =>
+  catKey === 'regulation' ? '+ Thêm văn bản' : catKey === 'form' ? '+ Thêm mục' : '+ Thêm gói thầu'
+const subItemModalTitle = (catKey) =>
+  catKey === 'regulation' ? '📄 Thêm văn bản' : catKey === 'form' ? '🗂 Thêm mục' : '📁 Thêm gói thầu'
+
 import { useAuth }        from './context/AuthContext'
 import { useProjects }    from './hooks/useProjects'
 import { useDocuments }   from './hooks/useDocuments'
@@ -389,15 +402,7 @@ ${memCtx}`
         {/* Danh sách dự án theo 3 nhóm: Dự án / Quy định / Biểu mẫu */}
         <div style={{ padding:'0 8px', borderTop:'0.5px solid #f0f0ec', marginTop:4, flex:1, overflowY:'auto' }}>
           {(() => {
-            // Dự án cũ chưa có field category → suy luận theo tên để không mất dữ liệu
-            const getCategory = (p) => {
-              if (p.category) return p.category
-              if (/quy định|quy trình/i.test(p.name)) return 'regulation'
-              if (/biểu mẫu/i.test(p.name)) return 'form'
-              return 'project'
-            }
-
-            const renderProjectRow = (p) => {
+            const renderProjectRow = (p, catKey) => {
               const pkgsForProj = packages.filter(pkg => pkg.projectId === p.id)
               const isExpanded  = expandedProjs.has(p.id)
               const isProjSel   = proj?.id === p.id
@@ -441,7 +446,7 @@ ${memCtx}`
                       {/* Nút thêm gói thầu */}
                       <button onClick={() => setShowAddPkg(p.id)}
                         style={{ fontSize:11, color:'#888', background:'none', border:'none', cursor:'pointer', padding:'4px 6px', width:'100%', textAlign:'left' }}>
-                        + Thêm gói thầu
+                        {subItemLabel(catKey)}
                       </button>
                     </div>
                   )}
@@ -460,7 +465,7 @@ ${memCtx}`
               return (
                 <div key={g.key} style={{ marginBottom:10 }}>
                   <div style={{ fontSize:12, color:'#555', padding:'8px 8px 4px', fontWeight:800, letterSpacing:'0.05em' }}>{g.label}</div>
-                  {catProjects.map(renderProjectRow)}
+                  {catProjects.map(p => renderProjectRow(p, g.key))}
                   <button onClick={() => setShowAddProj(g.key)}
                     style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:'#888', fontSize:12, marginTop:2, fontWeight:600 }}>
                     {g.addLabel}
@@ -723,8 +728,10 @@ ${memCtx}`
       {showAddPkg && (
         <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}>
           <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:400, boxShadow:'0 8px 32px rgba(0,0,0,.15)' }}>
-            <h3 style={{ fontSize:15, fontWeight:600, marginBottom:16 }}>📁 Thêm gói thầu</h3>
-            <input value={newPkgName} onChange={e => setNewPkgName(e.target.value)} placeholder="Tên gói thầu" autoFocus
+            <h3 style={{ fontSize:15, fontWeight:600, marginBottom:16 }}>
+              {subItemModalTitle(getCategory(projects.find(pr => pr.id === showAddPkg) || {}))}
+            </h3>
+            <input value={newPkgName} onChange={e => setNewPkgName(e.target.value)} placeholder="Tên" autoFocus
               onKeyDown={async e => {
                 if (e.key==='Enter' && newPkgName.trim()) {
                   await addPackage(newPkgName.trim(), showAddPkg)
