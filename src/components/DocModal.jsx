@@ -30,75 +30,52 @@ const bufToBase64 = (buf) => {
   return btoa(binary)
 }
 
-// ── Gọi Gemini với 1 PDF (toàn bộ file, base64) ─────────────────
-const callGeminiPdf = async (base64, prompt, gemKeys) => {
-  for (let i = 0; i < gemKeys.length; i++) {
-    try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${gemKeys[i]}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [
-              { inline_data: { mime_type: 'application/pdf', data: base64 } },
-              { text: prompt }
-            ]}],
-            generationConfig: { temperature: 0, maxOutputTokens: 8192 }
-          })
-        }
-      )
-      if (res.status === 429) { await new Promise(r => setTimeout(r, 2000)); continue }
-      if (!res.ok) continue
-      const text = (await res.json()).candidates?.[0]?.content?.parts?.[0]?.text || ''
-      if (text.length > 50) return text
-    } catch { continue }
-  }
-  return null
+// ── Gọi Gemini với 1 PDF qua /api/gemini-proxy (key nằm server) ────
+// SỬA 22/6/2026: trước đây gọi thẳng generativelanguage.googleapis.com
+// bằng model gemini-2.0-flash đã chết (1/6/2026) — mọi lệnh gọi đều lỗi
+// âm thầm (catch rồi continue), rơi xuống đọc text thô không OCR. Giờ gọi
+// qua proxy server — tự động hưởng model gemini-2.5-flash/-lite + xoay
+// vòng key đã sửa sẵn trong gemini-proxy.js, không cần lặp key ở đây nữa.
+const callGeminiPdf = async (base64, prompt) => {
+  try {
+    const res = await fetch('/api/gemini-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parts: [
+          { inline_data: { mime_type: 'application/pdf', data: base64 } },
+          { text: prompt },
+        ],
+        maxTokens: 8192,
+      }),
+    })
+    if (!res.ok) return null
+    const data = await res.json()
+    const text = data.text || ''
+    return text.length > 50 ? text : null
+  } catch { return null }
 }
 
-// ── Gemini đọc PDF theo nhóm trang ────────────────────────────────
-// pageGroup: 30 trang/lần → tối đa 200 trang = 7 lần gọi
+// ── Gemini đọc toàn bộ PDF trong 1 lần gọi ──────────────────────
+// SỬA 22/6/2026: trước đây chia "nhóm 30 trang" rồi gọi lặp lại — nhưng
+// mỗi lần đều gửi NGUYÊN file PDF y hệt (base64 tính 1 lần, dùng lại),
+// chỉ đổi câu prompt yêu cầu AI "tự tìm trang X-Y" — không cắt file thật,
+// nên không có tác dụng phân trang, chỉ tốn thêm lệnh gọi vô ích. Model
+// hiện tại (gemini-2.5-flash) đọc được tới hàng trăm trang trong 1 lần
+// gọi — gọi 1 lần duy nhất, để model tự đọc hết, không cần chia nhóm giả.
 const extractPdfWithGemini = async (buf, fileName = '', docId = null, onStatus = null) => {
-  const gemKeys = [
-    import.meta.env.VITE_GEMINI_API_KEY,
-    import.meta.env.VITE_GEMINI_API_KEY_2,
-    import.meta.env.VITE_GEMINI_API_KEY_3,
-  ].filter(Boolean)
-  if (!gemKeys.length) return null
-
   if (onStatus) onStatus('📄 Đang đọc văn bản...')
-
-  // Đọc số trang bằng pdfjs (nhanh, không cần nội dung)
-  const lib = await loadPdfJs()
-  const pdf = await lib.getDocument({ data: buf.slice(0) }).promise
-  const totalPages = pdf.numPages
-  const PAGE_GROUP = 30 // trang/lần gọi Gemini
-
   const base64 = bufToBase64(buf)
-  let allText = ''
 
-  const groups = Math.ceil(totalPages / PAGE_GROUP)
-  for (let g = 0; g < groups; g++) {
-    const fromPage = g * PAGE_GROUP + 1
-    const toPage = Math.min((g + 1) * PAGE_GROUP, totalPages)
-
-    const prompt = `Trích xuất nội dung từ trang ${fromPage} đến trang ${toPage} của PDF: "${fileName}".
+  const prompt = `Trích xuất TOÀN BỘ nội dung của file PDF "${fileName}".
 Yêu cầu:
 - Giữ nguyên 100% câu chữ, số liệu, tên người, ngày tháng
-- Chuyển bảng biểu sang Markdown table (| cột | cột |)  
+- Chuyển bảng biểu sang Markdown table (| cột | cột |)
 - Giữ heading (# ## ###), điều khoản (Điều 1, Khoản 2...)
-- Bắt đầu bằng dòng: ## Trang ${fromPage}–${toPage}
 - KHÔNG tóm tắt, chỉ trả về Markdown thuần túy`
 
-    const chunkText = await callGeminiPdf(base64, prompt, gemKeys)
-    if (chunkText) allText += chunkText + '\n\n'
-
-    // Delay giữa các nhóm tránh rate limit
-    if (g < groups - 1) await new Promise(r => setTimeout(r, 1500))
-  }
-
-  return allText.slice(0, 200000) // lưu 200K vào extractedText
+  const text = await callGeminiPdf(base64, prompt)
+  return text ? text.slice(0, 200000) : null
 }
 
 // ── Fallback: pdfjs đọc text thô ─────────────────────────────────
