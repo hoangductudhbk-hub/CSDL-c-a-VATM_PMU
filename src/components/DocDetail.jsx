@@ -605,20 +605,28 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       } else {
         // Ưu tiên Markdown từ Firestore cho RAG
         let rawText = memory?.extractedText || doc?.extractedText || ''
-        if (doc?.markdownRef && !rawText) {
+        // Đọc markdown từ documentMarkdown/{docId} (key mới) hoặc markdownRef (key cũ)
+        if (!rawText) {
           try {
             const { doc: fsDoc, getDoc } = await import('firebase/firestore')
             const { db } = await import('../firebase')
-            const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.markdownRef))
-            if (mdSnap.exists()) rawText = mdSnap.data().markdown || ''
+            // Thử key mới (docId) trước
+            const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
+            if (mdSnap.exists()) {
+              rawText = mdSnap.data().markdown || ''
+            } else if (doc?.markdownRef) {
+              // Tương thích ngược: key cũ (random ID)
+              const mdSnap2 = await getDoc(fsDoc(db, 'documentMarkdown', doc.markdownRef))
+              if (mdSnap2.exists()) rawText = mdSnap2.data().markdown || ''
+            }
           } catch {}
         }
-        // Fallback: dùng metadata văn bản làm context tối thiểu
+        // Fallback: metadata văn bản làm context tối thiểu
         if (!rawText && (doc?.subject || doc?.detail)) {
           rawText = [
-            doc.code ? `Số ký hiệu: ${doc.code}` : '',
-            doc.date ? `Ngày ban hành: ${doc.date}` : '',
-            doc.org  ? `Cơ quan ban hành: ${doc.org}` : '',
+            doc.code    ? `Số ký hiệu: ${doc.code}` : '',
+            doc.date    ? `Ngày ban hành: ${doc.date}` : '',
+            doc.org     ? `Cơ quan ban hành: ${doc.org}` : '',
             doc.docType ? `Loại văn bản: ${doc.docType}` : '',
             doc.subject ? `Nội dung/Về việc: ${doc.subject}` : '',
             doc.detail  ? `Trích yếu: ${doc.detail}` : '',
@@ -627,7 +635,8 @@ export default function DocDetail({ doc, onEdit, onClose }) {
         }
         relevantText = rawText.length > 50 ? findRelevantChunks(rawText, q) : rawText
       }
-      const answer = await askDeep(q, memory, chat, relevantText)
+      // Truyền memory || {} để askDeep không crash khi memory chưa có
+      const answer = await askDeep(q, memory || {}, chat, relevantText)
       setChat(c => [...c, { role:'ai', content: answer }])
     } catch(e) {
       const errMsg = e.message === 'AI_RATE_LIMIT'
@@ -648,7 +657,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100, padding:20 }}
       onClick={e => e.target===e.currentTarget && onClose()}>
-      <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:'100%', maxWidth: showChat ? 760 : 560, maxHeight:'90vh', overflowY:'auto', boxShadow:'0 8px 32px rgba(0,0,0,.15)', transition:'max-width .2s' }}>
+      <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:'100%', maxWidth:620, maxHeight:'92vh', overflowY:'auto', boxShadow:'0 8px 32px rgba(0,0,0,.15)' }}>
 
         {/* Header */}
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:16 }}>
@@ -659,8 +668,8 @@ export default function DocDetail({ doc, onEdit, onClose }) {
           <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', fontSize:18, color:'#888' }}>✕</button>
         </div>
 
-        <div style={{ display: showChat ? 'grid' : 'block', gridTemplateColumns:'1fr 1fr', gap:20 }}>
-          {/* Cột trái */}
+        <div>
+          {/* Thông tin văn bản */}
           <div>
             <div style={{ borderTop:'0.5px solid #e5e4e0', paddingTop:14 }}>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0 20px' }}>
@@ -819,55 +828,69 @@ export default function DocDetail({ doc, onEdit, onClose }) {
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Cột phải: Chat */}
-          {showChat && (memory || docChunks.length > 0 || jobDone) && (
-            <div style={{ display:'flex', flexDirection:'column', borderLeft:'0.5px solid #e5e4e0', paddingLeft:20, minHeight:400 }}>
-              <div style={{ fontSize:13, fontWeight:600, color:'#0a2342', marginBottom:12 }}>💬 Hỏi đáp sâu về tài liệu</div>
-              {chat.length === 0 && (
-                <div style={{ display:'flex', flexDirection:'column', gap:6, marginBottom:12 }}>
-                  {[
-                    'Tóm tắt toàn bộ nội dung văn bản này',
-                    'Các điểm quan trọng cần lưu ý là gì?',
-                    'Căn cứ pháp lý được viện dẫn?',
-                    'Có rủi ro hoặc điểm bất thường gì không?',
-                    memory?.requirements ? 'Yêu cầu kỹ thuật cụ thể là gì?' : null,
-                    memory?.legalBasis ? 'Các văn bản pháp lý liên quan?' : null,
-                  ].filter(Boolean).map(q => (
-                    <button key={q} onClick={() => handleAsk(q)}
-                      style={{ textAlign:'left', padding:'7px 10px', borderRadius:8, fontSize:12, background:'#f5f5f3', border:'0.5px solid #e5e4e0', cursor:'pointer', color:'#444' }}>
-                      {q}
-                    </button>
-                  ))}
+        {/* ── Chat Q&A — hiển thị bên DƯỚI thông tin văn bản ── */}
+        {showChat && (
+          <div style={{ marginTop:16, borderTop:'0.5px solid #e5e4e0', paddingTop:14 }}>
+            <div style={{ fontSize:13, fontWeight:600, color:'#0a2342', marginBottom:10 }}>💬 Hỏi đáp sâu về tài liệu</div>
+
+            {/* Gợi ý câu hỏi nhanh khi chưa có chat */}
+            {chat.length === 0 && (
+              <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:12 }}>
+                {[
+                  'Tóm tắt toàn bộ nội dung văn bản này',
+                  'Các điểm quan trọng cần lưu ý?',
+                  'Căn cứ pháp lý được viện dẫn?',
+                  'Có rủi ro hoặc điểm bất thường không?',
+                  memory?.requirements ? 'Yêu cầu kỹ thuật cụ thể?' : null,
+                  memory?.legalBasis   ? 'Văn bản pháp lý liên quan?' : null,
+                ].filter(Boolean).map(q => (
+                  <button key={q} onClick={() => handleAsk(q)}
+                    style={{ padding:'6px 10px', borderRadius:16, fontSize:11, background:'#f0f4ff', border:'0.5px solid #c7d7f5', cursor:'pointer', color:'#0a2342', whiteSpace:'nowrap' }}>
+                    {q}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Lịch sử chat */}
+            <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:10, maxHeight:380, overflowY:'auto' }}>
+              {chat.map((m, i) => (
+                <div key={i} style={{ display:'flex', justifyContent: m.role==='user' ? 'flex-end' : 'flex-start' }}>
+                  <div style={{ maxWidth:'88%', padding:'9px 13px', borderRadius:12, fontSize:12.5, lineHeight:1.65,
+                    background: m.role==='user' ? '#0a2342' : '#f8fffe',
+                    color: m.role==='user' ? '#fff' : '#1a1a1a',
+                    border: m.role==='ai' ? '0.5px solid #c3e6cb' : 'none',
+                    whiteSpace:'pre-wrap' }}>
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+              {aiLoading && (
+                <div style={{ display:'flex' }}>
+                  <div style={{ padding:'8px 12px', borderRadius:10, fontSize:12, background:'#f5f5f3', color:'#888' }}>⏳ Đang tra cứu...</div>
                 </div>
               )}
-              <div style={{ flex:1, overflowY:'auto', display:'flex', flexDirection:'column', gap:8, marginBottom:10, maxHeight:360 }}>
-                {chat.map((m, i) => (
-                  <div key={i} style={{ display:'flex', justifyContent: m.role==='user' ? 'flex-end' : 'flex-start' }}>
-                    <div style={{ maxWidth:'90%', padding:'8px 12px', borderRadius:10, fontSize:12, lineHeight:1.6, background: m.role==='user' ? '#0a2342' : '#f0fdf4', color: m.role==='user' ? '#fff' : '#1a1a1a', border: m.role==='ai' ? '0.5px solid #bbf7d0' : 'none' }}>
-                      {m.content}
-                    </div>
-                  </div>
-                ))}
-                {aiLoading && <div style={{ display:'flex' }}><div style={{ padding:'8px 12px', borderRadius:10, fontSize:12, background:'#f5f5f3', color:'#888' }}>⏳ Đang tra cứu bộ nhớ...</div></div>}
-                <div ref={chatEndRef}/>
-              </div>
-              <div style={{ display:'flex', gap:6 }}>
-                <input value={chatInput} onChange={e => setChatInput(e.target.value)}
-                  onKeyDown={e => e.key==='Enter' && !e.shiftKey && handleAsk(chatInput)}
-                  placeholder="Hỏi bất kỳ điều gì về tài liệu..."
-                  style={{ flex:1, padding:'8px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none' }}/>
-                <button onClick={() => handleAsk(chatInput)} disabled={aiLoading || !chatInput.trim()}
-                  style={{ padding:'8px 14px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13 }}>▶</button>
-              </div>
-              {chat.length > 0 && (
-                <button onClick={() => setChat([])} style={{ marginTop:6, fontSize:11, color:'#aaa', background:'none', border:'none', cursor:'pointer' }}>
-                  🗑️ Xóa lịch sử chat
-                </button>
-              )}
+              <div ref={chatEndRef}/>
             </div>
-          )}
-        </div>
+
+            {/* Input */}
+            <div style={{ display:'flex', gap:6 }}>
+              <input value={chatInput} onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key==='Enter' && !e.shiftKey && handleAsk(chatInput)}
+                placeholder="Hỏi bất kỳ điều gì về tài liệu..."
+                style={{ flex:1, padding:'9px 13px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none' }}/>
+              <button onClick={() => handleAsk(chatInput)} disabled={aiLoading || !chatInput.trim()}
+                style={{ padding:'9px 16px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:14 }}>▶</button>
+            </div>
+            {chat.length > 0 && (
+              <button onClick={() => setChat([])} style={{ marginTop:6, fontSize:11, color:'#aaa', background:'none', border:'none', cursor:'pointer' }}>
+                🗑️ Xóa lịch sử chat
+              </button>
+            )}
+          </div>
+        )}
 
         <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:16, borderTop:'0.5px solid #e5e4e0', paddingTop:14 }}>
           <button onClick={onClose} style={{ padding:'8px 18px', border:'0.5px solid #ddd', borderRadius:8, cursor:'pointer', background:'#fff', color:'#555', fontSize:13 }}>Đóng</button>
