@@ -41,15 +41,17 @@ const loadPdfJs = () => new Promise((res, rej) => {
 // CMap lỗi: dấu < 3%.
 const isPageTextUsable = (text) => {
   if (!text || text.trim().length < 30) return false
-  // Kiểm tra dấu tiếng Việt
+  // Watermark hệ thống quản lý văn bản VN (Voffice, VNPT, VATM...)
+  // Pattern: "tải về từ ... ngày ... bởi Phòng ..."
+  if (/(?:phòng\s*nghiệp\s*vụ|da\.phongnv|tải\s+về\s+từ\s+(?:hệ\s+thống|vatm)|thông\s+tin\s+tải\s+về)/i.test(text)) return false
+  // Trang ngắn < 120 ký tự = chỉ có watermark/header, không có nội dung thực
+  if (text.trim().length < 120) return false
+  // CMap lỗi: quá ít dấu tiếng Việt
   const accents = (text.match(/[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/gi) || []).length
   if (accents / text.length < 0.03) return false
-  // Kiểm tra độ đa dạng từ vựng — watermark lặp đi lặp lại có unique ratio thấp
+  // Từ vựng lặp: watermark dài hơn bị loại bởi unique ratio thấp
   const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 2)
-  if (words.length > 15) {
-    const uniqueRatio = new Set(words).size / words.length
-    if (uniqueRatio < 0.25) return false // < 25% từ unique = nội dung lặp (watermark)
-  }
+  if (words.length > 15 && new Set(words).size / words.length < 0.25) return false
   return true
 }
 
