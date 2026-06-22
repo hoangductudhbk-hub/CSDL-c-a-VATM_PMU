@@ -36,11 +36,21 @@ const loadPdfJs = () => new Promise((res, rej) => {
 })
 
 // ─── Kiểm tra text trang có dùng được không ────────────────────────────────
-// Văn bản hành chính VN có dấu ~15-20%. Watermark/CMap lỗi thường < 4%.
+// Văn bản hành chính VN: dấu ~15-20%, từ vựng đa dạng.
+// Watermark lặp: dấu có thể đủ nhưng từ vựng nghèo (unique words < 25%).
+// CMap lỗi: dấu < 3%.
 const isPageTextUsable = (text) => {
   if (!text || text.trim().length < 30) return false
+  // Kiểm tra dấu tiếng Việt
   const accents = (text.match(/[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/gi) || []).length
-  return accents / text.length >= 0.03 // ≥3% dấu = text dùng được
+  if (accents / text.length < 0.03) return false
+  // Kiểm tra độ đa dạng từ vựng — watermark lặp đi lặp lại có unique ratio thấp
+  const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 2)
+  if (words.length > 15) {
+    const uniqueRatio = new Set(words).size / words.length
+    if (uniqueRatio < 0.25) return false // < 25% từ unique = nội dung lặp (watermark)
+  }
+  return true
 }
 
 // ─── Render trang PDF thành JPEG base64 (scale 1.5, nhỏ gọn cho OCR) ───────
