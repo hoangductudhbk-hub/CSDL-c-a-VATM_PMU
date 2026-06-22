@@ -71,8 +71,10 @@ export function useDocuments(projectId, userId, packageId = null) {
     // Xóa bộ nhớ AI trong Firestore
     try { await deleteDoc(doc(db, 'documentMemory', id)) } catch {}
 
-    // Xóa markdown đầy đủ (lưu ở record riêng, tham chiếu qua markdownRef)
-    if (docData?.markdownRef) {
+    // Xóa markdown — giờ dùng docId làm key trực tiếp (không cần markdownRef)
+    try { await deleteDoc(doc(db, 'documentMarkdown', id)) } catch {}
+    // Tương thích ngược: nếu bản cũ vẫn còn markdownRef random thì xóa nốt
+    if (docData?.markdownRef && docData.markdownRef !== id) {
       try { await deleteDoc(doc(db, 'documentMarkdown', docData.markdownRef)) } catch {}
     }
 

@@ -265,10 +265,15 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     try {
       const { doc: fsDoc, getDoc } = await import('firebase/firestore')
       const { db } = await import('../firebase')
+      // documentMarkdown dùng docId làm key (bản mới) hoặc markdownRef (bản cũ)
       let text = '', charCount = 0
-      if (doc?.markdownRef) {
-        const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.markdownRef))
-        if (mdSnap.exists()) { text = mdSnap.data().markdown || ''; charCount = mdSnap.data().charCount || text.length }
+      const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
+      if (mdSnap.exists()) {
+        text = mdSnap.data().markdown || ''
+        charCount = mdSnap.data().charCount || text.length
+      } else if (doc?.markdownRef) {
+        const mdSnap2 = await getDoc(fsDoc(db, 'documentMarkdown', doc.markdownRef))
+        if (mdSnap2.exists()) { text = mdSnap2.data().markdown || ''; charCount = mdSnap2.data().charCount || text.length }
       }
       let totalPages = null
       const jobSnap = await getDoc(fsDoc(db, 'processingJobs', doc.id))
