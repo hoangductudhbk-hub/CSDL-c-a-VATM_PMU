@@ -15,16 +15,19 @@ export default async function handler(req, res) {
   if (!docId) return res.status(400).json({ error: 'Thiếu docId' })
   if (!fileUrl) return res.status(400).json({ error: 'Thiếu fileUrl' })
 
-  // Kiểm tra Gemini key đã cấu hình chưa (server-side)
+  // Kiểm tra các key đã cấu hình chưa (server-side)
+  // SỬA 22/6/2026: không block nếu thiếu Gemini — process-batch.js có Groq +
+  // Tesseract.js làm fallback, pipeline vẫn chạy được mà không cần Gemini.
   const hasGemini = !!(
     process.env.VITE_GEMINI_API_KEY ||
     process.env.GEMINI_API_KEY
   )
+  const hasGroq = !!(process.env.VITE_GROQ_API_KEY || process.env.VITE_GROQ_API_KEY_2)
   const hasGhToken = !!(process.env.VITE_GH_TOKEN || process.env.GH_TOKEN)
 
-  if (!hasGemini) {
+  if (!hasGroq && !hasGemini) {
     return res.status(500).json({
-      error: 'Server chưa cấu hình GEMINI_API_KEY. Set trên Vercel Environment Variables.',
+      error: 'Server chưa cấu hình key AI nào (cần ít nhất VITE_GROQ_API_KEY hoặc VITE_GEMINI_API_KEY).',
     })
   }
 
