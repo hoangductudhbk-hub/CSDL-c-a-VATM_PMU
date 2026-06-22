@@ -22,7 +22,38 @@
 
 import { createRequire } from 'module'
 import { PDFDocument } from 'pdf-lib'
+import * as mupdf from 'mupdf'
+import { createWorker } from 'tesseract.js'
 const require = createRequire(import.meta.url)
+
+// ── Render trang PDF thành ảnh, BỎ HOÀN TOÀN lớp text gốc ─────────
+// Lý do tồn tại: lỗi CMap/watermark nằm ở LỚP TEXT — nếu vẫn gửi PDF gốc
+// (kèm lớp text hỏng) cho Gemini qua inline_data, Gemini có thể tự lấy lớp
+// text nhúng sẵn cho rẻ và kế thừa lại lỗi (đã xác minh: AI vision không tự
+// động tránh được lỗi này nếu input vẫn là PDF có text layer). Render ra
+// ẢNH THUẦN (PNG) thì không còn lớp text nào để bất kỳ ai/cái gì đọc nhầm —
+// chỉ còn pixel, buộc phải đọc bằng OCR/vision thật.
+const renderPageToImage = (pdfBuffer, pageIndex) => {
+  const doc = mupdf.Document.openDocument(pdfBuffer, 'application/pdf')
+  const page = doc.loadPage(pageIndex)
+  const pixmap = page.toPixmap(mupdf.Matrix.scale(2, 2), mupdf.ColorSpace.DeviceRGB)
+  return Buffer.from(pixmap.asPNG())
+}
+
+// ── OCR bằng Tesseract.js — miễn phí tuyệt đối, không cần Google/Groq ──
+// Lý do tồn tại: khi Gemini bị chặn (như đợt key AQ. hiện tại) vẫn cần 1
+// đường OCR luôn hoạt động được, không phụ thuộc tài khoản/key bên ngoài.
+// Đã verify bằng dữ liệu thật: đọc đúng "BỘ XÂY DỰNG", "CỘNG HÒA XÃ HỘI CHỦ
+// NGHĨA VIỆT NAM"... trên đúng trang bị lỗi CMap của file 3482.
+const callTesseractOCR = async (imageBuffer) => {
+  const worker = await createWorker('vie')
+  try {
+    const { data } = await worker.recognize(imageBuffer)
+    return data.text
+  } finally {
+    await worker.terminate()
+  }
+}
 
 const getGroqKeys = () => [
   process.env.VITE_GROQ_API_KEY,
@@ -47,10 +78,11 @@ const callGroq = async (text, fileName, fromPage, toPage) => {
   const prompt = `Bạn là chuyên gia xử lý văn bản hành chính Việt Nam.
 Dưới đây là nội dung text thô trích từ trang ${fromPage}–${toPage} của tài liệu "${fileName}".
 Hãy làm sạch và định dạng lại thành Markdown rõ ràng:
-- Giữ nguyên 100% nội dung, số liệu, tên, ngày tháng
+- Giữ nguyên 100% nội dung, số liệu, tên, ngày tháng — không suy diễn, không thêm thông tin không có trong text thô
 - Thêm tiêu đề ## Trang ${fromPage}–${toPage} ở đầu
 - Bảng biểu → Markdown table
 - Xóa ký tự rác, khoảng trắng thừa
+- Nếu có dòng/cụm lặp lại nhiều lần không mang thông tin (watermark, header/footer hệ thống tải về...) — chỉ giữ lại 1 lần đầu, không lặp lại toàn bộ trong kết quả
 - Chỉ trả về Markdown, không giải thích thêm
 
 TEXT THÔ:
@@ -77,6 +109,43 @@ ${text.slice(0, 6000)}
     } catch { continue }
   }
   return null
+}
+
+// ── Phát hiện lỗi bảng mã (broken CMap) — khác hẳn lỗi watermark ──
+// Lý do tồn tại: file 3482 trang 1-2 có lớp text ĐỦ DÀI (vượt ngưỡng 80
+// ký tự/trang, qua được mọi check khác) nhưng là RÁC do PDF có bảng ánh xạ
+// ký tự (ToUnicode CMap) bị hỏng — chữ hiển thị đúng khi xem/in, nhưng dữ
+// liệu text ẩn bên dưới (dùng để copy/trích xuất) trỏ sai sang số/ký hiệu
+// khác (VD: "ĐỊNH" bị trích thành "D1NH", "DỰNG" thành "DI)G"). Không sửa
+// được bằng cách đổi OCR — ĐÃ TEST: ngay cả AI đọc qua vision cũng kế thừa
+// lỗi này nếu nó ưu tiên dùng lớp text nhúng sẵn. Tín hiệu đáng tin duy
+// nhất: tỷ lệ ký tự CÓ DẤU trên tổng ký tự bất thường thấp. Đã verify bằng
+// dữ liệu thật: văn bản hành chính VN thật ~16-19%, văn bản lỗi CMap ~4.68%.
+const accentRatio = (text) => {
+  const matches = text.match(/[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/gi) || []
+  return matches.length / Math.max(text.length, 1)
+}
+
+// ── Phát hiện watermark/nội dung lặp lại đánh lừa classifier ──────
+// Lý do tồn tại: file 5379 có watermark "Da.phongnv VATM Thông tin tải về..."
+// lặp đi lặp lại đủ nhiều để vượt ngưỡng avgCharsPerPage, khiến code tưởng
+// "có chữ tốt rồi" và KHÔNG gọi OCR. Không hardcode theo đúng câu watermark
+// đó (không tổng quát) — đo độ LẶP LẠI bằng tỷ lệ nén zlib: nội dung lặp
+// nhiều nén được rất gọn (tỷ lệ thấp), văn bản hành chính thật có từ vựng
+// đa dạng nén kém hơn nhiều (tỷ lệ cao hơn).
+// ĐÃ TEST bằng dữ liệu thật (file 5379, đúng lô trang 17-22 gây lỗi gốc):
+// phiên bản đầu dùng cửa sổ trượt cố định 60 ký tự đã SAI — watermark lặp
+// theo chu kỳ ~85 ký tự, không chia hết cho 60, mỗi cửa sổ rơi vào "pha"
+// khác nhau của chu kỳ lặp nên tưởng là không lặp (ratio=1.00, bỏ lọt đúng
+// lô lỗi). Tỷ lệ nén không phụ thuộc chu kỳ lặp dài bao nhiêu, đã verify
+// bắt đúng lô 17-22 (tỷ lệ nén 0.17) trong khi không báo nhầm cho nội dung
+// thật đa dạng từ vựng.
+const hasLowContentDiversity = (text) => {
+  if (text.length < 200) return false
+  const zlib = require('zlib')
+  const original = Buffer.byteLength(text, 'utf8')
+  const compressed = zlib.deflateSync(text).length
+  return (compressed / original) < 0.2
 }
 
 // ── Cắt đúng trang fromPage..toPage thành 1 PDF con ───────────────
@@ -148,10 +217,22 @@ const callGeminiOCR = async (pageBuffer, fileName, fromPage, toPage) => {
             contents: [{
               parts: [
                 { inline_data: { mime_type: 'application/pdf', data: base64Pdf } },
-                { text: `Đây là ${pageCount} trang trích từ tài liệu "${fileName}" (tương ứng trang ${fromPage}-${toPage} của bản gốc).
-Trích xuất TOÀN BỘ nội dung các trang này.
-Giữ nguyên 100% câu chữ, số liệu, tên người, bảng biểu, điều khoản. Giữ cấu trúc tiêu đề/điều/khoản.
-KHÔNG tóm tắt, KHÔNG bỏ thông tin. Chỉ trả về nội dung dạng Markdown thuần — không bình luận, không giải thích.` },
+                { text: `Bạn là công cụ chuyển đổi PDF sang Markdown chuyên dụng — KHÔNG phải trợ lý tư vấn, KHÔNG tóm tắt, KHÔNG bình luận, chỉ chuyển đổi định dạng.
+
+Đây là ${pageCount} trang trích từ tài liệu "${fileName}" (tương ứng trang ${fromPage}-${toPage} của bản gốc).
+
+NGUYÊN TẮC:
+- Trung thực tuyệt đối: không bỏ sót câu/đoạn nào, không diễn giải lại, không tóm tắt thay nội dung đầy đủ
+- Giữ đúng ngôn ngữ gốc (tiếng Việt có dấu/tiếng Anh), không dịch
+- Đọc đúng thứ tự tự nhiên; nếu bố cục nhiều cột, đọc lần lượt theo logic nội dung, không theo vị trí pixel
+- KHÔNG tự suy diễn đoạn không đọc được (mờ/rách/mất nét) — đánh dấu [không đọc được] tại đúng vị trí, không đoán
+- Số liệu, đơn vị kỹ thuật (kV, kVA, %, TCVN, IEC...): giữ chính xác 100%, không làm tròn, không đổi đơn vị
+- Chữ ký/dấu mộc: ghi chú *(Đã ký)*, *(Có dấu)* — KHÔNG transcribe lại watermark/dấu chìm/dấu mộc lặp lại nhiều lần
+- Header/footer lặp lại không mang thông tin (số trang, watermark hệ thống tải về...): bỏ qua, không lặp lại trong kết quả
+- Bảng biểu → Markdown table; tiêu đề → #/##/### đúng cấp bậc; danh sách giữ đúng -, 1. 2. 3. như bản gốc
+- Văn bản hành chính (số/ký hiệu, ngày, người ký, cơ quan): giữ đúng format chuẩn
+
+Chỉ trả về nội dung Markdown thuần. Không bọc code block, không lời chào/giới thiệu/nhận xét trước hoặc sau nội dung.` },
               ],
             }],
             generationConfig: { temperature: 0, maxOutputTokens: 8192 },
@@ -171,6 +252,87 @@ KHÔNG tóm tắt, KHÔNG bỏ thông tin. Chỉ trả về nội dung dạng Ma
         console.error(`[process-batch] lỗi gọi Gemini ${model}:`, e.message)
         continue
       }
+    }
+  }
+  return null
+}
+
+// ── OCR.space — nhà cung cấp OCR thứ 2, ĐỘC LẬP với Google ────────
+// Lý do tồn tại: Gemini đang bị chặn ở cấp tài khoản Google (key chỉ ra
+// được dạng AQ., không sửa được từ phía mình). OCR.space có API free thật
+// (không phải web giả lập), không liên quan gì tới Google — khi Gemini sống
+// lại thì vẫn còn nhà cung cấp dự phòng này, không còn phụ thuộc 1 nguồn duy
+// nhất. Giới hạn free tier: 1MB/request — nếu lô trang quá lớn, bỏ qua sạch
+// (không cố gửi thiếu dữ liệu), rơi xuống nhánh fallback bên dưới.
+const callOcrSpace = async (pageBuffer, fromPage, toPage) => {
+  const apiKey = process.env.OCRSPACE_API_KEY
+  if (!apiKey) return null
+  const pageCount = toPage - fromPage + 1
+  if (pageBuffer.length > 900 * 1024) {
+    console.error(`[process-batch] Lô trang ${fromPage}-${toPage} (${Math.round(pageBuffer.length / 1024)}KB) vượt giới hạn free tier OCR.space (~900KB) — bỏ qua, không thử.`)
+    return null
+  }
+  try {
+    const base64 = pageBuffer.toString('base64')
+    const body = new URLSearchParams({
+      apikey: apiKey,
+      base64Image: `data:application/pdf;base64,${base64}`,
+      filetype: 'PDF',
+      language: 'vie',
+      OCREngine: '2',
+      isCreateSearchablePdf: 'false',
+    })
+    const res = await fetch('https://api.ocr.space/parse/image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+    if (!res.ok) { console.error('[process-batch] OCR.space HTTP', res.status); return null }
+    const data = await res.json()
+    if (data.IsErroredOnProcessing) {
+      console.error('[process-batch] OCR.space báo lỗi xử lý:', data.ErrorMessage || JSON.stringify(data).slice(0, 200))
+      return null
+    }
+    const text = (data.ParsedResults || []).map(r => r.ParsedText || '').join('\n').trim()
+    if (isLikelyInvalid(text, pageCount)) {
+      console.error(`[process-batch] OCR.space trả nội dung không hợp lệ cho trang ${fromPage}-${toPage}`)
+      return null
+    }
+    return { text, model: 'ocr.space' }
+  } catch (e) {
+    console.error('[process-batch] lỗi gọi OCR.space:', e.message)
+    return null
+  }
+}
+
+// ── Gemini đọc ẢNH đã render (không phải PDF) — dùng cho lỗi CMap ─
+// Khác callGeminiOCR ở trên: gửi PNG thuần, không có lớp text nào trong
+// ảnh để Gemini lấy nhầm — buộc phải đọc bằng vision thật.
+const callGeminiVisionImage = async (imageBuffer, fileName, pageLabel) => {
+  const keys = getGeminiKeys()
+  const base64Img = imageBuffer.toString('base64')
+  for (const key of keys) {
+    for (const model of GEMINI_MODELS) {
+      try {
+        const res = await fetch(geminiUrl(model, key), {
+          method: 'POST',
+          headers: geminiHeaders(key),
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { inline_data: { mime_type: 'image/png', data: base64Img } },
+                { text: `Đây là ảnh chụp ${pageLabel} của tài liệu "${fileName}". Đọc và trích xuất TOÀN BỘ nội dung nhìn thấy trong ảnh. Giữ nguyên 100% câu chữ, số liệu. Chỉ trả về Markdown thuần, không giải thích.` },
+              ],
+            }],
+            generationConfig: { temperature: 0, maxOutputTokens: 4096 },
+          }),
+        })
+        if (res.status === 429) continue
+        if (!res.ok) continue
+        const data = await res.json()
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+        if (!isLikelyInvalid(text, 1)) return { text, model }
+      } catch { continue }
     }
   }
   return null
@@ -214,6 +376,7 @@ export default async function handler(req, res) {
   // ── Thử pdf-parse trước (text-based PDF) ────────────────────
   let extractedText = ''
   let isScan = false
+  let corruptedText = false // CÓ lớp text dài nhưng là rác (watermark lặp/lỗi CMap) — khác "scan thật"
   let totalPages = null
   try {
     const pdfParse = require('pdf-parse')
@@ -222,7 +385,14 @@ export default async function handler(req, res) {
     totalPages = data.numpages || 1
 
     // Ước tính phần text từ trang fromPage đến toPage
-    const charsPerPage = rawText.length / totalPages
+    // SỬA 22/6/2026: pdf-parse({max:N}) chỉ trích xuất text từ trang 1..N,
+    // nhưng data.numpages luôn trả tổng số trang THẬT của cả file (không bị
+    // giới hạn bởi max). Code cũ chia rawText.length / totalPages (tổng số
+    // trang cả file) — với file dài (vd 44 trang) mà chỉ trích 1-2 trang đầu,
+    // phép chia này sai gấp hàng chục lần, cắt mất gần hết nội dung thật.
+    // Phải chia theo SỐ TRANG THẬT ĐÃ TRÍCH (min(toPage, totalPages)).
+    const pagesActuallyExtracted = Math.min(toPage, totalPages)
+    const charsPerPage = rawText.length / pagesActuallyExtracted
     const startChar = Math.floor((fromPage - 1) * charsPerPage)
     const endChar = Math.floor(toPage * charsPerPage)
     extractedText = rawText.slice(startChar, endChar).trim()
@@ -230,7 +400,15 @@ export default async function handler(req, res) {
     // PDF scan thì text rất ít hoặc toàn ký tự rác
     const hasVietnamese = /[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/i.test(extractedText)
     const avgCharsPerPage = extractedText.length / Math.max(toPage - fromPage + 1, 1)
-    isScan = !hasVietnamese || avgCharsPerPage < 80
+    const lowDiversity = hasLowContentDiversity(extractedText)
+    const lowAccentRatio = accentRatio(extractedText) < 0.08
+    // 2 loại nguyên nhân khác nhau — cần OCR khác nhau:
+    // - "no-text": không có lớp text dùng được (scan thật) -> gửi PDF cho Gemini OCR bình thường
+    // - "corrupted-text": CÓ lớp text dài nhưng là rác (watermark lặp / lỗi CMap)
+    //   -> phải render ảnh bỏ lớp text trước, không thì AI có thể đọc nhầm lại lớp text hỏng
+    const noUsableText = !hasVietnamese || avgCharsPerPage < 80
+    corruptedText = !noUsableText && (lowDiversity || lowAccentRatio)
+    isScan = noUsableText || corruptedText
 
   } catch (e) {
     console.error('[process-batch] pdf-parse error:', e.message)
@@ -249,30 +427,64 @@ export default async function handler(req, res) {
     })
   }
 
-  // ── PDF scan → cắt đúng trang rồi gửi Gemini OCR ─────────────
-  const geminiKeys = getGeminiKeys()
-  if (geminiKeys.length) {
+  // ── Lớp text bị hỏng (watermark lặp / lỗi CMap) → render ảnh trước ──
+  // Không gửi PDF gốc cho Gemini ở đây — nó có lớp text hỏng, AI có thể
+  // lấy nhầm lớp đó. Render từng trang ra ảnh PNG (bỏ hẳn lớp text), gửi
+  // ảnh cho Gemini vision; nếu Gemini không khả dụng, tự OCR bằng
+  // tesseract.js — miễn phí, không phụ thuộc Google.
+  if (corruptedText) {
     try {
-      const { buffer: pageBuffer, totalPages: realTotalPages } = await extractPageRange(pdfBuffer, fromPage, toPage)
-      if (realTotalPages) totalPages = realTotalPages
-
-      const ocrResult = await callGeminiOCR(pageBuffer, fileName || 'document', fromPage, toPage)
-      if (ocrResult) {
-        return res.status(200).json({
-          ok: true, docId,
-          batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
-          text: ocrResult.text, charCount: ocrResult.text.length,
-          method: 'gemini-ocr', model: ocrResult.model,
-        })
+      const pages = []
+      for (let p = fromPage; p <= toPage; p++) pages.push(p)
+      const texts = []
+      for (const p of pages) {
+        const img = renderPageToImage(pdfBuffer, p - 1) // mupdf 0-indexed
+        const pageLabel = `trang ${p}`
+        let pageText = null
+        if (getGeminiKeys().length) {
+          const r = await callGeminiVisionImage(img, fileName || 'document', pageLabel)
+          if (r) pageText = r.text
+        }
+        if (!pageText) pageText = await callTesseractOCR(img) // fallback miễn phí
+        texts.push(`## Trang ${p}\n\n${pageText || '[không đọc được]'}`)
       }
+      const finalText = texts.join('\n\n')
+      return res.status(200).json({
+        ok: true, docId,
+        batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
+        text: finalText, charCount: finalText.length,
+        method: 'render-image-ocr',
+      })
     } catch (e) {
-      // Lỗi cắt trang (file hỏng, mã hoá...) — báo rõ, không âm thầm gửi nguyên file
-      console.error('[process-batch] Lỗi cắt trang PDF:', e.message)
-      return res.status(422).json({
-        error: 'Không cắt được trang PDF để OCR: ' + e.message,
-        isScan: true, batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
+      console.error('[process-batch] Lỗi render ảnh + OCR:', e.message)
+      // Rơi xuống nhánh OCR PDF thường phía dưới như phương án dự phòng
+    }
+  }
+
+  // ── PDF scan thật (không có lớp text) → cắt đúng trang rồi gửi OCR ─
+  try {
+    const { buffer: pageBuffer, totalPages: realTotalPages } = await extractPageRange(pdfBuffer, fromPage, toPage)
+    if (realTotalPages) totalPages = realTotalPages
+
+    const geminiKeys = getGeminiKeys()
+    const ocrResult = (geminiKeys.length ? await callGeminiOCR(pageBuffer, fileName || 'document', fromPage, toPage) : null)
+      || await callOcrSpace(pageBuffer, fromPage, toPage)
+
+    if (ocrResult) {
+      return res.status(200).json({
+        ok: true, docId,
+        batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
+        text: ocrResult.text, charCount: ocrResult.text.length,
+        method: 'ocr', model: ocrResult.model,
       })
     }
+  } catch (e) {
+    // Lỗi cắt trang (file hỏng, mã hoá...) — báo rõ, không âm thầm gửi nguyên file
+    console.error('[process-batch] Lỗi cắt trang PDF:', e.message)
+    return res.status(422).json({
+      error: 'Không cắt được trang PDF để OCR: ' + e.message,
+      isScan: true, batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
+    })
   }
 
   // ── Không OCR được hoặc Gemini chỉ trả nội dung không hợp lệ ─
