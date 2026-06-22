@@ -28,7 +28,7 @@ export function useProcessPipeline() {
   }
   const abort = () => { abortRef.current = true }
 
-  const startPipeline = async ({ docId, fileUrl, fileName, onStatus }) => {
+  const startPipeline = async ({ docId, fileUrl, fileName, onStatus, forceRestart = false }) => {
     abortRef.current = false
     const notify = (msg, pct) => {
       setStatus(msg)
@@ -37,16 +37,30 @@ export function useProcessPipeline() {
     }
 
     try {
-      // ── 0. Đã chạy xong từ trước? (idempotent) ──────────────────
-      const existingSnap = await getDoc(jobRef(docId))
-      if (existingSnap.exists() && existingSnap.data().stage === 'done') {
-        notify('✅ Đã xử lý xong từ trước', 100)
-        setStage('done')
-        return { ok: true, resumed: true }
+      // ── 0. forceRestart: xóa data cũ, chạy lại từ đầu ──────────
+      if (forceRestart) {
+        notify('🗑️ Đang xóa dữ liệu cũ...', 2)
+        await setDoc(jobRef(docId), {
+          docId, stage: 'idle', batchesDone: 0, markdownParts: [],
+          totalPages: null, nextFromPage: 1, updatedAt: serverTimestamp(),
+        })
+        try {
+          const { deleteDoc } = await import('firebase/firestore')
+          await deleteDoc(doc(db, 'documentMemory', docId))
+        } catch {}
+      } else {
+        // Đã chạy xong từ trước → skip
+        const snap = await getDoc(jobRef(docId))
+        if (snap.exists() && snap.data().stage === 'done') {
+          notify('✅ Đã xử lý xong từ trước', 100)
+          setStage('done')
+          return { ok: true, resumed: true }
+        }
       }
-      // Nếu job cũ dở dang (ví dụ do lỗi/đóng tab giữa lúc chạy), tiếp tục
-      // đúng từ lô còn thiếu — không làm lại từ đầu.
-      const existing = existingSnap.exists() ? existingSnap.data() : null
+
+      // Tiếp tục từ lô dở dang (nếu có)
+      const existingSnap = await getDoc(jobRef(docId))
+      const existing = (!forceRestart && existingSnap.exists()) ? existingSnap.data() : null
       const markdownParts = existing?.markdownParts ? [...existing.markdownParts] : []
       let fromPage = existing?.nextFromPage || 1
       let batchIndex = existing?.batchesDone || 0

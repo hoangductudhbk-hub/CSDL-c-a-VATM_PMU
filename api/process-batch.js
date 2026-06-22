@@ -22,9 +22,19 @@
 
 import { createRequire } from 'module'
 import { PDFDocument } from 'pdf-lib'
-import * as mupdf from 'mupdf'
-import { createWorker } from 'tesseract.js'
 const require = createRequire(import.meta.url)
+
+// mupdf và tesseract dùng WASM — load động để tránh crash toàn function nếu WASM lỗi
+let _mupdf = null
+const getMupdf = async () => {
+  if (_mupdf) return _mupdf
+  try { _mupdf = await import('mupdf'); return _mupdf } catch { return null }
+}
+let _tesseract = null
+const getTesseract = async () => {
+  if (_tesseract) return _tesseract
+  try { _tesseract = await import('tesseract.js'); return _tesseract } catch { return null }
+}
 
 // ── Render trang PDF thành ảnh, BỎ HOÀN TOÀN lớp text gốc ─────────
 // Lý do tồn tại: lỗi CMap/watermark nằm ở LỚP TEXT — nếu vẫn gửi PDF gốc
@@ -33,10 +43,12 @@ const require = createRequire(import.meta.url)
 // động tránh được lỗi này nếu input vẫn là PDF có text layer). Render ra
 // ẢNH THUẦN (PNG) thì không còn lớp text nào để bất kỳ ai/cái gì đọc nhầm —
 // chỉ còn pixel, buộc phải đọc bằng OCR/vision thật.
-const renderPageToImage = (pdfBuffer, pageIndex) => {
-  const doc = mupdf.Document.openDocument(pdfBuffer, 'application/pdf')
+const renderPageToImage = async (pdfBuffer, pageIndex) => {
+  const mu = await getMupdf()
+  if (!mu) throw new Error('mupdf không khả dụng trong môi trường này')
+  const doc = mu.Document.openDocument(pdfBuffer, 'application/pdf')
   const page = doc.loadPage(pageIndex)
-  const pixmap = page.toPixmap(mupdf.Matrix.scale(2, 2), mupdf.ColorSpace.DeviceRGB)
+  const pixmap = page.toPixmap(mu.Matrix.scale(2, 2), mu.ColorSpace.DeviceRGB)
   return Buffer.from(pixmap.asPNG())
 }
 
@@ -46,7 +58,9 @@ const renderPageToImage = (pdfBuffer, pageIndex) => {
 // Đã verify bằng dữ liệu thật: đọc đúng "BỘ XÂY DỰNG", "CỘNG HÒA XÃ HỘI CHỦ
 // NGHĨA VIỆT NAM"... trên đúng trang bị lỗi CMap của file 3482.
 const callTesseractOCR = async (imageBuffer) => {
-  const worker = await createWorker('vie')
+  const tess = await getTesseract()
+  if (!tess) return null
+  const worker = await tess.createWorker('vie')
   try {
     const { data } = await worker.recognize(imageBuffer)
     return data.text
@@ -379,7 +393,7 @@ export default async function handler(req, res) {
     try {
       const texts = []
       for (let p = fromPage; p <= toPage; p++) {
-        const img = renderPageToImage(pdfBuffer, p - 1) // mupdf 0-indexed
+        const img = await renderPageToImage(pdfBuffer, p - 1) // mupdf 0-indexed
         const r = await ocrOnePage(img, fileName || 'document', `trang ${p}`)
         texts.push(`## Trang ${p}\n\n${r ? r.text : '[không đọc được]'}`)
       }

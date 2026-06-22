@@ -385,6 +385,23 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     }, 1000)
   }
 
+  // ── Đọc lại toàn bộ PDF từ đầu (xóa bộ nhớ cũ, chạy pipeline mới) ──
+  const handleForceReAnalyze = async () => {
+    if (!window.confirm('Xóa bộ nhớ cũ và đọc lại toàn bộ file PDF từ đầu?')) return
+    const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
+    if (!fileUrl) { alert('Không có file URL'); return }
+    setChat([]); setShowChat(false)
+    setMdPreview(null); setMdPreviewOpen(false)
+    setJobDone(false); setAutoPipeStarted(true)
+    setAnalyzeStep('🔄 Đang đọc lại từ đầu...')
+    await startPipeline({
+      docId: doc.id, fileUrl, fileName: doc.fileName || '',
+      onStatus: setAnalyzeStep, forceRestart: true,
+    })
+    setAutoPipeStarted(false)
+    setJobDone(true)
+  }
+
   // ── Phân tích sâu & ghi nhớ ──
   const handleAnalyze = async () => {
     if (countdown > 0) {
@@ -706,9 +723,9 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                           style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
                           💬 Hỏi đáp tài liệu
                         </button>
-                        <button onClick={handleAnalyze} disabled={analyzing}
-                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff', border:'0.5px solid #ddd', color:'#888', cursor:'pointer' }}
-                          title="Phân tích lại">🔄</button>
+                        <button onClick={handleForceReAnalyze} disabled={analyzing || autoPipeStarted}
+                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff', border:'0.5px solid #f59e0b', color:'#92400e', cursor:'pointer' }}
+                          title="Đọc lại toàn bộ file PDF và phân tích lại từ đầu (xóa bộ nhớ cũ)">🔄 Đọc lại</button>
                       </div>
                     </div>
                     {memory.summary && (
