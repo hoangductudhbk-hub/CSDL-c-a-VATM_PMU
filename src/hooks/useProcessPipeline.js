@@ -61,37 +61,82 @@ const detectScanPdf = async (pdfDoc) => {
   return avgChars < SCAN_THRESHOLD // scan nếu ít chữ
 }
 
-// ─── OCR scan PDF: browser render → api/ocr-page (Groq Vision) ─────────────
+// ─── OCR scan PDF: browser render → Groq Vision TRỰC TIẾP (không qua Vercel) ─
+// Lý do bỏ /api/ocr-page: Vercel serverless body limit ~1MB, ảnh JPEG base64
+// 1 trang A4 ≈ 300–700KB → dễ vượt ngưỡng → 502 Bad Gateway.
+// Gọi thẳng Groq API từ browser: không giới hạn body, nhanh hơn 1 round-trip.
 const ocrScanPdf = async (pdfDoc, fileName, notify) => {
+  // Lấy Groq keys từ env (VITE_ exposed ở client) + localStorage
+  const envKeys = [
+    import.meta.env.VITE_GROQ_API_KEY,
+    import.meta.env.VITE_GROQ_API_KEY_2,
+    import.meta.env.VITE_GROQ_API_KEY_3,
+  ].filter(Boolean)
+  const lsKeys = (localStorage.getItem('groq_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
+  const allKeys = [...new Set([...envKeys, ...lsKeys])]
+  if (!allKeys.length) throw new Error('Chưa cấu hình VITE_GROQ_API_KEY')
+
+  const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+  const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
   const total = pdfDoc.numPages
   const parts = []
+  let keyIdx = 0
 
   for (let pageNum = 1; pageNum <= total; pageNum++) {
     notify(`📷 Groq Vision - OCR trang ${pageNum}/${total}...`, 10 + Math.round((pageNum / total) * 50))
 
     try {
-      const base64 = await renderPageToBase64(pdfDoc, pageNum)
-      const res = await fetch('/api/ocr-page', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: base64,
-          fileName,
-          pageLabel: `${pageNum}/${total}`,
-        }),
-      })
+      // Render trang: scale 1.5 + JPEG (nhỏ hơn PNG 60-70%, đủ chất cho OCR)
+      const page = await pdfDoc.getPage(pageNum)
+      const viewport = page.getViewport({ scale: 1.5 })
+      const canvas = document.createElement('canvas')
+      canvas.width = viewport.width
+      canvas.height = viewport.height
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise
+      const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
 
-      if (res.ok) {
-        const { text } = await res.json()
-        if (text) parts.push(`## Trang ${pageNum}\n\n${text}`)
-      } else {
-        parts.push(`## Trang ${pageNum}\n\n*(Không đọc được trang này)*`)
+      // Gọi Groq Vision trực tiếp — thử lần lượt các key nếu rate-limit
+      let pageText = ''
+      for (let attempt = 0; attempt < allKeys.length; attempt++) {
+        const key = allKeys[(keyIdx + attempt) % allKeys.length]
+        try {
+          const resp = await fetch(GROQ_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+            body: JSON.stringify({
+              model: VISION_MODEL,
+              max_tokens: 4096,
+              temperature: 0,
+              messages: [{
+                role: 'user',
+                content: [
+                  { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
+                  { type: 'text', text: `Đọc toàn bộ nội dung trang ${pageNum}/${total} của tài liệu "${fileName}". Trả về Markdown, giữ nguyên 100% số liệu/tên/ngày tháng. Bảng → markdown table. Không giải thích thêm.` },
+                ],
+              }],
+            }),
+          })
+          if (resp.status === 429) {
+            keyIdx = (keyIdx + 1) % allKeys.length
+            await new Promise(r => setTimeout(r, 2500))
+            continue
+          }
+          if (resp.ok) {
+            const data = await resp.json()
+            pageText = data.choices?.[0]?.message?.content?.trim() || ''
+            if (pageText) break
+          }
+        } catch { continue }
       }
+
+      parts.push(pageText
+        ? `## Trang ${pageNum}\n\n${pageText}`
+        : `## Trang ${pageNum}\n\n*(Không đọc được)*`)
+
     } catch (e) {
       parts.push(`## Trang ${pageNum}\n\n*(Lỗi: ${e.message})*`)
     }
 
-    // Nghỉ giữa các trang để tránh rate-limit Groq
     if (pageNum < total) await new Promise(r => setTimeout(r, OCR_PAUSE_MS))
   }
 

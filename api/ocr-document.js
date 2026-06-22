@@ -62,21 +62,42 @@ export default async function handler(req, res) {
     }
   }
 
-  // ── 2. OCR.space — miễn phí, không cần đăng ký ───────────────────────────
-  // Public key "helloworld": 500 req/ngày, hỗ trợ PDF URL trực tiếp
-  // Engine 2: chính xác hơn cho tiếng Việt scan
+  // ── 2. OCR.space — tải file server-side, gửi base64 ─────────────────────────
+  // GitHub raw URL bị chặn từ OCR.space CDN → tải file về server (có auth token),
+  // gửi base64 thay URL. Free key "helloworld" giới hạn 1MB; paid key ~5MB.
   try {
     const ocrKey = process.env.OCRSPACE_API_KEY || 'helloworld'
-    console.log('[ocr-document] Thử OCR.space...')
+    console.log('[ocr-document] Thử OCR.space (download + base64)...')
 
+    // Tải PDF từ GitHub với auth token
+    const ghToken = process.env.VITE_GH_TOKEN || process.env.GH_TOKEN || ''
+    const fileResp = await fetch(fileUrl, {
+      headers: {
+        'User-Agent': 'VATM-PMU/1.0',
+        ...(ghToken ? { Authorization: `token ${ghToken}` } : {}),
+      },
+    })
+    if (!fileResp.ok) throw new Error(`Không tải được file: ${fileResp.status}`)
+    const fileBuf = Buffer.from(await fileResp.arrayBuffer())
+    console.log('[ocr-document] File size:', (fileBuf.length / 1024 / 1024).toFixed(1), 'MB')
+
+    // helloworld: 1MB; paid key: 5MB
+    const maxBytes = ocrKey === 'helloworld' ? 1 * 1024 * 1024 : 4.5 * 1024 * 1024
+    if (fileBuf.length > maxBytes) {
+      console.warn('[ocr-document] File quá lớn cho OCR.space key này → bỏ qua')
+      throw new Error('file_too_large')
+    }
+
+    const base64File = fileBuf.toString('base64')
     const form = new URLSearchParams()
     form.append('apikey', ocrKey)
-    form.append('url', fileUrl)
+    form.append('base64Image', `data:application/pdf;base64,${base64File}`)
+    form.append('filetype', 'PDF')
     form.append('language', 'vie')
     form.append('isTable', 'true')
     form.append('OCREngine', '2')
     form.append('detectOrientation', 'true')
-    form.append('isSearchablePdfHideTextLayer', 'true') // bỏ qua text layer hỏng (watermark)
+    form.append('isSearchablePdfHideTextLayer', 'true')
 
     const resp = await fetch('https://api.ocr.space/parse/image', {
       method: 'POST',
