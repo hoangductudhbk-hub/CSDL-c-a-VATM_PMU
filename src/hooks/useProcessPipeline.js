@@ -67,7 +67,7 @@ const ocrScanPdf = async (pdfDoc, fileName, notify) => {
   const parts = []
 
   for (let pageNum = 1; pageNum <= total; pageNum++) {
-    notify(`🔍 OCR trang ${pageNum}/${total}...`, 10 + Math.round((pageNum / total) * 50))
+    notify(`📷 Groq Vision - OCR trang ${pageNum}/${total}...`, 10 + Math.round((pageNum / total) * 50))
 
     try {
       const base64 = await renderPageToBase64(pdfDoc, pageNum)
@@ -210,8 +210,8 @@ export function useProcessPipeline() {
       // ════════════════════════════════════════════════════════════
       else if (ext === 'pdf') {
 
-        // ── A. Thử Mistral OCR trước (tốt nhất cho mọi loại PDF) ──
-        notify('🤖 Đang thử Mistral OCR...', 8)
+        // ── A. Thử Mistral OCR / OCR.space trước (1 API call, nhanh nhất) ──
+        notify('🤖 [Bước 1/3] Thử Mistral OCR / OCR.space...', 8)
         try {
           const mistralRes = await fetch('/api/ocr-document', {
             method: 'POST',
@@ -222,11 +222,13 @@ export function useProcessPipeline() {
             const mistralData = await mistralRes.json()
             if (mistralData.ok && mistralData.markdown?.length > 200) {
               fullMarkdown = mistralData.markdown
-              notify(`✅ Mistral OCR: ${mistralData.pages} trang, ${(mistralData.charCount/1000).toFixed(0)}K ký tự`, 60)
+              const engineLabel = mistralData.engine === 'mistral' ? '🤖 Mistral OCR' : '🔵 OCR.space'
+              notify(`✅ ${engineLabel}: ${mistralData.pages} trang, ${(mistralData.charCount/1000).toFixed(0)}K ký tự`, 60)
             }
           } else {
-            // Mistral lỗi (key chưa set hoặc hết quota) → thử đường khác
-            console.warn('[pipeline] Mistral OCR không khả dụng:', mistralRes.status)
+            const errData = await mistralRes.json().catch(() => ({}))
+            console.warn('[pipeline] Mistral/OCR.space không khả dụng:', mistralRes.status)
+            notify(`⚠️ Mistral+OCR.space không dùng được (${mistralRes.status}) → chuyển sang Groq Vision`, 9)
           }
         } catch (e) {
           console.warn('[pipeline] Mistral OCR exception:', e.message)
@@ -253,6 +255,7 @@ export function useProcessPipeline() {
             updatedAt: serverTimestamp(),
           }, { merge: true })
 
+          notify(`📷 [Bước 2/3] Groq Vision OCR - render từng trang...`, 10)
           fullMarkdown = await ocrScanPdf(pdfDoc, fileName, notify)
 
         } else {

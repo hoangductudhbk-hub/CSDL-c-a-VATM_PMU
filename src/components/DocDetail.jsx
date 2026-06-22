@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useAI } from '../hooks/useAI'
 import { useDocMemory } from '../hooks/useDocMemory'
 import { useProcessPipeline } from '../hooks/useProcessPipeline'
+import { useAuth } from '../context/AuthContext'
 
 // ── Đọc file qua Vercel proxy (tránh CORS) ──────────────────────
 const loadPdfJs = () => new Promise((res,rej) => {
@@ -245,6 +246,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   const { analyzeDeepForMemory, askDeep, loading: aiLoading } = useAI()
   const { memory, loading: memLoading, saveMemory } = useDocMemory(doc.id)
   const { startPipeline, status: pipeStatus, progress: pipeProgress, stage: pipeStage } = useProcessPipeline()
+  const { isAdmin } = useAuth()
 
   const [analyzing,        setAnalyzing]        = useState(false)
   const [docChunks,        setDocChunks]        = useState([])
@@ -732,30 +734,49 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                 </div>
               )}
 
-              {/* Vùng phân tích sâu — hiện với tất cả văn bản */}
-              <div style={{ marginBottom:12, padding:'14px', borderRadius:10, background: memory ? '#f0fdf4' : '#fefce8', border:`0.5px solid ${memory ? '#bbf7d0' : '#fde68a'}` }}>
+              {/* Vùng phân tích sâu */}
+              <div style={{ marginBottom:12, padding:'14px', borderRadius:10,
+                background: memory ? '#f0fdf4' : (autoPipeStarted || analyzing) ? '#eff6ff' : '#fefce8',
+                border:`0.5px solid ${memory ? '#bbf7d0' : (autoPipeStarted || analyzing) ? '#bfdbfe' : '#fde68a'}` }}>
+
+                {/* Đang kiểm tra */}
                 {memLoading ? (
-                  <div style={{ fontSize:12, color:'#888', textAlign:'center' }}>⏳ Đang kiểm tra bộ nhớ...</div>
+                  <div style={{ fontSize:12, color:'#888', textAlign:'center' }}>⏳ Đang kiểm tra...</div>
+
+                /* Đang chạy pipeline */
+                ) : (autoPipeStarted || analyzing) ? (
+                  <div style={{ fontSize:12, color:'#1d4ed8' }}>
+                    {isAdmin
+                      ? (analyzeStep || '⏳ Đang phân tích tài liệu...')
+                      : '⏳ Đang phân tích tài liệu...'}
+                  </div>
+
+                /* ĐÃ PHÂN TÍCH — có memory */
                 ) : memory ? (
                   <>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8, flexWrap:'wrap', gap:6 }}>
                       <div style={{ fontSize:12, fontWeight:600, color:'#15803d' }}>
                         ✅ Tài liệu đã được phân tích · {fmtDate(memory.analyzedAt)}
-                        {memory.readChars > 500 && <span style={{ fontWeight:400, color:'#888' }}> · {(memory.readChars/1000).toFixed(0)}K ký tự</span>}
                       </div>
                       <div style={{ display:'flex', gap:6 }}>
                         <button onClick={() => setShowChat(v => !v)}
                           style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
                           💬 Hỏi đáp tài liệu
                         </button>
-                        <button onClick={handleForceReAnalyze} disabled={analyzing || autoPipeStarted}
-                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff', border:'0.5px solid #f59e0b', color:'#92400e', cursor:'pointer' }}
-                          title="Đọc lại toàn bộ file PDF và phân tích lại từ đầu (xóa bộ nhớ cũ)">🔄 Đọc lại</button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm('Tài liệu đã được phân tích rồi.\nCó muốn phân tích lại từ đầu không?\n(Bộ nhớ cũ sẽ bị xóa)')) {
+                              handleForceReAnalyze()
+                            }
+                          }}
+                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff', border:'0.5px solid #d1d5db', color:'#6b7280', cursor:'pointer' }}>
+                          🔄 Phân tích lại
+                        </button>
                       </div>
                     </div>
                     {memory.summary && (
                       <div style={{ fontSize:12, color:'#374151', lineHeight:1.6, background:'#fff', borderRadius:8, padding:'8px 10px', border:'0.5px solid #d1fae5' }}>
-                        {memory.summary.slice(0, 250)}{memory.summary.length > 250 ? '...' : ''}
+                        {memory.summary.slice(0, 300)}{memory.summary.length > 300 ? '...' : ''}
                       </div>
                     )}
                     {memory.keywords?.length > 0 && (
@@ -766,75 +787,44 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                       </div>
                     )}
                   </>
+
+                /* ĐÃ XỬ LÝ — có chunks/jobDone nhưng chưa có memory (lỗi bước cuối) */
                 ) : (docChunks.length > 0 || jobDone) ? (
                   <div>
                     <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:6 }}>
-                      <div style={{ fontSize:12, fontWeight:600, color:'#1d4ed8' }}>✅ Đã xử lý · <span style={{fontWeight:400,color:'#888'}}>Nếu nội dung sai → bấm Đọc lại</span></div>
+                      <div style={{ fontSize:12, color:'#92400e' }}>
+                        ⚠️ Đã đọc file nhưng chưa tạo được bộ nhớ AI
+                      </div>
                       <div style={{ display:'flex', gap:6 }}>
                         <button onClick={() => setShowChat(v => !v)}
                           style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
                           💬 Hỏi đáp tài liệu
                         </button>
-                        <button onClick={handleForceReAnalyze} disabled={analyzing || autoPipeStarted}
+                        <button
+                          onClick={() => {
+                            if (window.confirm('Tài liệu đã được đọc rồi.\nCó muốn phân tích lại từ đầu không?')) {
+                              handleForceReAnalyze()
+                            }
+                          }}
                           style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff7ed', border:'0.5px solid #f59e0b', color:'#92400e', cursor:'pointer', fontWeight:600 }}>
-                          🔄 Đọc lại
+                          🔄 Phân tích lại
                         </button>
                       </div>
                     </div>
-                    {analyzeStep && (
-                      <div style={{ fontSize:12, color:'#1d4ed8', marginTop:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
-                    )}
-                    {mdPreviewOpen && mdPreview && (
-                      <div style={{ marginTop:10 }}>
-                        {mdPreview.error ? (
-                          <div style={{ fontSize:12, color:'#b91c1c' }}>❌ Không tải được: {mdPreview.error}</div>
-                        ) : (
-                          <>
-                            {(() => {
-                              const avgPerPage = mdPreview.totalPages ? Math.round(mdPreview.charCount / mdPreview.totalPages) : null
-                              const looksThin = avgPerPage != null && avgPerPage < 100
-                              return (
-                                <div style={{
-                                  fontSize:12, marginBottom:8, padding:'6px 10px', borderRadius:6,
-                                  background: looksThin ? '#fef2f2' : '#f0fdf4',
-                                  color:      looksThin ? '#b91c1c' : '#15803d',
-                                }}>
-                                  {looksThin ? '⚠️ ' : '✅ '}
-                                  {mdPreview.charCount.toLocaleString()} ký tự
-                                  {mdPreview.totalPages ? ` / ${mdPreview.totalPages} trang (~${avgPerPage} ký tự/trang)` : ''}
-                                  {looksThin && ' — quá ít so với số trang, có thể đã đọc thiếu, kiểm tra lại bên dưới.'}
-                                </div>
-                              )
-                            })()}
-                            <div style={{
-                              maxHeight:240, overflowY:'auto', fontSize:12, lineHeight:1.6,
-                              background:'#fafafa', border:'0.5px solid #e5e7eb', borderRadius:6, padding:10,
-                              whiteSpace:'pre-wrap', color:'#374151',
-                            }}>
-                              {mdPreview.text ? mdPreview.text.slice(0, 5000) + (mdPreview.text.length > 5000 ? '\n\n... (còn nữa, đã cắt để hiển thị)' : '') : '(Không có nội dung — pipeline có thể chưa lưu được gì)'}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
                   </div>
+
+                /* CHƯA PHÂN TÍCH LẦN NÀO */
                 ) : (
                   <>
                     <div style={{ fontSize:12, color:'#92400e', marginBottom:10 }}>
-                      📋 <b>Tài liệu chưa phân tích</b> — Phân tích 1 lần, hỏi đáp mãi mãi!
-                      {hasFile && <span style={{ color:'#555', fontWeight:400 }}> AI sẽ đọc toàn bộ {(fileSize/1024/1024).toFixed(1)}MB file.</span>}
+                      📋 <b>Tài liệu chưa được phân tích</b>
+                      {hasFile && <span style={{ color:'#555', fontWeight:400 }}> — AI sẽ đọc toàn bộ {(fileSize/1024/1024).toFixed(1)}MB và ghi nhớ để hỏi đáp sau này.</span>}
                     </div>
-                    {analyzeStep && (
-                      <div style={{ fontSize:12, color:'#1d4ed8', marginBottom:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
-                    )}
-                    <button onClick={handleForceReAnalyze} disabled={analyzing || autoPipeStarted}
-                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background: (analyzing || autoPipeStarted) ? '#9ca3af' : '#0a2342', color:'#fff', border:'none', cursor: (analyzing || autoPipeStarted) ? 'not-allowed' : 'pointer' }}>
-                      {autoPipeStarted ? (analyzeStep || '⏳ Đang xử lý...') : analyzing ? (analyzeStep || '⏳ Đang phân tích...') : '🧠 Đọc & Ghi nhớ tài liệu (mới hoàn toàn)'}
+                    <button onClick={handleForceReAnalyze}
+                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
+                      📊 Phân tích tài liệu
                     </button>
                   </>
-                )}
-                {analyzeStep && !memLoading && memory && (
-                  <div style={{ fontSize:12, color:'#1d4ed8', marginTop:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
                 )}
               </div>
             </div>
