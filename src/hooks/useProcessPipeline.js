@@ -292,93 +292,38 @@ export function useProcessPipeline() {
         const isScan = await detectScanPdf(pdfDoc)
 
         if (isScan) {
-          // ── C. PDF SCAN: browser render → api/ocr-page (Groq Vision) ──
-          notify(`📷 PDF scan (${totalPages} trang) - OCR từng trang...`, 10)
+          // ── C. PDF SCAN → Groq Vision trực tiếp từ browser ────────────────
+          notify(`📷 PDF scan (${totalPages} trang) - đang OCR...`, 10)
           await setDoc(jobRef(docId), {
             docId, fileUrl, fileName: fileName || '',
-            stage: 'extract', totalPages,
-            updatedAt: serverTimestamp(),
+            stage: 'extract', totalPages, updatedAt: serverTimestamp(),
           }, { merge: true })
-
-          notify(`📷 [Bước 2/3] Groq Vision OCR - render từng trang...`, 10)
           fullMarkdown = await ocrScanPdf(pdfDoc, fileName, notify)
 
         } else {
-          // ── 3d. PDF TEXT: server batch processing ──────────────
-          // Kiểm tra server sẵn sàng
-          notify('📥 Đang khởi tạo...', 5)
-          const initRes = await fetch('/api/process-document', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ docId, fileUrl, fileName: fileName || '', totalPages }),
-          })
-          if (!initRes.ok) {
-            const err = await initRes.json().catch(() => ({}))
-            notify(`❌ Lỗi khởi tạo: ${err.error || initRes.status}`)
-            return { ok: false, error: err.error || 'init_failed' }
+          // ── B. PDF TEXT → pdfjs extract text CLIENT-SIDE (không cần API) ──
+          // Không dùng api/process-batch nữa: WASM crash trên Vercel, phức tạp.
+          // pdfjs đã load rồi, extract text tại chỗ — nhanh, free, 0 token.
+          notify(`📄 Đang đọc văn bản (${totalPages} trang)...`, 10)
+          const parts = []
+          for (let i = 1; i <= totalPages; i++) {
+            const p = await pdfDoc.getPage(i)
+            const content = await p.getTextContent()
+            const pageText = content.items.map(x => x.str).join(' ').trim()
+            if (pageText.length > 30) parts.push(`## Trang ${i}\n\n${pageText}`)
+            notify(`📄 Đọc trang ${i}/${totalPages}...`, 10 + Math.round((i / totalPages) * 45))
           }
+          fullMarkdown = parts.join('\n\n---\n\n')
 
-          // Resume nếu có từ trước
-          const existingSnap = await getDoc(jobRef(docId))
-          const existing = (!forceRestart && existingSnap.exists()) ? existingSnap.data() : null
-          const markdownParts = existing?.markdownParts ? [...existing.markdownParts] : []
-          let fromPage = existing?.nextFromPage || 1
-          let batchIndex = existing?.batchesDone || 0
-          let knownTotal = existing?.totalPages || totalPages
-
-          await setDoc(jobRef(docId), {
-            docId, fileUrl, fileName: fileName || '',
-            stage: 'extract', batchesDone: batchIndex,
-            markdownParts, totalPages: knownTotal,
-            updatedAt: serverTimestamp(),
-          }, { merge: true })
-
-          // Đọc từng lô
-          let safety = 0
-          while (!abortRef.current) {
-            safety++
-            if (safety > 200) { notify('⚠️ Quá nhiều lô, dừng lại'); break }
-            if (fromPage > knownTotal) break
-
-            const toPage = Math.min(fromPage + PAGE_BATCH - 1, knownTotal)
-            const pct = 10 + Math.round((fromPage / knownTotal) * 50)
-            notify(`🔍 Đọc trang ${fromPage}–${toPage}/${knownTotal}...`, pct)
-
-            const res = await fetch('/api/process-batch', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ docId, fileUrl, fileName: fileName || '', fromPage, toPage, batchIndex }),
-            })
-
-            if (res.status === 422) {
-              notify(`⏳ Trang ${fromPage}–${toPage} chưa đọc được, thử lại...`)
-              await new Promise(r => setTimeout(r, 3000))
-              continue
-            }
-            if (!res.ok) {
-              const err = await res.json().catch(() => ({}))
-              notify(`❌ Lỗi đọc trang ${fromPage}–${toPage}: ${err.error || res.status}`)
-              await setDoc(jobRef(docId), { stage: 'error', errorMessage: err.error || String(res.status) }, { merge: true })
-              return { ok: false, error: err.error }
-            }
-
-            const data = await res.json()
-            if (data.totalPages && !knownTotal) knownTotal = data.totalPages
-            markdownParts.push(data.text || '')
-            batchIndex++
-            fromPage = toPage + 1
-
-            await setDoc(jobRef(docId), {
-              batchesDone: batchIndex, markdownParts, totalPages: knownTotal,
-              nextFromPage: fromPage, updatedAt: serverTimestamp(),
-            }, { merge: true })
-
-            if (fromPage > knownTotal) break
-            await new Promise(r => setTimeout(r, PAUSE_MS))
+          // Nếu text layer hỏng (watermark lặp / CMap lỗi) → fallback Groq Vision
+          const accentCount = (fullMarkdown.match(/[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/gi) || []).length
+          const accentRatio = accentCount / Math.max(fullMarkdown.length, 1)
+          if (fullMarkdown.length < 200 || accentRatio < 0.05) {
+            notify('⚠️ Text layer hỏng → chuyển sang Groq Vision OCR...', 50)
+            fullMarkdown = await ocrScanPdf(pdfDoc, fileName, notify)
+          } else {
+            notify('✅ Đã đọc văn bản thành công', 58)
           }
-
-          if (abortRef.current) { notify('⏸ Đã dừng'); return { ok: false, aborted: true } }
-          fullMarkdown = markdownParts.join('\n\n')
         }
         } // end if (!fullMarkdown) — fallback khi Mistral không khả dụng
       }
@@ -423,12 +368,37 @@ export function useProcessPipeline() {
       await setDoc(jobRef(docId), { stage: 'memory', updatedAt: serverTimestamp() }, { merge: true })
       setStage('memory')
 
-      // ── Tổng hợp bộ nhớ AI ───────────────────────────────────────
+      // ── Tổng hợp bộ nhớ AI (có retry + fallback nếu Groq rate-limit) ────────
       notify('🧠 Đang tổng hợp bộ nhớ AI...', 70)
-      const memoryRaw = await analyzeFullDocument(fullMarkdown, fileName || '', (msg) => notify(msg, 85))
-      let memory
-      try { memory = JSON.parse((memoryRaw.match(/\{[\s\S]*\}/) || [memoryRaw])[0]) }
-      catch { memory = { summary: memoryRaw } }
+      let memory = null
+      // Thử tối đa 2 lần (lần 2 nghỉ 5s để tránh rate-limit sau OCR)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          if (attempt > 0) {
+            notify('⏳ Chờ để tránh rate-limit Groq...', 72)
+            await new Promise(r => setTimeout(r, 5000))
+          }
+          const memoryRaw = await analyzeFullDocument(fullMarkdown, fileName || '', (msg) => notify(msg, 85))
+          if (memoryRaw) {
+            try { memory = JSON.parse((memoryRaw.match(/\{[\s\S]*\}/) || [memoryRaw])[0]) }
+            catch { memory = { summary: memoryRaw } }
+            break
+          }
+        } catch (e) {
+          console.warn('[pipeline] analyzeFullDocument lần', attempt + 1, 'thất bại:', e.message)
+        }
+      }
+
+      // Fallback: nếu vẫn không tạo được memory → lưu placeholder để chat vẫn dùng được
+      if (!memory) {
+        memory = {
+          summary: `Tài liệu đã được đọc (${fullMarkdown.length} ký tự). Nhấn "Hỏi đáp" để đặt câu hỏi về nội dung.`,
+          keywords: [],
+          documentType: 'unknown',
+          fallback: true,
+        }
+        notify('⚠️ Bộ nhớ AI tạm thời — chat vẫn hoạt động bình thường', 90)
+      }
 
       await setDoc(doc(db, 'documentMemory', docId), {
         ...memory,
