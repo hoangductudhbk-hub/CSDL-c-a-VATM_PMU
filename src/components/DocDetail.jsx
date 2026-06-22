@@ -308,27 +308,39 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     )
   }, [doc?.id])
 
-  // Auto-pipeline: khi mở văn bản PDF chưa có memory và chưa có chunks
+  // Auto-pipeline: CHỈ chạy khi văn bản HOÀN TOÀN mới (không có bất kỳ data nào)
+  // Không resume data cũ (có thể là watermark) — người dùng tự bấm "Đọc lại" nếu muốn
   useEffect(() => {
-    if (memLoading) return                        // đợi load memory xong
+    if (memLoading) return
     if (memory) return                            // đã có memory → bỏ qua
-    if (jobDone) return                           // pipeline đã chạy xong → không auto lại
-    if (autoPipeStarted) return                   // đã trigger rồi
+    if (jobDone) return
+    if (autoPipeStarted) return
     const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
-    const isPdf   = doc?.fileName?.toLowerCase().endsWith('.pdf') ||
-                    fileUrl?.toLowerCase().includes('.pdf')
-    if (!isPdf || !fileUrl) return                // không phải PDF → bỏ qua
+    if (!fileUrl) return                          // chưa có file → bỏ qua
 
-    // Delay nhỏ để load chunks trước
     const timer = setTimeout(async () => {
-      if (docChunks.length > 0) return            // đã có chunks → không cần pipeline
+      if (docChunks.length > 0) return            // đã có chunks → người dùng tự quyết
+
+      // Kiểm tra processingJobs — nếu đã có bất kỳ data nào thì KHÔNG auto chạy
+      // (tránh resume dữ liệu cũ bị lỗi/watermark)
+      try {
+        const { doc: fsDoc, getDoc } = await import('firebase/firestore')
+        const { db } = await import('../firebase')
+        const jobSnap = await getDoc(fsDoc(db, 'processingJobs', doc.id))
+        if (jobSnap.exists()) return              // đã có job cũ → không auto, để user bấm "Đọc lại"
+        const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
+        if (mdSnap.exists()) return              // đã có markdown cũ → không auto
+      } catch {}
+
+      // Thực sự là văn bản mới chưa xử lý gì → auto chạy pipeline
       setAutoPipeStarted(true)
-      setAnalyzeStep('🚀 Auto-pipeline: đang xử lý PDF...')
+      setAnalyzeStep('🚀 Đang tự động xử lý tài liệu mới...')
       await startPipeline({
         docId:    doc.id,
         fileUrl,
         fileName: doc.fileName || '',
         onStatus: setAnalyzeStep,
+        forceRestart: false,
       })
     }, 1500)
 
@@ -390,15 +402,14 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     }, 1000)
   }
 
-  // ── Đọc lại toàn bộ PDF từ đầu (xóa bộ nhớ cũ, chạy pipeline mới) ──
+  // ── Đọc lại toàn bộ file từ đầu (xóa bộ nhớ cũ, chạy pipeline mới) ──
   const handleForceReAnalyze = async () => {
-    if (!window.confirm('Xóa bộ nhớ cũ và đọc lại toàn bộ file PDF từ đầu?')) return
     const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
-    if (!fileUrl) { alert('Không có file URL'); return }
+    if (!fileUrl) { alert('Không có file URL để đọc lại'); return }
     setChat([]); setShowChat(false)
     setMdPreview(null); setMdPreviewOpen(false)
     setJobDone(false); setAutoPipeStarted(true)
-    setAnalyzeStep('🔄 Đang đọc lại từ đầu...')
+    setAnalyzeStep('🔄 Đang xóa dữ liệu cũ và đọc lại từ đầu...')
     await startPipeline({
       docId: doc.id, fileUrl, fileName: doc.fileName || '',
       onStatus: setAnalyzeStep, forceRestart: true,
@@ -757,16 +768,16 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                   </>
                 ) : (docChunks.length > 0 || jobDone) ? (
                   <div>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                      <div style={{ fontSize:12, fontWeight:600, color:'#1d4ed8' }}>✅ Tài liệu đã được phân tích</div>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:6 }}>
+                      <div style={{ fontSize:12, fontWeight:600, color:'#1d4ed8' }}>✅ Đã xử lý · <span style={{fontWeight:400,color:'#888'}}>Nếu nội dung sai → bấm Đọc lại</span></div>
                       <div style={{ display:'flex', gap:6 }}>
-                        <button onClick={loadMdPreview} disabled={mdLoading}
-                          style={{ padding:'5px 10px', borderRadius:7, fontSize:12, fontWeight:600, background:'#fff', border:'0.5px solid #ddd', color:'#374151', cursor:'pointer' }}>
-                          {mdLoading ? '⏳' : '📊 Phân tích tài liệu'}
-                        </button>
                         <button onClick={() => setShowChat(v => !v)}
                           style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
                           💬 Hỏi đáp tài liệu
+                        </button>
+                        <button onClick={handleForceReAnalyze} disabled={analyzing || autoPipeStarted}
+                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff7ed', border:'0.5px solid #f59e0b', color:'#92400e', cursor:'pointer', fontWeight:600 }}>
+                          🔄 Đọc lại
                         </button>
                       </div>
                     </div>
@@ -816,9 +827,9 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                     {analyzeStep && (
                       <div style={{ fontSize:12, color:'#1d4ed8', marginBottom:8, padding:'6px 10px', background:'#eff6ff', borderRadius:6 }}>{analyzeStep}</div>
                     )}
-                    <button onClick={handleAnalyze} disabled={analyzing || autoPipeStarted || countdown > 0}
-                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background: (analyzing || autoPipeStarted || countdown > 0) ? '#9ca3af' : '#0a2342', color:'#fff', border:'none', cursor: (analyzing || autoPipeStarted || countdown > 0) ? 'not-allowed' : 'pointer' }}>
-                      {autoPipeStarted ? (analyzeStep || '⏳ Đang tự động xử lý...') : (analyzing || countdown > 0) ? (analyzeStep || '⏳ Đang phân tích...') : '🧠 Phân tích & Ghi nhớ tài liệu'}
+                    <button onClick={handleForceReAnalyze} disabled={analyzing || autoPipeStarted}
+                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background: (analyzing || autoPipeStarted) ? '#9ca3af' : '#0a2342', color:'#fff', border:'none', cursor: (analyzing || autoPipeStarted) ? 'not-allowed' : 'pointer' }}>
+                      {autoPipeStarted ? (analyzeStep || '⏳ Đang xử lý...') : analyzing ? (analyzeStep || '⏳ Đang phân tích...') : '🧠 Đọc & Ghi nhớ tài liệu (mới hoàn toàn)'}
                     </button>
                   </>
                 )}

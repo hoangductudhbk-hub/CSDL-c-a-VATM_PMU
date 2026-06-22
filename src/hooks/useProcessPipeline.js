@@ -202,24 +202,51 @@ export function useProcessPipeline() {
       }
 
       // ════════════════════════════════════════════════════════════
-      // ĐƯỜNG 3: PDF — phát hiện text vs scan, xử lý riêng
+      // ĐƯỜNG 3: PDF
+      // Thứ tự ưu tiên:
+      //   A. Mistral OCR (1 API call, toàn bộ file, markdown chất lượng cao)
+      //   B. pdfjs extract (nếu PDF text, 0 token)
+      //   C. Groq Vision page-by-page (nếu scan PDF, browser render)
       // ════════════════════════════════════════════════════════════
       else if (ext === 'pdf') {
 
-        // ── 3a. Tải PDF và load với pdfjs ─────────────────────────
+        // ── A. Thử Mistral OCR trước (tốt nhất cho mọi loại PDF) ──
+        notify('🤖 Đang thử Mistral OCR...', 8)
+        try {
+          const mistralRes = await fetch('/api/ocr-document', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileUrl, fileName: fileName || '', docId }),
+          })
+          if (mistralRes.ok) {
+            const mistralData = await mistralRes.json()
+            if (mistralData.ok && mistralData.markdown?.length > 200) {
+              fullMarkdown = mistralData.markdown
+              notify(`✅ Mistral OCR: ${mistralData.pages} trang, ${(mistralData.charCount/1000).toFixed(0)}K ký tự`, 60)
+            }
+          } else {
+            // Mistral lỗi (key chưa set hoặc hết quota) → thử đường khác
+            console.warn('[pipeline] Mistral OCR không khả dụng:', mistralRes.status)
+          }
+        } catch (e) {
+          console.warn('[pipeline] Mistral OCR exception:', e.message)
+        }
+
+        // ── B & C. Fallback: pdfjs detect → text extract hoặc Groq Vision ──
+        if (!fullMarkdown) {
         notify('📥 Đang tải file PDF...', 5)
         const buf = await fetchBuffer(fileUrl)
         const lib = await loadPdfJs()
         const pdfDoc = await lib.getDocument({ data: new Uint8Array(buf) }).promise
         const totalPages = pdfDoc.numPages
 
-        // ── 3b. Phát hiện scan hay text PDF ───────────────────────
+        // ── B: PDF text ───────────────────────────────────────────
         notify('🔎 Đang phát hiện loại PDF...', 8)
         const isScan = await detectScanPdf(pdfDoc)
 
         if (isScan) {
-          // ── 3c. PDF SCAN: browser render → api/ocr-page ──────────
-          notify(`📷 Phát hiện PDF scan (${totalPages} trang) - bắt đầu OCR...`, 10)
+          // ── C. PDF SCAN: browser render → api/ocr-page (Groq Vision) ──
+          notify(`📷 PDF scan (${totalPages} trang) - OCR từng trang...`, 10)
           await setDoc(jobRef(docId), {
             docId, fileUrl, fileName: fileName || '',
             stage: 'extract', totalPages,
@@ -305,6 +332,7 @@ export function useProcessPipeline() {
           if (abortRef.current) { notify('⏸ Đã dừng'); return { ok: false, aborted: true } }
           fullMarkdown = markdownParts.join('\n\n')
         }
+        } // end if (!fullMarkdown) — fallback khi Mistral không khả dụng
       }
 
       // ════════════════════════════════════════════════════════════
