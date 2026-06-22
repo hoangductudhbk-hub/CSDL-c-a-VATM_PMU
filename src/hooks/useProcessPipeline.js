@@ -35,38 +35,74 @@ const loadPdfJs = () => new Promise((res, rej) => {
   document.head.appendChild(s)
 })
 
-// ─── Render trang PDF thành PNG base64 bằng browser canvas ─────────────────
-const renderPageToBase64 = async (pdfDoc, pageNum) => {
-  const page = await pdfDoc.getPage(pageNum)
-  const viewport = page.getViewport({ scale: 2.0 })
+// ─── Kiểm tra text trang có dùng được không ────────────────────────────────
+// Văn bản hành chính VN có dấu ~15-20%. Watermark/CMap lỗi thường < 4%.
+const isPageTextUsable = (text) => {
+  if (!text || text.trim().length < 30) return false
+  const accents = (text.match(/[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/gi) || []).length
+  return accents / text.length >= 0.03 // ≥3% dấu = text dùng được
+}
+
+// ─── Render trang PDF thành JPEG base64 (scale 1.5, nhỏ gọn cho OCR) ───────
+const renderPageToJpeg = async (page) => {
+  const viewport = page.getViewport({ scale: 1.5 })
   const canvas = document.createElement('canvas')
   canvas.width = viewport.width
   canvas.height = viewport.height
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise
-  // Trả về phần base64 sau "data:image/png;base64,"
-  return canvas.toDataURL('image/png').split(',')[1]
-}
-
-// ─── Kiểm tra PDF text hay scan ─────────────────────────────────────────────
-const detectScanPdf = async (pdfDoc) => {
-  const total = pdfDoc.numPages
-  const checkPages = Math.min(total, 5)
-  let totalChars = 0
-  for (let i = 1; i <= checkPages; i++) {
-    const page = await pdfDoc.getPage(i)
-    const content = await page.getTextContent()
-    totalChars += content.items.map(x => x.str).join('').length
+  const ctx = canvas.getContext('2d')
+  // getImageNode lỗi thường xảy ra với một số element PDF — bắt lỗi để canvas
+  // vẫn render được phần còn lại, không crash toàn bộ pipeline
+  try {
+    await page.render({ canvasContext: ctx, viewport }).promise
+  } catch {
+    // Một số element lỗi (getImageNode), render những gì đã vẽ được
   }
-  const avgChars = totalChars / checkPages
-  return avgChars < SCAN_THRESHOLD // scan nếu ít chữ
+  return canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
 }
 
-// ─── OCR scan PDF: browser render → Groq Vision TRỰC TIẾP (không qua Vercel) ─
-// Lý do bỏ /api/ocr-page: Vercel serverless body limit ~1MB, ảnh JPEG base64
-// 1 trang A4 ≈ 300–700KB → dễ vượt ngưỡng → 502 Bad Gateway.
-// Gọi thẳng Groq API từ browser: không giới hạn body, nhanh hơn 1 round-trip.
-const ocrScanPdf = async (pdfDoc, fileName, notify) => {
-  // Lấy Groq keys từ env (VITE_ exposed ở client) + localStorage
+// ─── Gọi Groq Vision 1 trang (trực tiếp từ browser, không qua Vercel) ───────
+// Lý do: Vercel serverless body limit 1MB < ảnh JPEG base64 → 502.
+// Gọi thẳng Groq API: không giới hạn body, nhanh hơn 1 round-trip.
+const groqVisionPage = async (base64, pageLabel, fileName, keys) => {
+  const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
+  const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+
+  for (let attempt = 0; attempt < keys.length * 2; attempt++) {
+    const key = keys[attempt % keys.length]
+    try {
+      const resp = await fetch(GROQ_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model: VISION_MODEL, max_tokens: 3000, temperature: 0,
+          messages: [{ role: 'user', content: [
+            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
+            { type: 'text', text: `Đọc toàn bộ nội dung ${pageLabel} của tài liệu "${fileName}". Trả về Markdown, giữ nguyên số liệu/tên/ngày tháng. Bảng → markdown table. Chỉ trả nội dung, không giải thích.` },
+          ]}],
+        }),
+      })
+      if (resp.status === 429) {
+        // Rate limit: chờ 10s trước khi thử key tiếp theo
+        await new Promise(r => setTimeout(r, 10000))
+        continue
+      }
+      if (resp.ok) {
+        const data = await resp.json()
+        return data.choices?.[0]?.message?.content?.trim() || ''
+      }
+    } catch { continue }
+  }
+  return ''
+}
+
+// ─── HYBRID extract: text pdfjs trước, Groq Vision chỉ cho trang trống ──────
+// Chiến lược:
+//   1. Mỗi trang: thử pdfjs extract text (instant, 0 token)
+//   2. Text đủ tốt (có dấu tiếng Việt, ≥30 ký tự) → dùng luôn
+//   3. Text rỗng/hỏng → render ảnh → Groq Vision
+// Kết quả: văn bản text-layer → xong trong <5 giây, 0 Groq call.
+//           PDF scan thật → Groq Vision chỉ cho trang cần thiết.
+const hybridExtractPdf = async (pdfDoc, fileName, notify) => {
   const envKeys = [
     import.meta.env.VITE_GROQ_API_KEY,
     import.meta.env.VITE_GROQ_API_KEY_2,
@@ -74,72 +110,54 @@ const ocrScanPdf = async (pdfDoc, fileName, notify) => {
   ].filter(Boolean)
   const lsKeys = (localStorage.getItem('groq_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
   const allKeys = [...new Set([...envKeys, ...lsKeys])]
-  if (!allKeys.length) throw new Error('Chưa cấu hình VITE_GROQ_API_KEY')
 
-  const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
-  const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
   const total = pdfDoc.numPages
   const parts = []
-  let keyIdx = 0
+  let groqCallCount = 0
 
   for (let pageNum = 1; pageNum <= total; pageNum++) {
-    notify(`📷 Groq Vision - OCR trang ${pageNum}/${total}...`, 10 + Math.round((pageNum / total) * 50))
+    const pct = 10 + Math.round((pageNum / total) * 50)
+    const page = await pdfDoc.getPage(pageNum)
 
+    // ── Bước 1: extract text bằng pdfjs ───────────────────────────────────
+    let pageText = ''
     try {
-      // Render trang: scale 1.5 + JPEG (nhỏ hơn PNG 60-70%, đủ chất cho OCR)
-      const page = await pdfDoc.getPage(pageNum)
-      const viewport = page.getViewport({ scale: 1.5 })
-      const canvas = document.createElement('canvas')
-      canvas.width = viewport.width
-      canvas.height = viewport.height
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise
-      const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+      const content = await page.getTextContent()
+      pageText = content.items.map(x => x.str).join(' ').trim()
+    } catch { /* ignore */ }
 
-      // Gọi Groq Vision trực tiếp — thử lần lượt các key nếu rate-limit
-      let pageText = ''
-      for (let attempt = 0; attempt < allKeys.length; attempt++) {
-        const key = allKeys[(keyIdx + attempt) % allKeys.length]
-        try {
-          const resp = await fetch(GROQ_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-            body: JSON.stringify({
-              model: VISION_MODEL,
-              max_tokens: 4096,
-              temperature: 0,
-              messages: [{
-                role: 'user',
-                content: [
-                  { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
-                  { type: 'text', text: `Đọc toàn bộ nội dung trang ${pageNum}/${total} của tài liệu "${fileName}". Trả về Markdown, giữ nguyên 100% số liệu/tên/ngày tháng. Bảng → markdown table. Không giải thích thêm.` },
-                ],
-              }],
-            }),
-          })
-          if (resp.status === 429) {
-            keyIdx = (keyIdx + 1) % allKeys.length
-            await new Promise(r => setTimeout(r, 2500))
-            continue
-          }
-          if (resp.ok) {
-            const data = await resp.json()
-            pageText = data.choices?.[0]?.message?.content?.trim() || ''
-            if (pageText) break
-          }
-        } catch { continue }
-      }
-
-      parts.push(pageText
-        ? `## Trang ${pageNum}\n\n${pageText}`
-        : `## Trang ${pageNum}\n\n*(Không đọc được)*`)
-
-    } catch (e) {
-      parts.push(`## Trang ${pageNum}\n\n*(Lỗi: ${e.message})*`)
+    if (isPageTextUsable(pageText)) {
+      // Text tốt → dùng ngay
+      notify(`📄 Trang ${pageNum}/${total} (text)`, pct)
+      parts.push(`## Trang ${pageNum}\n\n${pageText}`)
+      continue
     }
 
-    if (pageNum < total) await new Promise(r => setTimeout(r, OCR_PAUSE_MS))
+    // ── Bước 2: text hỏng/rỗng → Groq Vision ─────────────────────────────
+    if (!allKeys.length) {
+      parts.push(`## Trang ${pageNum}\n\n*(Không có Groq key để OCR)*`)
+      continue
+    }
+
+    notify(`📷 Trang ${pageNum}/${total} (OCR)...`, pct)
+    groqCallCount++
+
+    // Thêm delay từ lần gọi Groq thứ 2 trở đi để tránh rate limit
+    if (groqCallCount > 1) await new Promise(r => setTimeout(r, 3000))
+
+    try {
+      const base64 = await renderPageToJpeg(page)
+      const ocrText = await groqVisionPage(base64, `trang ${pageNum}/${total}`, fileName, allKeys)
+      parts.push(ocrText
+        ? `## Trang ${pageNum}\n\n${ocrText}`
+        : `## Trang ${pageNum}\n\n*(Không đọc được)*`)
+    } catch (e) {
+      parts.push(`## Trang ${pageNum}\n\n*(Lỗi render: ${e.message})*`)
+    }
   }
 
+  const groqNote = groqCallCount > 0 ? ` (${groqCallCount} trang cần OCR)` : ' (toàn bộ text layer)'
+  notify(`✅ Đã đọc ${total} trang${groqNote}`, 62)
   return parts.join('\n\n---\n\n')
 }
 
@@ -279,53 +297,19 @@ export function useProcessPipeline() {
           console.warn('[pipeline] Mistral OCR exception:', e.message)
         }
 
-        // ── B & C. Fallback: pdfjs detect → text extract hoặc Groq Vision ──
+        // ── B. Fallback: hybrid extract từng trang (text → OCR chỉ khi cần) ──
         if (!fullMarkdown) {
-        notify('📥 Đang tải file PDF...', 5)
-        const buf = await fetchBuffer(fileUrl)
-        const lib = await loadPdfJs()
-        const pdfDoc = await lib.getDocument({ data: new Uint8Array(buf) }).promise
-        const totalPages = pdfDoc.numPages
-
-        // ── B: PDF text ───────────────────────────────────────────
-        notify('🔎 Đang phát hiện loại PDF...', 8)
-        const isScan = await detectScanPdf(pdfDoc)
-
-        if (isScan) {
-          // ── C. PDF SCAN → Groq Vision trực tiếp từ browser ────────────────
-          notify(`📷 PDF scan (${totalPages} trang) - đang OCR...`, 10)
+          notify('📥 Đang tải file PDF...', 5)
+          const buf = await fetchBuffer(fileUrl)
+          const lib = await loadPdfJs()
+          const pdfDoc = await lib.getDocument({ data: new Uint8Array(buf) }).promise
+          notify(`📄 Đang đọc ${pdfDoc.numPages} trang...`, 10)
           await setDoc(jobRef(docId), {
             docId, fileUrl, fileName: fileName || '',
-            stage: 'extract', totalPages, updatedAt: serverTimestamp(),
+            stage: 'extract', totalPages: pdfDoc.numPages, updatedAt: serverTimestamp(),
           }, { merge: true })
-          fullMarkdown = await ocrScanPdf(pdfDoc, fileName, notify)
-
-        } else {
-          // ── B. PDF TEXT → pdfjs extract text CLIENT-SIDE (không cần API) ──
-          // Không dùng api/process-batch nữa: WASM crash trên Vercel, phức tạp.
-          // pdfjs đã load rồi, extract text tại chỗ — nhanh, free, 0 token.
-          notify(`📄 Đang đọc văn bản (${totalPages} trang)...`, 10)
-          const parts = []
-          for (let i = 1; i <= totalPages; i++) {
-            const p = await pdfDoc.getPage(i)
-            const content = await p.getTextContent()
-            const pageText = content.items.map(x => x.str).join(' ').trim()
-            if (pageText.length > 30) parts.push(`## Trang ${i}\n\n${pageText}`)
-            notify(`📄 Đọc trang ${i}/${totalPages}...`, 10 + Math.round((i / totalPages) * 45))
-          }
-          fullMarkdown = parts.join('\n\n---\n\n')
-
-          // Nếu text layer hỏng (watermark lặp / CMap lỗi) → fallback Groq Vision
-          const accentCount = (fullMarkdown.match(/[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/gi) || []).length
-          const accentRatio = accentCount / Math.max(fullMarkdown.length, 1)
-          if (fullMarkdown.length < 200 || accentRatio < 0.05) {
-            notify('⚠️ Text layer hỏng → chuyển sang Groq Vision OCR...', 50)
-            fullMarkdown = await ocrScanPdf(pdfDoc, fileName, notify)
-          } else {
-            notify('✅ Đã đọc văn bản thành công', 58)
-          }
-        }
-        } // end if (!fullMarkdown) — fallback khi Mistral không khả dụng
+          fullMarkdown = await hybridExtractPdf(pdfDoc, fileName, notify)
+        } // end if (!fullMarkdown)
       }
 
       // ════════════════════════════════════════════════════════════
