@@ -21,64 +21,8 @@ const extractPdfText = async (buf) => {
   }
   return text.trim().replace(/\s+/g,' ').slice(0,8000)
 }
-// ── Helper: ArrayBuffer → base64 ────────────────────────────────
-const bufToBase64 = (buf) => {
-  const bytes = new Uint8Array(buf)
-  let binary = ''
-  for (let i = 0; i < bytes.length; i += 8192)
-    binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
-  return btoa(binary)
-}
 
-// ── Gọi Gemini với 1 PDF qua /api/gemini-proxy (key nằm server) ────
-// SỬA 22/6/2026: trước đây gọi thẳng generativelanguage.googleapis.com
-// bằng model gemini-2.0-flash đã chết (1/6/2026) — mọi lệnh gọi đều lỗi
-// âm thầm (catch rồi continue), rơi xuống đọc text thô không OCR. Giờ gọi
-// qua proxy server — tự động hưởng model gemini-2.5-flash/-lite + xoay
-// vòng key đã sửa sẵn trong gemini-proxy.js, không cần lặp key ở đây nữa.
-const callGeminiPdf = async (base64, prompt) => {
-  try {
-    const res = await fetch('/api/gemini-proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        parts: [
-          { inline_data: { mime_type: 'application/pdf', data: base64 } },
-          { text: prompt },
-        ],
-        maxTokens: 8192,
-      }),
-    })
-    if (!res.ok) return null
-    const data = await res.json()
-    const text = data.text || ''
-    return text.length > 50 ? text : null
-  } catch { return null }
-}
-
-// ── Gemini đọc toàn bộ PDF trong 1 lần gọi ──────────────────────
-// SỬA 22/6/2026: trước đây chia "nhóm 30 trang" rồi gọi lặp lại — nhưng
-// mỗi lần đều gửi NGUYÊN file PDF y hệt (base64 tính 1 lần, dùng lại),
-// chỉ đổi câu prompt yêu cầu AI "tự tìm trang X-Y" — không cắt file thật,
-// nên không có tác dụng phân trang, chỉ tốn thêm lệnh gọi vô ích. Model
-// hiện tại (gemini-2.5-flash) đọc được tới hàng trăm trang trong 1 lần
-// gọi — gọi 1 lần duy nhất, để model tự đọc hết, không cần chia nhóm giả.
-const extractPdfWithGemini = async (buf, fileName = '', docId = null, onStatus = null) => {
-  if (onStatus) onStatus('📄 Đang đọc văn bản...')
-  const base64 = bufToBase64(buf)
-
-  const prompt = `Trích xuất TOÀN BỘ nội dung của file PDF "${fileName}".
-Yêu cầu:
-- Giữ nguyên 100% câu chữ, số liệu, tên người, ngày tháng
-- Chuyển bảng biểu sang Markdown table (| cột | cột |)
-- Giữ heading (# ## ###), điều khoản (Điều 1, Khoản 2...)
-- KHÔNG tóm tắt, chỉ trả về Markdown thuần túy`
-
-  const text = await callGeminiPdf(base64, prompt)
-  return text ? text.slice(0, 200000) : null
-}
-
-// ── Fallback: pdfjs đọc text thô ─────────────────────────────────
+// ── Đọc text thô từ PDF bằng pdfjs ──────────────────────────────
 const extractPdfTextFull = async (buf) => {
   const lib = await loadPdfJs()
   const pdf = await lib.getDocument({ data: buf }).promise
@@ -91,10 +35,11 @@ const extractPdfTextFull = async (buf) => {
   return text.trim().replace(/\s+/g, ' ').slice(0, 100000)
 }
 
-// ── Hàm chính: Gemini trước, pdfjs fallback ──────────────────────
+// ── Hàm chính: pdfjs (luôn dùng được) ───────────────────────────
+// Gemini bị xóa hoàn toàn (AQ. key không dùng được).
+// extractPdfFull chỉ còn pdfjs — đủ cho "AI tự điền" vì chỉ cần 3-5 trang đầu.
 const extractPdfFull = async (buf, fileName = '', docId = null, onStatus = null) => {
-  const gemResult = await extractPdfWithGemini(buf.slice(0), fileName, docId, onStatus)
-  if (gemResult) return gemResult
+  if (onStatus) onStatus('📄 Đang đọc văn bản...')
   return await extractPdfTextFull(buf.slice(0))
 }
 

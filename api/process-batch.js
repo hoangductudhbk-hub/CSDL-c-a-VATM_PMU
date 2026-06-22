@@ -61,11 +61,7 @@ const getGroqKeys = () => [
   process.env.VITE_GROQ_API_KEY_3,
 ].filter(Boolean)
 
-const getGeminiKeys = () => [
-  process.env.VITE_GEMINI_API_KEY,
-  process.env.VITE_GEMINI_API_KEY_2,
-  process.env.VITE_GEMINI_API_KEY_3,
-].filter(Boolean)
+// Gemini keys bị xóa — AQ. format không dùng được (401 "Expected OAuth 2 access token")
 
 const getGhToken = () =>
   process.env.VITE_GH_TOKEN || process.env.GH_TOKEN || ''
@@ -170,24 +166,7 @@ const extractPageRange = async (pdfBuffer, fromPage, toPage) => {
   return { buffer: Buffer.from(bytes), totalPages }
 }
 
-// ── Gemini OCR (cho PDF scan) ─────────────────────────────────────
-// Hỗ trợ cả 2 định dạng key:
-// - Key cũ "AIzaSy..." → gửi qua query param ?key=
-// - Key mới "AQ...." (Authorization key) → gửi qua header x-goog-api-key
-const geminiUrl = (model, key) =>
-  key.startsWith('AIzaSy')
-    ? `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`
-    : `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`
-
-const geminiHeaders = (key) => {
-  const h = { 'Content-Type': 'application/json' }
-  if (!key.startsWith('AIzaSy')) h['x-goog-api-key'] = key
-  return h
-}
-
-// gemini-2.0-flash / gemini-2.0-flash-lite đã bị Google khai tử 1/6/2026.
-// Dùng gemini-2.5-flash / gemini-2.5-flash-lite (free tier vẫn có).
-const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+// Gemini bị xóa hoàn toàn — AQ. key không dùng được, dùng Groq Vision thay thế
 
 // ── Cổng kiểm tra chất lượng — chặn rác trước khi cho phép lưu ────
 // Không tin tuyệt đối vào bất cứ thứ Gemini trả về. Kiểm tra rẻ, không cần
@@ -202,82 +181,67 @@ const isLikelyInvalid = (text, pageCount) => {
   return false
 }
 
-const callGeminiOCR = async (pageBuffer, fileName, fromPage, toPage) => {
-  const keys = getGeminiKeys()
-  const pageCount = toPage - fromPage + 1
-  const base64Pdf = pageBuffer.toString('base64')
+// ── Groq Vision OCR — đọc ảnh PNG của từng trang PDF ──────────────
+// Dùng cho cả scan PDF và text PDF bị lỗi CMap/watermark.
+// mupdf render trang → PNG buffer → base64 → Groq Vision.
+const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
+const OCR_PROMPT = (fileName, pageLabel) =>
+  `Đây là ảnh ${pageLabel} của tài liệu "${fileName}".
+Trích xuất TOÀN BỘ nội dung văn bản nhìn thấy trong ảnh.
+- Giữ nguyên 100% câu chữ, số liệu, tên, ngày tháng
+- Bảng biểu → Markdown table
+- Tiêu đề → ## ###
+- Chữ ký/dấu mộc: ghi *(Đã ký)* / *(Có dấu)*
+- Header/footer lặp lại: bỏ qua
+- Chỉ trả về Markdown thuần, không giải thích`
 
+const callGroqVisionOCR = async (imageBuffer, fileName, pageLabel) => {
+  const keys = getGroqKeys()
+  const base64Img = imageBuffer.toString('base64')
   for (const key of keys) {
-    for (const model of GEMINI_MODELS) {
-      try {
-        const res = await fetch(geminiUrl(model, key), {
-          method: 'POST',
-          headers: geminiHeaders(key),
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { inline_data: { mime_type: 'application/pdf', data: base64Pdf } },
-                { text: `Bạn là công cụ chuyển đổi PDF sang Markdown chuyên dụng — KHÔNG phải trợ lý tư vấn, KHÔNG tóm tắt, KHÔNG bình luận, chỉ chuyển đổi định dạng.
-
-Đây là ${pageCount} trang trích từ tài liệu "${fileName}" (tương ứng trang ${fromPage}-${toPage} của bản gốc).
-
-NGUYÊN TẮC:
-- Trung thực tuyệt đối: không bỏ sót câu/đoạn nào, không diễn giải lại, không tóm tắt thay nội dung đầy đủ
-- Giữ đúng ngôn ngữ gốc (tiếng Việt có dấu/tiếng Anh), không dịch
-- Đọc đúng thứ tự tự nhiên; nếu bố cục nhiều cột, đọc lần lượt theo logic nội dung, không theo vị trí pixel
-- KHÔNG tự suy diễn đoạn không đọc được (mờ/rách/mất nét) — đánh dấu [không đọc được] tại đúng vị trí, không đoán
-- Số liệu, đơn vị kỹ thuật (kV, kVA, %, TCVN, IEC...): giữ chính xác 100%, không làm tròn, không đổi đơn vị
-- Chữ ký/dấu mộc: ghi chú *(Đã ký)*, *(Có dấu)* — KHÔNG transcribe lại watermark/dấu chìm/dấu mộc lặp lại nhiều lần
-- Header/footer lặp lại không mang thông tin (số trang, watermark hệ thống tải về...): bỏ qua, không lặp lại trong kết quả
-- Bảng biểu → Markdown table; tiêu đề → #/##/### đúng cấp bậc; danh sách giữ đúng -, 1. 2. 3. như bản gốc
-- Văn bản hành chính (số/ký hiệu, ngày, người ký, cơ quan): giữ đúng format chuẩn
-
-Chỉ trả về nội dung Markdown thuần. Không bọc code block, không lời chào/giới thiệu/nhận xét trước hoặc sau nội dung.` },
-              ],
-            }],
-            generationConfig: { temperature: 0, maxOutputTokens: 8192 },
-          }),
-        })
-        if (res.status === 429) continue
-        if (!res.ok) {
-          const errText = await res.text().catch(() => '')
-          console.error(`[process-batch] Gemini ${model} HTTP ${res.status}: ${errText.slice(0, 300)}`)
-          continue
-        }
-        const data = await res.json()
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-        if (!isLikelyInvalid(text, pageCount)) return { text, model }
-        console.error(`[process-batch] Gemini ${model} trả nội dung không hợp lệ (rỗng/từ chối/quá ngắn) cho trang ${fromPage}-${toPage}: "${text.slice(0, 150)}"`)
-      } catch (e) {
-        console.error(`[process-batch] lỗi gọi Gemini ${model}:`, e.message)
-        continue
-      }
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({
+          model: GROQ_VISION_MODEL,
+          max_tokens: 4096,
+          temperature: 0,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${base64Img}` } },
+              { type: 'text', text: OCR_PROMPT(fileName, pageLabel) },
+            ],
+          }],
+        }),
+      })
+      if (res.status === 429) { await new Promise(r => setTimeout(r, 2000)); continue }
+      if (!res.ok) continue
+      const data = await res.json()
+      const text = data.choices?.[0]?.message?.content || ''
+      if (!isLikelyInvalid(text, 1)) return { text, model: GROQ_VISION_MODEL }
+    } catch (e) {
+      console.error('[process-batch] Groq Vision lỗi:', e.message)
+      continue
     }
   }
   return null
 }
 
-// ── OCR.space — nhà cung cấp OCR thứ 2, ĐỘC LẬP với Google ────────
-// Lý do tồn tại: Gemini đang bị chặn ở cấp tài khoản Google (key chỉ ra
-// được dạng AQ., không sửa được từ phía mình). OCR.space có API free thật
-// (không phải web giả lập), không liên quan gì tới Google — khi Gemini sống
-// lại thì vẫn còn nhà cung cấp dự phòng này, không còn phụ thuộc 1 nguồn duy
-// nhất. Giới hạn free tier: 1MB/request — nếu lô trang quá lớn, bỏ qua sạch
-// (không cố gửi thiếu dữ liệu), rơi xuống nhánh fallback bên dưới.
-const callOcrSpace = async (pageBuffer, fromPage, toPage) => {
+// ── OCR.space — fallback khi Groq Vision không dùng được ───────────
+// Nhận PNG buffer (không phải PDF) vì ta đã render ảnh rồi.
+// Giới hạn free tier: 1MB/request.
+const callOcrSpace = async (imageBuffer, pageLabel) => {
   const apiKey = process.env.OCRSPACE_API_KEY
   if (!apiKey) return null
-  const pageCount = toPage - fromPage + 1
-  if (pageBuffer.length > 900 * 1024) {
-    console.error(`[process-batch] Lô trang ${fromPage}-${toPage} (${Math.round(pageBuffer.length / 1024)}KB) vượt giới hạn free tier OCR.space (~900KB) — bỏ qua, không thử.`)
-    return null
-  }
+  if (imageBuffer.length > 900 * 1024) return null
   try {
-    const base64 = pageBuffer.toString('base64')
+    const base64 = imageBuffer.toString('base64')
     const body = new URLSearchParams({
       apikey: apiKey,
-      base64Image: `data:application/pdf;base64,${base64}`,
-      filetype: 'PDF',
+      base64Image: `data:image/png;base64,${base64}`,
+      filetype: 'PNG',
       language: 'vie',
       OCREngine: '2',
       isCreateSearchablePdf: 'false',
@@ -287,45 +251,26 @@ const callOcrSpace = async (pageBuffer, fromPage, toPage) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,
     })
-    if (!res.ok) { console.error('[process-batch] OCR.space HTTP', res.status); return null }
+    if (!res.ok) return null
     const data = await res.json()
-    if (data.IsErroredOnProcessing) {
-      console.error('[process-batch] OCR.space báo lỗi xử lý:', data.ErrorMessage || JSON.stringify(data).slice(0, 200))
-      return null
-    }
+    if (data.IsErroredOnProcessing) return null
     const text = (data.ParsedResults || []).map(r => r.ParsedText || '').join('\n').trim()
-    if (isLikelyInvalid(text, pageCount)) {
-      console.error(`[process-batch] OCR.space trả nội dung không hợp lệ cho trang ${fromPage}-${toPage}`)
-      return null
-    }
+    if (isLikelyInvalid(text, 1)) return null
     return { text, model: 'ocr.space' }
-  } catch (e) {
-    console.error('[process-batch] lỗi gọi OCR.space:', e.message)
-    return null
-  }
+  } catch { return null }
 }
 
-// ── Gemini đọc ẢNH đã render (không phải PDF) — dùng cho lỗi CMap ─
-// Khác callGeminiOCR ở trên: gửi PNG thuần, không có lớp text nào trong
-// ảnh để Gemini lấy nhầm — buộc phải đọc bằng vision thật.
-const callGeminiVisionImage = async (imageBuffer, fileName, pageLabel) => {
-  const keys = getGeminiKeys()
-  const base64Img = imageBuffer.toString('base64')
-  for (const key of keys) {
-    for (const model of GEMINI_MODELS) {
-      try {
-        const res = await fetch(geminiUrl(model, key), {
-          method: 'POST',
-          headers: geminiHeaders(key),
-          body: JSON.stringify({
-            contents: [{
-              parts: [
-                { inline_data: { mime_type: 'image/png', data: base64Img } },
-                { text: `Đây là ảnh chụp ${pageLabel} của tài liệu "${fileName}". Đọc và trích xuất TOÀN BỘ nội dung nhìn thấy trong ảnh. Giữ nguyên 100% câu chữ, số liệu. Chỉ trả về Markdown thuần, không giải thích.` },
-              ],
-            }],
-            generationConfig: { temperature: 0, maxOutputTokens: 4096 },
-          }),
+// ── OCR 1 trang: Groq Vision → OCR.space → Tesseract ──────────────
+const ocrOnePage = async (imageBuffer, fileName, pageLabel) => {
+  const groq = await callGroqVisionOCR(imageBuffer, fileName, pageLabel)
+  if (groq) return groq
+  const ocrspace = await callOcrSpace(imageBuffer, pageLabel)
+  if (ocrspace) return ocrspace
+  const tesseract = await callTesseractOCR(imageBuffer)
+  if (tesseract && tesseract.trim().length > 20) return { text: tesseract, model: 'tesseract' }
+  return null
+}
+
         })
         if (res.status === 429) continue
         if (!res.ok) continue
@@ -428,61 +373,50 @@ export default async function handler(req, res) {
   }
 
   // ── Lớp text bị hỏng (watermark lặp / lỗi CMap) → render ảnh trước ──
-  // Không gửi PDF gốc cho Gemini ở đây — nó có lớp text hỏng, AI có thể
-  // lấy nhầm lớp đó. Render từng trang ra ảnh PNG (bỏ hẳn lớp text), gửi
-  // ảnh cho Gemini vision; nếu Gemini không khả dụng, tự OCR bằng
-  // tesseract.js — miễn phí, không phụ thuộc Google.
+  // Render từng trang ra PNG (bỏ hẳn lớp text), gửi ảnh cho Groq Vision.
+  // Fallback: OCR.space → Tesseract (qua ocrOnePage).
   if (corruptedText) {
     try {
-      const pages = []
-      for (let p = fromPage; p <= toPage; p++) pages.push(p)
       const texts = []
-      for (const p of pages) {
+      for (let p = fromPage; p <= toPage; p++) {
         const img = renderPageToImage(pdfBuffer, p - 1) // mupdf 0-indexed
-        const pageLabel = `trang ${p}`
-        let pageText = null
-        if (getGeminiKeys().length) {
-          const r = await callGeminiVisionImage(img, fileName || 'document', pageLabel)
-          if (r) pageText = r.text
-        }
-        if (!pageText) pageText = await callTesseractOCR(img) // fallback miễn phí
-        texts.push(`## Trang ${p}\n\n${pageText || '[không đọc được]'}`)
+        const r = await ocrOnePage(img, fileName || 'document', `trang ${p}`)
+        texts.push(`## Trang ${p}\n\n${r ? r.text : '[không đọc được]'}`)
       }
-      const finalText = texts.join('\n\n')
       return res.status(200).json({
         ok: true, docId,
         batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
-        text: finalText, charCount: finalText.length,
+        text: texts.join('\n\n'), charCount: texts.join('\n\n').length,
         method: 'render-image-ocr',
       })
     } catch (e) {
       console.error('[process-batch] Lỗi render ảnh + OCR:', e.message)
-      // Rơi xuống nhánh OCR PDF thường phía dưới như phương án dự phòng
+      // Rơi xuống nhánh scan PDF bên dưới
     }
   }
 
-  // ── PDF scan thật (không có lớp text) → cắt đúng trang rồi gửi OCR ─
+  // ── PDF scan thật (không có lớp text) → render từng trang → Groq Vision ─
   try {
-    const { buffer: pageBuffer, totalPages: realTotalPages } = await extractPageRange(pdfBuffer, fromPage, toPage)
+    const { totalPages: realTotalPages } = await extractPageRange(pdfBuffer, fromPage, toPage)
     if (realTotalPages) totalPages = realTotalPages
 
-    const geminiKeys = getGeminiKeys()
-    const ocrResult = (geminiKeys.length ? await callGeminiOCR(pageBuffer, fileName || 'document', fromPage, toPage) : null)
-      || await callOcrSpace(pageBuffer, fromPage, toPage)
-
-    if (ocrResult) {
-      return res.status(200).json({
-        ok: true, docId,
-        batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
-        text: ocrResult.text, charCount: ocrResult.text.length,
-        method: 'ocr', model: ocrResult.model,
-      })
+    const texts = []
+    for (let p = fromPage; p <= toPage; p++) {
+      const img = renderPageToImage(pdfBuffer, p - 1)
+      const r = await ocrOnePage(img, fileName || 'document', `trang ${p}`)
+      texts.push(`## Trang ${p}\n\n${r ? r.text : '[không đọc được]'}`)
     }
+    const finalText = texts.join('\n\n')
+    return res.status(200).json({
+      ok: true, docId,
+      batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
+      text: finalText, charCount: finalText.length,
+      method: 'groq-vision-ocr',
+    })
   } catch (e) {
-    // Lỗi cắt trang (file hỏng, mã hoá...) — báo rõ, không âm thầm gửi nguyên file
-    console.error('[process-batch] Lỗi cắt trang PDF:', e.message)
+    console.error('[process-batch] Lỗi scan PDF OCR:', e.message)
     return res.status(422).json({
-      error: 'Không cắt được trang PDF để OCR: ' + e.message,
+      error: 'Không OCR được trang này: ' + e.message,
       isScan: true, batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
     })
   }
@@ -499,12 +433,12 @@ export default async function handler(req, res) {
       text: fallback, charCount: fallback.length,
       method: 'raw-text',
       needsReview: true,
-      warning: 'PDF scan/font lỗi — Gemini OCR không trả được nội dung hợp lệ. Đây là text thô (có thể sai/méo), CẦN người kiểm tra lại, không nên coi là đã đọc xong.',
+      warning: 'PDF scan/font lỗi — OCR không trả được nội dung hợp lệ. Đây là text thô (có thể sai/méo), CẦN người kiểm tra lại.',
     })
   }
 
   return res.status(422).json({
-    error: 'Không đọc được nội dung trang này — pdf-parse không có text, Gemini OCR không trả kết quả hợp lệ. Kiểm tra VITE_GEMINI_API_KEY trên Vercel và log Vercel Functions để xem lỗi cụ thể.',
+    error: 'Không đọc được nội dung trang này — pdf-parse không có text, Groq Vision OCR cũng thất bại.',
     isScan: true, needsReview: true,
     batchIndex: batchIndex ?? 0, fromPage, toPage, totalPages,
   })
