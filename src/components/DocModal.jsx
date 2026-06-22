@@ -218,7 +218,7 @@ export default function DocModal({ doc, onSave, onClose }) {
   const processOnePdf = async (buf, fileName='') => {
     const text = await extractPdfText(buf.slice(0))
     if (isRealContent(text)) return await analyzeText(text, fileName)
-    setSt('⏳ PDF scan — đang dùng vision AI...')
+    setSt('⏳ Đang trích xuất thông tin...')
     const imgs = await renderPdfToImages(buf.slice(0))
     return await analyzeImages(imgs, fileName)
   }
@@ -241,7 +241,7 @@ export default function DocModal({ doc, onSave, onClose }) {
           rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, setSt)
           result = isRealContent(rawExtracted)
             ? await analyzeText(rawExtracted.slice(0, 8000), file.name)
-            : await (async () => { setSt('⏳ PDF scan — đang dùng vision AI...'); const imgs = await renderPdfToImages(buf.slice(0)); return await analyzeImages(imgs, file.name) })()
+            : await (async () => { setSt('⏳ Đang trích xuất thông tin...'); const imgs = await renderPdfToImages(buf.slice(0)); return await analyzeImages(imgs, file.name) })()
         } else if (['doc','docx'].includes(ext)) {
           rawExtracted = await extractDocxText(buf)
           result = await analyzeText(rawExtracted.slice(0, 8000), file.name)

@@ -35,9 +35,9 @@ const extractDocxText = async (buf) => {
   return (await window.mammoth.extractRawText({arrayBuffer:buf})).value
 }
 
-// ── Đọc PDF scan bằng Gemini Vision (OCR) ──────────────────────
+// ── Đọc PDF scan (OCR dự phòng khi không có chunks/markdown/text khác) ──
 const readPDFWithGemini = async (arrayBuf, fileName, onStep) => {
-  if (onStep) onStep('🔍 PDF scan — dùng Gemini OCR đọc toàn bộ...')
+  if (onStep) onStep('🔍 Đang trích xuất thông tin...')
 
   // Convert ArrayBuffer → base64
   const bytes = new Uint8Array(arrayBuf)
@@ -56,7 +56,7 @@ const readPDFWithGemini = async (arrayBuf, fileName, onStep) => {
 
   for (let i = 0; i < gemKeys.length; i++) {
     try {
-      if (onStep) onStep(`🔍 Gemini đang đọc và nhận dạng văn bản${i > 0 ? ` (key ${i+1})` : ''}...`)
+      if (onStep) onStep(`🔍 Đang đọc và nhận dạng văn bản${i > 0 ? ` (lần ${i+1})` : ''}...`)
       const res = await fetch(GEM_URL(gemKeys[i]), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -92,7 +92,7 @@ Yêu cầu:
       const data = await res.json()
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
       if (text.length > 100) {
-        if (onStep) onStep(`✅ Gemini đọc xong ${text.length.toLocaleString()} ký tự`)
+        if (onStep) onStep(`✅ Đã trích xuất ${text.length.toLocaleString()} ký tự`)
         return text
       }
     } catch(e) {
@@ -473,7 +473,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
             try {
               fileText = await readPDFWithGemini(result.arrayBuf, fileName, setAnalyzeStep)
             } catch(e) {
-              setAnalyzeStep(`⚠️ Gemini OCR lỗi: ${e.message} — dùng metadata`)
+              setAnalyzeStep(`⚠️ Không trích xuất được nội dung: ${e.message} — dùng metadata`)
             }
           }
 
