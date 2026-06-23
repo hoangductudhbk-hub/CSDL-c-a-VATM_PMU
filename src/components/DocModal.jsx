@@ -172,9 +172,11 @@ export default function DocModal({ doc, onSave, onClose }) {
           rawExtracted = await extractXlsxText(buf)
           result = await analyzeText(rawExtracted.slice(0, 8000), file.name)
           rawExtracted = rawExtracted.slice(0, 100000)
-        } else if (ext === 'txt') {
+        } else if (['txt', 'md', 'csv'].includes(ext)) {
           const t = await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,100000));rd.readAsText(file,'utf-8')})
-          setRaw(t.slice(0, 8000)); setExtractedText(t); setSt('✅ Đọc xong — nhấn AI phân tích'); setLoad(false); return
+          rawExtracted = t
+          result = await analyzeText(t.slice(0, 8000), file.name)
+          rawExtracted = rawExtracted.slice(0, 100000)
         } else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
         setExtractedText(rawExtracted)
         // Lưu markdown lên Firestore ngay (không cần docId)
@@ -297,8 +299,8 @@ export default function DocModal({ doc, onSave, onClose }) {
             </div>
             {aiTab==='file'&&(
               <label style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8,padding:'28px 20px',border:'2px dashed #ddd',borderRadius:10,cursor:loading?'not-allowed':'pointer',background:'#fafaf8'}}>
-                <input type="file" accept=".pdf,.txt,.doc,.docx,.xlsx,.xls,.pptx,.ppt" onChange={handleFile} style={{display:'none'}} disabled={loading} multiple/>
-                {loading?<><span style={{fontSize:20}}>⏳</span><span style={{fontSize:13,color:'#555'}}>Đang xử lý...</span></>:<><span style={{fontSize:36}}>📎</span><span style={{fontSize:13,color:'#555',fontWeight:600}}>Nhấn để chọn file</span><span style={{fontSize:11,color:'#9b9b9b'}}>PDF, Word, Excel, TXT (Ctrl+Click nhiều file)</span></>}
+                <input type="file" accept=".pdf,.txt,.md,.csv,.doc,.docx,.xlsx,.xls,.pptx,.ppt" onChange={handleFile} style={{display:'none'}} disabled={loading} multiple/>
+                {loading?<><span style={{fontSize:20}}>⏳</span><span style={{fontSize:13,color:'#555'}}>Đang xử lý...</span></>:<><span style={{fontSize:36}}>📎</span><span style={{fontSize:13,color:'#555',fontWeight:600}}>Nhấn để chọn file</span><span style={{fontSize:11,color:'#9b9b9b'}}>PDF, Word, Excel, TXT, MD, CSV (Ctrl+Click nhiều file)</span></>}
               </label>
             )}
             {aiTab==='paste'&&<textarea value={rawText} onChange={e=>setRaw(e.target.value)} placeholder="Dán nội dung văn bản vào đây..." rows={8} style={{...iSt,resize:'vertical',minHeight:160}}/>}
@@ -334,7 +336,7 @@ export default function DocModal({ doc, onSave, onClose }) {
                 </div>
               ) : (
                 <label style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',border:'1.5px dashed #ddd',borderRadius:8,cursor:'pointer',background:'#fafaf8'}}>
-                  <input type="file" accept=".pdf,.doc,.docx,.xlsx,.xls,.pptx,.ppt,.txt" onChange={e=>{if(e.target.files[0]) setPF(e.target.files[0])}} style={{display:'none'}}/>
+                  <input type="file" accept=".pdf,.txt,.md,.csv,.doc,.docx,.xlsx,.xls" onChange={e=>{if(e.target.files[0]) setPF(e.target.files[0])}} style={{display:'none'}}/>
                   <span style={{fontSize:20}}>📎</span>
                   <span style={{fontSize:13,color:'#888'}}>Nhấn để chọn file đính kèm</span>
                 </label>

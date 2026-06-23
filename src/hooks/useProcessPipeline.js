@@ -1,27 +1,19 @@
 // src/hooks/useProcessPipeline.js
-// Pipeline chuyển đổi văn bản → Markdown → AI Memory
+// Pipeline đơn giản: fileUrl → extract text → AI → markdown → Firestore
+// Không ABBYY, không OCR.space, không server-side OCR, không job queue.
 //
-// Luồng theo loại file:
-//   PDF text  → Server (pdf-parse + Groq format)    via api/process-batch
-//   PDF scan  → Client render pdfjs → api/ocr-page  (loại bỏ mupdf trên server!)
-//   Word docx → Client mammoth → markdown
-//   Excel xlsx→ Client SheetJS → markdown table/CSV
-//
-// Tất cả kết quả lưu vào documentMarkdown/{docId} (dùng docId làm key, không random)
+// Luồng:
+//   1. Fetch file từ Cloudinary URL
+//   2. Extract text (pdf.js / mammoth / sheetjs) — client-side, free
+//   3. Nếu PDF scan (ít text) → Groq Vision vài trang đầu
+//   4. AI tổng hợp → markdown
+//   5. Lưu documentMarkdown + documentMemory vào Firestore
 
-import { useState, useRef } from 'react'
-import { doc, setDoc, getDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
+import { useState } from 'react'
+import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase'
-import { analyzeFullDocument } from './useAI'
 
-// ─── Hằng số ───────────────────────────────────────────────────────────────
-const PAGE_BATCH   = 8      // số trang/lô gửi server (text PDF path)
-const PAUSE_MS     = 1200   // nghỉ giữa các lô để tránh rate-limit
-const OCR_PAUSE_MS = 1500   // nghỉ giữa các trang khi OCR scan PDF
-const SCAN_THRESHOLD = 80   // avg chars/page dưới mức này → coi là scan PDF
-const jobRef = (id) => doc(db, 'processingJobs', id)
-
-// ─── Load pdfjs từ CDN (dùng lại window.pdfjsLib nếu đã load) ──────────────
+// ─── Helpers load thư viện từ CDN ──────────────────────────────────────────
 const loadPdfJs = () => new Promise((res, rej) => {
   if (window.pdfjsLib) { res(window.pdfjsLib); return }
   const s = document.createElement('script')
@@ -31,412 +23,271 @@ const loadPdfJs = () => new Promise((res, rej) => {
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
     res(window.pdfjsLib)
   }
-  s.onerror = () => rej(new Error('Không load được pdfjs'))
+  s.onerror = () => rej(new Error('Không load được pdf.js'))
   document.head.appendChild(s)
 })
 
-// ─── Kiểm tra text trang có dùng được không ────────────────────────────────
-// Văn bản hành chính VN: dấu ~15-20%, từ vựng đa dạng.
-// Watermark lặp: dấu có thể đủ nhưng từ vựng nghèo (unique words < 25%).
-// CMap lỗi: dấu < 3%.
-const isPageTextUsable = (text) => {
-  if (!text || text.trim().length < 30) return false
-  // Watermark hệ thống quản lý văn bản VN (Voffice, VNPT, VATM...)
-  // Pattern: "tải về từ ... ngày ... bởi Phòng ..."
-  if (/(?:phòng\s*nghiệp\s*vụ|da\.phongnv|tải\s+về\s+từ\s+(?:hệ\s+thống|vatm)|thông\s+tin\s+tải\s+về)/i.test(text)) return false
-  // Trang ngắn < 120 ký tự = chỉ có watermark/header, không có nội dung thực
-  if (text.trim().length < 120) return false
-  // CMap lỗi: quá ít dấu tiếng Việt
-  const accents = (text.match(/[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/gi) || []).length
-  if (accents / text.length < 0.03) return false
-  // Từ vựng lặp: watermark dài hơn bị loại bởi unique ratio thấp
-  const words = text.toLowerCase().split(/\s+/).filter(w => w.length > 2)
-  if (words.length > 15 && new Set(words).size / words.length < 0.25) return false
-  return true
+const loadScript = (src, check) => new Promise((res, rej) => {
+  if (check()) { res(); return }
+  const s = document.createElement('script')
+  s.src = src; s.onload = res; s.onerror = rej
+  document.head.appendChild(s)
+})
+
+// ─── Extract text từ PDF (text layer) ──────────────────────────────────────
+const extractPdfText = async (buf) => {
+  const lib = await loadPdfJs()
+  const pdf = await lib.getDocument({ data: buf }).promise
+  let text = ''
+  const maxPages = Math.min(pdf.numPages, 50)
+  for (let i = 1; i <= maxPages; i++) {
+    const page = await pdf.getPage(i)
+    const content = await page.getTextContent()
+    text += content.items.map(it => it.str).join(' ') + '\n'
+  }
+  return { text: text.trim(), totalPages: pdf.numPages }
 }
 
-// ─── Render trang PDF thành JPEG base64 (scale 1.5, nhỏ gọn cho OCR) ───────
+// ─── Render trang PDF thành JPEG base64 (cho scan PDF) ─────────────────────
 const renderPageToJpeg = async (page) => {
   const viewport = page.getViewport({ scale: 1.5 })
   const canvas = document.createElement('canvas')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
+  canvas.width = viewport.width; canvas.height = viewport.height
   const ctx = canvas.getContext('2d')
-  // getImageNode lỗi thường xảy ra với một số element PDF — bắt lỗi để canvas
-  // vẫn render được phần còn lại, không crash toàn bộ pipeline
-  try {
-    await page.render({ canvasContext: ctx, viewport }).promise
-  } catch {
-    // Một số element lỗi (getImageNode), render những gì đã vẽ được
-  }
-  return canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+  try { await page.render({ canvasContext: ctx, viewport }).promise } catch {}
+  return canvas.toDataURL('image/jpeg', 0.8).split(',')[1]
 }
 
-// ─── Gọi Groq Vision 1 trang (trực tiếp từ browser, không qua Vercel) ───────
-// Lý do: Vercel serverless body limit 1MB < ảnh JPEG base64 → 502.
-// Gọi thẳng Groq API: không giới hạn body, nhanh hơn 1 round-trip.
-const groqVisionPage = async (base64, pageLabel, fileName, keys) => {
-  const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
-  const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
-
-  for (let attempt = 0; attempt < keys.length * 2; attempt++) {
-    const key = keys[attempt % keys.length]
+// ─── OCR scan PDF bằng Groq Vision (tối đa 8 trang) ───────────────────────
+const ocrScanPdf = async (buf, groqKey, onStatus) => {
+  const lib = await loadPdfJs()
+  const pdf = await lib.getDocument({ data: buf }).promise
+  const maxOcr = Math.min(pdf.numPages, 8)
+  let allText = ''
+  for (let i = 1; i <= maxOcr; i++) {
+    if (onStatus) onStatus(`🔍 OCR trang ${i}/${maxOcr}...`)
+    const page = await pdf.getPage(i)
+    const b64 = await renderPageToJpeg(page)
     try {
-      const resp = await fetch(GROQ_URL, {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${groqKey}` },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          max_tokens: 2000,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Đọc toàn bộ văn bản trong ảnh này. Trả về đúng text, giữ nguyên số liệu và tên.' },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }
+            ]
+          }]
+        })
+      })
+      if (res.ok) {
+        const data = await res.json()
+        allText += (data.choices?.[0]?.message?.content || '') + '\n'
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, 1200))
+  }
+  return allText
+}
+
+// ─── Extract text từ DOCX ──────────────────────────────────────────────────
+const extractDocxText = async (buf) => {
+  await loadScript(
+    'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js',
+    () => window.mammoth
+  )
+  return (await window.mammoth.extractRawText({ arrayBuffer: buf })).value
+}
+
+// ─── Extract text từ XLSX ──────────────────────────────────────────────────
+const extractXlsxText = async (buf) => {
+  await loadScript(
+    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+    () => window.XLSX
+  )
+  const wb = window.XLSX.read(buf, { type: 'array' })
+  let text = ''
+  wb.SheetNames.forEach(name => {
+    text += `[${name}]\n` + window.XLSX.utils.sheet_to_txt(wb.Sheets[name]) + '\n'
+  })
+  return text
+}
+
+// ─── AI tổng hợp text → markdown ──────────────────────────────────────────
+const analyzeWithAI = async (text, fileName, groqKeys) => {
+  const prompt = `Bạn là chuyên gia phân tích văn bản hành chính Việt Nam.
+Đây là nội dung văn bản: "${fileName}"
+
+Hãy tổng hợp thành bộ nhớ hoàn chỉnh dạng Markdown với các mục:
+## Tổng quan
+(tóm tắt 5-10 câu bao quát toàn bộ)
+
+## Thông tin chính
+- Số ký hiệu, ngày ban hành, cơ quan ban hành
+- Đối tượng áp dụng
+
+## Nội dung quan trọng
+(các điểm chính, số liệu cụ thể)
+
+## Nhân sự liên quan
+(họ tên, chức vụ nếu có)
+
+## Tài chính & Kỹ thuật
+(số tiền, thông số kỹ thuật nếu có)
+
+## Thời hạn & Yêu cầu
+(deadline, điều kiện nếu có)
+
+## Từ khóa
+(5-15 từ khóa đặc trưng)
+
+NỘI DUNG VĂN BẢN:
+${text.slice(0, 12000)}`
+
+  for (const key of groqKeys) {
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
         body: JSON.stringify({
-          model: VISION_MODEL, max_tokens: 3000, temperature: 0,
-          messages: [{ role: 'user', content: [
-            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
-            { type: 'text', text: `Đọc toàn bộ nội dung ${pageLabel} của tài liệu "${fileName}". Trả về Markdown, giữ nguyên số liệu/tên/ngày tháng. Bảng → markdown table. Chỉ trả nội dung, không giải thích.` },
-          ]}],
-        }),
+          model: 'llama-3.3-70b-versatile',
+          max_tokens: 3000,
+          temperature: 0.1,
+          messages: [{ role: 'user', content: prompt }]
+        })
       })
-      if (resp.status === 429) {
-        // Rate limit: chờ 10s trước khi thử key tiếp theo
-        await new Promise(r => setTimeout(r, 10000))
-        continue
-      }
-      if (resp.ok) {
-        const data = await resp.json()
-        return data.choices?.[0]?.message?.content?.trim() || ''
-      }
+      if (res.status === 429) continue
+      if (!res.ok) continue
+      const data = await res.json()
+      const result = data.choices?.[0]?.message?.content || ''
+      if (result.length > 100) return result
     } catch { continue }
   }
-  return ''
+  return null
 }
 
-// ─── HYBRID extract: text pdfjs trước, Groq Vision chỉ cho trang trống ──────
-// Chiến lược:
-//   1. Mỗi trang: thử pdfjs extract text (instant, 0 token)
-//   2. Text đủ tốt (có dấu tiếng Việt, ≥30 ký tự) → dùng luôn
-//   3. Text rỗng/hỏng → render ảnh → Groq Vision
-// Kết quả: văn bản text-layer → xong trong <5 giây, 0 Groq call.
-//           PDF scan thật → Groq Vision chỉ cho trang cần thiết.
-const hybridExtractPdf = async (pdfDoc, fileName, notify) => {
-  const envKeys = [
-    import.meta.env.VITE_GROQ_API_KEY,
-    import.meta.env.VITE_GROQ_API_KEY_2,
-    import.meta.env.VITE_GROQ_API_KEY_3,
-  ].filter(Boolean)
-  const lsKeys = (localStorage.getItem('groq_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
-  const allKeys = [...new Set([...envKeys, ...lsKeys])]
-
-  const total = pdfDoc.numPages
-  const parts = []
-  let groqCallCount = 0
-
-  for (let pageNum = 1; pageNum <= total; pageNum++) {
-    const pct = 10 + Math.round((pageNum / total) * 50)
-    const page = await pdfDoc.getPage(pageNum)
-
-    // ── Bước 1: extract text bằng pdfjs ───────────────────────────────────
-    let pageText = ''
-    try {
-      const content = await page.getTextContent()
-      pageText = content.items.map(x => x.str).join(' ').trim()
-    } catch { /* ignore */ }
-
-    if (isPageTextUsable(pageText)) {
-      // Text tốt → dùng ngay
-      notify(`📄 Trang ${pageNum}/${total} (text)`, pct)
-      parts.push(`## Trang ${pageNum}\n\n${pageText}`)
-      continue
-    }
-
-    // ── Bước 2: text hỏng/rỗng → Groq Vision ─────────────────────────────
-    if (!allKeys.length) {
-      parts.push(`## Trang ${pageNum}\n\n*(Không có Groq key để OCR)*`)
-      continue
-    }
-
-    notify(`📷 Trang ${pageNum}/${total} (OCR)...`, pct)
-    groqCallCount++
-
-    // Thêm delay từ lần gọi Groq thứ 2 trở đi để tránh rate limit
-    if (groqCallCount > 1) await new Promise(r => setTimeout(r, 3000))
-
-    try {
-      const base64 = await renderPageToJpeg(page)
-      const ocrText = await groqVisionPage(base64, `trang ${pageNum}/${total}`, fileName, allKeys)
-      parts.push(ocrText
-        ? `## Trang ${pageNum}\n\n${ocrText}`
-        : `## Trang ${pageNum}\n\n*(Không đọc được)*`)
-    } catch (e) {
-      parts.push(`## Trang ${pageNum}\n\n*(Lỗi render: ${e.message})*`)
-    }
-  }
-
-  const groqNote = groqCallCount > 0 ? ` (${groqCallCount} trang cần OCR)` : ' (toàn bộ text layer)'
-  notify(`✅ Đã đọc ${total} trang${groqNote}`, 62)
-  return parts.join('\n\n---\n\n')
-}
-
-// ─── Convert Word (.docx) → markdown bằng mammoth ──────────────────────────
-const convertWordToMd = async (arrayBuffer) => {
-  const mammoth = await import('mammoth')
-  const result = await mammoth.convertToMarkdown({ arrayBuffer })
-  return result.value
-}
-
-// ─── Convert Excel (.xlsx/.xls) → markdown table ───────────────────────────
-const convertExcelToMd = async (arrayBuffer) => {
-  const XLSX = await import('xlsx')
-  const wb = XLSX.read(arrayBuffer, { type: 'array' })
-  const parts = []
-  for (const sheetName of wb.SheetNames) {
-    const ws = wb.Sheets[sheetName]
-    const csv = XLSX.utils.sheet_to_csv(ws, { defval: '' })
-    // Chuyển CSV sang markdown table
-    const rows = csv.trim().split('\n').map(r => r.split(','))
-    if (!rows.length) continue
-    const header = '| ' + rows[0].join(' | ') + ' |'
-    const divider = '| ' + rows[0].map(() => '---').join(' | ') + ' |'
-    const body = rows.slice(1).map(r => '| ' + r.join(' | ') + ' |').join('\n')
-    parts.push(`### Sheet: ${sheetName}\n\n${header}\n${divider}\n${body}`)
-  }
-  return parts.join('\n\n')
-}
-
-// ─── Download file về ArrayBuffer ──────────────────────────────────────────
-const fetchBuffer = async (url) => {
-  const resp = await fetch(url)
-  if (!resp.ok) throw new Error(`Không tải được file: ${resp.status}`)
-  return await resp.arrayBuffer()
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Hook chính
-// ═══════════════════════════════════════════════════════════════════════════
+// ─── Hook chính ────────────────────────────────────────────────────────────
 export function useProcessPipeline() {
   const [status,   setStatus]   = useState('')
   const [progress, setProgress] = useState(0)
-  const [stage,    setStage]    = useState('idle')
-  const abortRef = useRef(false)
 
-  const reset = () => {
-    abortRef.current = false
-    setStatus(''); setProgress(0); setStage('idle')
-  }
-  const abort = () => { abortRef.current = true }
-
-  // ── Chế độ Local OCR (ABBYY trên máy tính) ─────────────────────────────
-  // Đặt stage='pending_local' trong Firestore, sau đó poll đến khi xong.
-  const startLocalOcr = async ({ docId, fileUrl, fileName, onStatus }) => {
-    const notify = (msg, pct) => { setStatus(msg); if (pct != null) setProgress(pct); if (onStatus) onStatus(msg) }
-    notify('⏳ Chờ ABBYY OCR trên máy tính...', 5)
-    setStage('pending_local')
-    await setDoc(jobRef(docId), { docId, fileUrl, fileName: fileName || '', stage: 'pending_local', updatedAt: serverTimestamp() })
-
-    // Poll đến khi stage != pending_local
-    for (let i = 0; i < 120; i++) { // tối đa 10 phút
-      await new Promise(r => setTimeout(r, 5000))
-      const snap = await getDoc(jobRef(docId))
-      const s = snap.exists() ? snap.data().stage : 'idle'
-      if (s === 'done') { notify('✅ ABBYY OCR hoàn tất!', 100); setStage('done'); return { ok: true } }
-      if (s === 'error') { const msg = snap.data().errorMessage || 'Lỗi không xác định'; notify('❌ ' + msg); return { ok: false, error: msg } }
-      if (s === 'extract') notify('🔍 ABBYY đang đọc file...', 30)
-      else if (s === 'memory') notify('🧠 Đang tổng hợp AI...', 80)
-      else notify('⏳ Chờ worker xử lý...', 10 + i * 0.5)
-    }
-    return { ok: false, error: 'Timeout — worker chưa xử lý sau 10 phút' }
+  const getGroqKeys = () => {
+    const fromEnv = [
+      import.meta.env.VITE_GROQ_API_KEY,
+      import.meta.env.VITE_GROQ_API_KEY_2,
+      import.meta.env.VITE_GROQ_API_KEY_3,
+    ].filter(Boolean)
+    if (fromEnv.length) return fromEnv
+    return (localStorage.getItem('groq_key') || '')
+      .split(/[,\n]/).map(k => k.trim()).filter(Boolean)
   }
 
-  const startPipeline = async ({ docId, fileUrl, fileName, onStatus, forceRestart = false, useLocalOcr = false }) => {
-    abortRef.current = false
-    const notify = (msg, pct) => {
+  const startPipeline = async ({ docId, fileUrl, fileName, onStatus, forceRestart = false }) => {
+    const report = (msg, pct) => {
       setStatus(msg)
-      if (pct != null) setProgress(pct)
+      if (pct !== undefined) setProgress(pct)
       if (onStatus) onStatus(msg)
     }
 
-    // Nếu bật Local OCR → delegate sang startLocalOcr
-    if (useLocalOcr) return startLocalOcr({ docId, fileUrl, fileName, onStatus })
-
     try {
-      // ── 0. forceRestart: xóa data cũ ────────────────────────────
-      if (forceRestart) {
-        notify('🗑️ Đang xóa dữ liệu cũ...', 2)
-        await setDoc(jobRef(docId), {
-          docId, stage: 'idle', batchesDone: 0, markdownParts: [],
-          totalPages: null, nextFromPage: 1, updatedAt: serverTimestamp(),
-        })
-        try { await deleteDoc(doc(db, 'documentMemory', docId)) } catch {}
-        try { await deleteDoc(doc(db, 'documentMarkdown', docId)) } catch {}
-      } else {
-        // Đã xong từ trước → skip
-        const snap = await getDoc(jobRef(docId))
-        if (snap.exists() && snap.data().stage === 'done') {
-          notify('✅ Đã xử lý xong từ trước', 100)
-          setStage('done')
-          return { ok: true, resumed: true }
+      // Kiểm tra đã có markdown chưa (bỏ qua nếu forceRestart)
+      if (!forceRestart) {
+        const snap = await getDoc(doc(db, 'documentMarkdown', docId))
+        if (snap.exists() && snap.data().markdown) {
+          report('✅ Đã có dữ liệu phân tích')
+          return
         }
       }
 
-      setStage('extract')
+      const groqKeys = getGroqKeys()
+      if (!groqKeys.length) throw new Error('Chưa có Groq API key. Vào ⚙️ cài đặt key.')
+
+      // ── 1. Fetch file ──────────────────────────────────────────
+      report('📥 Đang tải file...', 5)
+      let buf
+      try {
+        const res = await fetch(fileUrl)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        buf = await res.arrayBuffer()
+      } catch (e) {
+        throw new Error(`Không tải được file: ${e.message}`)
+      }
+      report('📄 Đang đọc nội dung...', 20)
+
+      // ── 2. Extract text theo loại file ────────────────────────
       const ext = (fileName || '').split('.').pop().toLowerCase()
+      let rawText = ''
+      let totalPages = 1
+      let isScan = false
 
-      let fullMarkdown = ''
-
-      // ════════════════════════════════════════════════════════════
-      // ĐƯỜNG 1: Word (.docx) — mammoth client-side
-      // ════════════════════════════════════════════════════════════
-      if (ext === 'docx') {
-        notify('📄 Đang tải file Word...', 5)
-        const buf = await fetchBuffer(fileUrl)
-        notify('📝 Đang chuyển Word → Markdown...', 15)
-        fullMarkdown = await convertWordToMd(buf)
-        notify('✅ Chuyển đổi Word xong', 60)
-      }
-
-      // ════════════════════════════════════════════════════════════
-      // ĐƯỜNG 2: Excel (.xlsx/.xls) — SheetJS client-side
-      // ════════════════════════════════════════════════════════════
-      else if (ext === 'xlsx' || ext === 'xls') {
-        notify('📊 Đang tải file Excel...', 5)
-        const buf = await fetchBuffer(fileUrl)
-        notify('📝 Đang chuyển Excel → Markdown table...', 15)
-        fullMarkdown = await convertExcelToMd(buf)
-        notify('✅ Chuyển đổi Excel xong', 60)
-      }
-
-      // ════════════════════════════════════════════════════════════
-      // ĐƯỜNG 3: PDF
-      // Thứ tự ưu tiên:
-      //   A. Mistral OCR (1 API call, toàn bộ file, markdown chất lượng cao)
-      //   B. pdfjs extract (nếu PDF text, 0 token)
-      //   C. Groq Vision page-by-page (nếu scan PDF, browser render)
-      // ════════════════════════════════════════════════════════════
-      else if (ext === 'pdf') {
-
-        // ── A. Thử Mistral OCR / OCR.space trước (1 API call, nhanh nhất) ──
-        notify('🤖 [Bước 1/3] Thử Mistral OCR / OCR.space...', 8)
-        try {
-          const mistralRes = await fetch('/api/ocr-document', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ fileUrl, fileName: fileName || '', docId }),
-          })
-          if (mistralRes.ok) {
-            const mistralData = await mistralRes.json()
-            if (mistralData.ok && mistralData.markdown?.length > 200) {
-              fullMarkdown = mistralData.markdown
-              const engineLabel = mistralData.engine === 'mistral' ? '🤖 Mistral OCR' : '🔵 OCR.space'
-              notify(`✅ ${engineLabel}: ${mistralData.pages} trang, ${(mistralData.charCount/1000).toFixed(0)}K ký tự`, 60)
-            }
-          } else {
-            const errData = await mistralRes.json().catch(() => ({}))
-            console.warn('[pipeline] Mistral/OCR.space không khả dụng:', mistralRes.status)
-            notify(`⚠️ Mistral+OCR.space không dùng được (${mistralRes.status}) → chuyển sang Groq Vision`, 9)
-          }
-        } catch (e) {
-          console.warn('[pipeline] Mistral OCR exception:', e.message)
+      if (ext === 'pdf') {
+        const { text, totalPages: tp } = await extractPdfText(buf.slice(0))
+        rawText = text; totalPages = tp
+        const avgChars = rawText.length / Math.max(totalPages, 1)
+        isScan = avgChars < 80
+        if (isScan) {
+          report(`🔍 PDF scan (${totalPages} trang) — đang OCR...`, 30)
+          rawText = await ocrScanPdf(buf.slice(0), groqKeys[0], report)
         }
-
-        // ── B. Fallback: hybrid extract từng trang (text → OCR chỉ khi cần) ──
-        if (!fullMarkdown) {
-          notify('📥 Đang tải file PDF...', 5)
-          const buf = await fetchBuffer(fileUrl)
-          const lib = await loadPdfJs()
-          const pdfDoc = await lib.getDocument({ data: new Uint8Array(buf) }).promise
-          notify(`📄 Đang đọc ${pdfDoc.numPages} trang...`, 10)
-          await setDoc(jobRef(docId), {
-            docId, fileUrl, fileName: fileName || '',
-            stage: 'extract', totalPages: pdfDoc.numPages, updatedAt: serverTimestamp(),
-          }, { merge: true })
-          fullMarkdown = await hybridExtractPdf(pdfDoc, fileName, notify)
-        } // end if (!fullMarkdown)
+      } else if (['doc', 'docx'].includes(ext)) {
+        rawText = await extractDocxText(buf)
+      } else if (['xls', 'xlsx'].includes(ext)) {
+        rawText = await extractXlsxText(buf)
+      } else if (ext === 'txt') {
+        rawText = new TextDecoder('utf-8').decode(buf)
+      } else {
+        throw new Error(`Định dạng .${ext} chưa hỗ trợ phân tích`)
       }
 
-      // ════════════════════════════════════════════════════════════
-      // ĐƯỜNG 4: File khác — thử server batch như cũ
-      // ════════════════════════════════════════════════════════════
-      else {
-        notify('📥 Đang xử lý file...', 5)
-        const initRes = await fetch('/api/process-document', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ docId, fileUrl, fileName: fileName || '' }),
-        })
-        if (!initRes.ok) return { ok: false, error: 'Loại file không hỗ trợ' }
-        const data = await initRes.json()
-        fullMarkdown = data.text || ''
+      if (!rawText || rawText.trim().length < 50) {
+        throw new Error('Không đọc được nội dung. File có thể bị bảo vệ hoặc trống.')
       }
+      report('🤖 AI đang phân tích...', 60)
 
-      if (!fullMarkdown.trim()) {
-        notify('⚠️ Không đọc được nội dung file')
-        return { ok: false, error: 'empty_content' }
-      }
+      // ── 3. AI tổng hợp → markdown ─────────────────────────────
+      const markdown = await analyzeWithAI(rawText, fileName || 'văn bản', groqKeys)
+      if (!markdown) throw new Error('AI không phản hồi. Kiểm tra API key hoặc thử lại.')
 
-      // ── Lưu markdown vào Firestore ────────────────────────────────
-      notify('📝 Đang lưu nội dung...', 65)
+      report('💾 Đang lưu kết quả...', 85)
+
+      // ── 4. Lưu vào Firestore ───────────────────────────────────
+      const now = serverTimestamp()
       await setDoc(doc(db, 'documentMarkdown', docId), {
+        markdown,
+        rawText: rawText.slice(0, 50000),
         fileName: fileName || '',
-        markdown: fullMarkdown,
-        charCount: fullMarkdown.length,
-        updatedAt: serverTimestamp(),
+        totalPages,
+        charCount: markdown.length,
+        isScan,
+        updatedAt: now,
       })
 
-      // Cập nhật documents/{docId} — đánh dấu đã có markdown
-      const docSnap = await getDoc(doc(db, 'documents', docId))
-      await setDoc(doc(db, 'documents', docId), {
-        ...(docSnap.exists() ? docSnap.data() : {}),
-        hasMarkdown: true,
-        extractedText: fullMarkdown.slice(0, 100000),
-      })
-
-      await setDoc(jobRef(docId), { stage: 'memory', updatedAt: serverTimestamp() }, { merge: true })
-      setStage('memory')
-
-      // ── Tổng hợp bộ nhớ AI (có retry + fallback nếu Groq rate-limit) ────────
-      notify('🧠 Đang tổng hợp bộ nhớ AI...', 70)
-      let memory = null
-      // Thử tối đa 2 lần (lần 2 nghỉ 5s để tránh rate-limit sau OCR)
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          if (attempt > 0) {
-            notify('⏳ Chờ để tránh rate-limit Groq...', 72)
-            await new Promise(r => setTimeout(r, 5000))
-          }
-          const memoryRaw = await analyzeFullDocument(fullMarkdown, fileName || '', (msg) => notify(msg, 85))
-          if (memoryRaw) {
-            try { memory = JSON.parse((memoryRaw.match(/\{[\s\S]*\}/) || [memoryRaw])[0]) }
-            catch { memory = { summary: memoryRaw } }
-            break
-          }
-        } catch (e) {
-          console.warn('[pipeline] analyzeFullDocument lần', attempt + 1, 'thất bại:', e.message)
-        }
-      }
-
-      // Fallback: nếu vẫn không tạo được memory → lưu placeholder để chat vẫn dùng được
-      if (!memory) {
-        memory = {
-          summary: `Tài liệu đã được đọc (${fullMarkdown.length} ký tự). Nhấn "Hỏi đáp" để đặt câu hỏi về nội dung.`,
-          keywords: [],
-          documentType: 'unknown',
-          fallback: true,
-        }
-        notify('⚠️ Bộ nhớ AI tạm thời — chat vẫn hoạt động bình thường', 90)
-      }
-
+      // Memory: tóm tắt ngắn để chat nhanh
+      const summaryMatch = markdown.match(/## Tổng quan\n([\s\S]*?)(?=\n##|$)/)
+      const summary = summaryMatch ? summaryMatch[1].trim() : markdown.slice(0, 500)
       await setDoc(doc(db, 'documentMemory', docId), {
-        ...memory,
-        analyzedAt: serverTimestamp(),
+        summary,
+        hasFullMarkdown: true,
+        fileName: fileName || '',
+        analyzedAt: now,
       })
-      await setDoc(jobRef(docId), { stage: 'done', updatedAt: serverTimestamp() }, { merge: true })
-      setStage('done')
 
-      notify('✅ Hoàn tất! Đã đọc và ghi nhớ toàn bộ tài liệu.', 100)
-      return { ok: true }
+      setProgress(100)
+      report('✅ Phân tích xong!', 100)
 
     } catch (e) {
-      notify(`❌ Lỗi: ${e.message}`)
-      try { await setDoc(jobRef(docId), { stage: 'error', errorMessage: e.message }, { merge: true }) } catch {}
-      return { ok: false, error: e.message }
+      const msg = `❌ ${e.message}`
+      setStatus(msg)
+      if (onStatus) onStatus(msg)
+      throw e
     }
   }
 
-  return { startPipeline, startLocalOcr, abort, reset, status, progress, stage }
+  const reset = () => { setStatus(''); setProgress(0) }
+
+  return { startPipeline, status, progress, reset }
 }

@@ -245,13 +245,11 @@ export default function DocDetail({ doc, onEdit, onClose }) {
 
   const { analyzeDeepForMemory, askDeep, loading: aiLoading } = useAI()
   const { memory, loading: memLoading, saveMemory } = useDocMemory(doc.id)
-  const { startPipeline, status: pipeStatus, progress: pipeProgress, stage: pipeStage } = useProcessPipeline()
+  const { startPipeline, status: pipeStatus, progress: pipeProgress } = useProcessPipeline()
   const { isAdmin } = useAuth()
 
   const [analyzing,        setAnalyzing]        = useState(false)
-  const [docChunks,        setDocChunks]        = useState([])
   const [analyzeStep,      setAnalyzeStep]      = useState('')
-  const [countdown,        setCountdown]        = useState(0)
   const [showChat,         setShowChat]         = useState(false)
   const [chat,             setChat]             = useState([])
   const [chatInput,        setChatInput]        = useState('')
@@ -262,24 +260,18 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   const [mdLoading,    setMdLoading]    = useState(false)
 
   const loadMdPreview = async () => {
-    if (mdPreview) { setMdPreviewOpen(v => !v); return } // đã tải rồi, chỉ toggle hiện/ẩn
+    if (mdPreview) { setMdPreviewOpen(v => !v); return }
     setMdLoading(true)
     try {
       const { doc: fsDoc, getDoc } = await import('firebase/firestore')
       const { db } = await import('../firebase')
-      // documentMarkdown dùng docId làm key (bản mới) hoặc markdownRef (bản cũ)
-      let text = '', charCount = 0
+      let text = '', charCount = 0, totalPages = null
       const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
       if (mdSnap.exists()) {
         text = mdSnap.data().markdown || ''
         charCount = mdSnap.data().charCount || text.length
-      } else if (doc?.markdownRef) {
-        const mdSnap2 = await getDoc(fsDoc(db, 'documentMarkdown', doc.markdownRef))
-        if (mdSnap2.exists()) { text = mdSnap2.data().markdown || ''; charCount = mdSnap2.data().charCount || text.length }
+        totalPages = mdSnap.data().totalPages || null
       }
-      let totalPages = null
-      const jobSnap = await getDoc(fsDoc(db, 'processingJobs', doc.id))
-      if (jobSnap.exists()) totalPages = jobSnap.data().totalPages || null
       setMdPreview({ text, charCount, totalPages })
       setMdPreviewOpen(true)
     } catch (e) {
@@ -287,67 +279,43 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       setMdPreviewOpen(true)
     } finally { setMdLoading(false) }
   }
-  const [jobDone,          setJobDone]          = useState(false)
   const chatEndRef = useRef(null)
 
   useEffect(() => {
     if (showChat) setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
   }, [chat, showChat])
 
-  // Load chunks + kiểm tra processingJobs khi mở
-  useEffect(() => {
-    if (!doc?.id) return
-    loadDocChunks(doc.id).then(chunks => {
-      if (chunks.length > 0) setDocChunks(chunks)
-    })
-    // Kiểm tra pipeline đã chạy xong chưa
-    import('firebase/firestore').then(({ doc: fsDoc, getDoc }) =>
-      import('../firebase').then(({ db }) =>
-        getDoc(fsDoc(db, 'processingJobs', doc.id)).then(snap => {
-          if (snap.exists() && snap.data().stage === 'done') setJobDone(true)
-        }).catch(() => {})
-      )
-    )
-  }, [doc?.id])
-
-  // Auto-pipeline: CHỈ chạy khi văn bản HOÀN TOÀN mới (không có bất kỳ data nào)
-  // Không resume data cũ (có thể là watermark) — người dùng tự bấm "Đọc lại" nếu muốn
+  // Auto-pipeline: chạy khi mở văn bản mới chưa có memory
   useEffect(() => {
     if (memLoading) return
-    if (memory) return                            // đã có memory → bỏ qua
-    if (jobDone) return
+    if (memory) return
     if (autoPipeStarted) return
     const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
-    if (!fileUrl) return                          // chưa có file → bỏ qua
+    if (!fileUrl) return
 
     const timer = setTimeout(async () => {
-      if (docChunks.length > 0) return            // đã có chunks → người dùng tự quyết
-
-      // Kiểm tra processingJobs — nếu đã có bất kỳ data nào thì KHÔNG auto chạy
-      // (tránh resume dữ liệu cũ bị lỗi/watermark)
+      // Kiểm tra đã có markdown chưa → không auto nếu đã có
       try {
         const { doc: fsDoc, getDoc } = await import('firebase/firestore')
         const { db } = await import('../firebase')
-        const jobSnap = await getDoc(fsDoc(db, 'processingJobs', doc.id))
-        if (jobSnap.exists()) return              // đã có job cũ → không auto, để user bấm "Đọc lại"
         const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
-        if (mdSnap.exists()) return              // đã có markdown cũ → không auto
+        if (mdSnap.exists()) return
       } catch {}
 
-      // Thực sự là văn bản mới chưa xử lý gì → auto chạy pipeline
       setAutoPipeStarted(true)
       setAnalyzeStep('🚀 Đang tự động xử lý tài liệu mới...')
-      await startPipeline({
-        docId:    doc.id,
-        fileUrl,
-        fileName: doc.fileName || '',
-        onStatus: setAnalyzeStep,
-        forceRestart: false,
-      })
+      try {
+        await startPipeline({
+          docId: doc.id, fileUrl, fileName: doc.fileName || '',
+          onStatus: setAnalyzeStep, forceRestart: false,
+        })
+        setShowChat(true)
+      } catch {}
+      setAutoPipeStarted(false)
     }, 1500)
 
     return () => clearTimeout(timer)
-  }, [memLoading, memory, jobDone, doc?.id, docChunks.length, autoPipeStarted])
+  }, [memLoading, memory, doc?.id, autoPipeStarted])
 
   const code     = get(doc, 'code')
   const date     = get(doc, 'date')
@@ -387,186 +355,37 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     }
   }
 
-  // ── Đếm ngược và tự retry ──
-  const startCountdownAndRetry = (seconds) => {
-    let left = seconds
-    setCountdown(left)
-    setAnalyzeStep(`⏳ AI đang nghỉ ngơi... thử lại sau ${left}s`)
-    const timer = setInterval(() => {
-      left -= 1
-      setCountdown(left)
-      setAnalyzeStep(`⏳ AI đang nghỉ ngơi... thử lại sau ${left}s`)
-      if (left <= 0) {
-        clearInterval(timer)
-        setCountdown(0)
-        handleAnalyze() // Tự động retry
-      }
-    }, 1000)
-  }
-
   // ── Đọc lại toàn bộ file từ đầu (xóa bộ nhớ cũ, chạy pipeline mới) ──
   const handleForceReAnalyze = async () => {
     const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
     if (!fileUrl) { alert('Không có file URL để đọc lại'); return }
     setChat([]); setShowChat(false)
     setMdPreview(null); setMdPreviewOpen(false)
-    setJobDone(false); setAutoPipeStarted(true)
-    setAnalyzeStep('🔄 Đang xóa dữ liệu cũ và đọc lại từ đầu...')
-    await startPipeline({
-      docId: doc.id, fileUrl, fileName: doc.fileName || '',
-      onStatus: setAnalyzeStep, forceRestart: true,
-    })
+    setAutoPipeStarted(true)
+    try {
+      await startPipeline({
+        docId: doc.id, fileUrl, fileName: doc.fileName || '',
+        onStatus: setAnalyzeStep, forceRestart: true,
+      })
+      setShowChat(true)
+    } catch {}
     setAutoPipeStarted(false)
-    setJobDone(true)
-  }
-
-  // ── Local OCR bằng ABBYY (worker chạy trên máy tính) ──
-  const handleLocalOcr = async () => {
-    const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
-    if (!fileUrl) { alert('Không có file URL'); return }
-    setChat([]); setShowChat(false)
-    setMdPreview(null); setMdPreviewOpen(false)
-    setJobDone(false); setAutoPipeStarted(true)
-    setAnalyzeStep('🖥️ Đang gửi lệnh cho ABBYY worker trên máy tính...')
-    await startPipeline({
-      docId: doc.id, fileUrl, fileName: doc.fileName || '',
-      onStatus: setAnalyzeStep, forceRestart: true, useLocalOcr: true,
-    })
-    setAutoPipeStarted(false)
-    setJobDone(true)
   }
 
   // ── Phân tích sâu & ghi nhớ ──
   const handleAnalyze = async () => {
-    if (countdown > 0) {
-      setAnalyzeStep(`⏳ Vui lòng đợi thêm ${countdown} giây nữa để AI sẵn sàng!`)
-      return
-    }
-    // Xóa chat cũ khi phân tích lại để tránh AI trả lời theo lịch sử cũ
-    setChat([])
-    setShowChat(false)
-    if (countdown > 0) {
-      setAnalyzeStep(`⏳ Vui lòng đợi thêm ${countdown} giây nữa để AI sẵn sàng!`)
-      return
-    }
-    // Xóa chat cũ khi phân tích lại để tránh AI trả lời theo lịch sử cũ
-    setChat([])
-    setShowChat(false)
+    const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
+    if (!fileUrl) { alert('Không có file URL'); return }
+    setChat([]); setShowChat(false)
     setAnalyzing(true)
     try {
-      // Bước 1: metadata sẵn có trong Firestore
-      const docMeta = [
-        `Số ký hiệu: ${doc.code || ''}`,
-        `Ngày ban hành: ${doc.date || ''}`,
-        `Cơ quan ban hành: ${doc.org || ''}`,
-        `Loại văn bản: ${doc.docType || ''}`,
-        `Nội dung/Về việc: ${doc.subject || ''}`,
-        `Trích yếu: ${doc.detail || ''}`,
-        `Ghi chú: ${doc.note || ''}`,
-      ].filter(l => !l.endsWith(': ')).join('\n')
-
-      let fullText = docMeta
-
-      // Bước 2: Kiểm tra nguồn text — ưu tiên: chunks → doc.extractedText → memory → proxy
-      let extractedText = ''
-
-      if (docChunks.length > 0) {
-        // 🟢 Tốt nhất: chunks Firestore — đọc đầy đủ 100-200 trang
-        extractedText = docChunks.map(c => `### Trang ${c.fromPage}–${c.toPage}\n${c.text}`).join('\n\n')
-        setAnalyzeStep(`⚡ Dùng ${docChunks.length} chunks Firestore (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
-        fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE (CHUNKS) ===\n' + extractedText.slice(0, 80000)
-
-      } else if (doc.markdownRef) {
-        // 🟢 Tốt nhất: Markdown đầy đủ từ Firestore documentMarkdown
-        try {
-          setAnalyzeStep('📥 Đang tải Markdown từ Firestore...')
-          const { doc: fsDoc, getDoc } = await import('firebase/firestore')
-          const { db } = await import('../firebase')
-          const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.markdownRef))
-          if (mdSnap.exists()) {
-            extractedText = mdSnap.data().markdown || ''
-            setAnalyzeStep(`✅ Tải xong Markdown (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
-            fullText = docMeta + '\n\n=== NỘI DUNG MARKDOWN ĐẦY ĐỦ ===\n' + extractedText
-          }
-        } catch(e) {
-          setAnalyzeStep('⚠️ Không tải được Markdown, dùng extractedText...')
-        }
-        if (!extractedText && doc.extractedText?.length > 100) {
-          extractedText = doc.extractedText
-          fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + extractedText
-        }
-
-      } else if (doc.extractedText?.length > 100) {
-        // 🟡 Thứ 2: text lưu ngay lúc upload
-        extractedText = doc.extractedText
-        setAnalyzeStep(`⚡ Dùng text đã lưu sẵn (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
-        fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + extractedText
-
-      } else if (memory?.extractedText?.length > 100) {
-        // 🟡 Thứ 2: text đã lưu từ lần phân tích trước
-        extractedText = memory.extractedText
-        setAnalyzeStep(`📚 Dùng bộ nhớ cũ (${(extractedText.length/1000).toFixed(0)}K ký tự) · 🤖 AI phân tích...`)
-        fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + extractedText
-
-      } else if (hasFile) {
-        // Bước 3: Tải file qua proxy
-        setAnalyzeStep('📥 Đang tải file qua proxy...')
-        try {
-          const result = await Promise.race([
-            readFileViaProxy(fileUrl, fileName, setAnalyzeStep),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 180000))
-          ])
-
-          let fileText = result.text || ''
-
-          // Bước 4: Nếu PDF không có text (scan) → dùng Gemini OCR
-          if (fileText.length < 100 && result.ext === 'pdf' && result.arrayBuf) {
-            try {
-              fileText = await readPDFWithGemini(result.arrayBuf, fileName, setAnalyzeStep)
-            } catch(e) {
-              setAnalyzeStep(`⚠️ Không trích xuất được nội dung: ${e.message} — dùng metadata`)
-            }
-          }
-
-          if (fileText.length > 100) {
-            extractedText = fileText
-            fullText = docMeta + '\n\n=== NỘI DUNG ĐẦY ĐỦ TỪ FILE ===\n' + fileText
-            setAnalyzeStep(`✅ Đọc xong ${fileText.length.toLocaleString()} ký tự · 🤖 AI bắt đầu phân tích...`)
-          } else {
-            setAnalyzeStep('⚠️ Không đọc được nội dung file — dùng metadata')
-          }
-        } catch(e) {
-          setAnalyzeStep(`⚠️ ${e.message === 'timeout' ? 'File quá lớn/chậm' : 'Lỗi: ' + e.message} — dùng metadata`)
-        }
-      }
-
-      setAnalyzeStep(prev => prev.includes('AI') ? prev : '🤖 AI đang phân tích sâu...')
-      const result = await analyzeDeepForMemory(fullText, fileName || doc.code, setAnalyzeStep)
-
-      let parsed = parseJ(result)
-      if (!parsed) {
-        parsed = {
-          summary: result.slice(0, 1500),
-          keyPoints: result.split('\n').filter(l => l.trim().match(/^[-\d•*]/)).map(l => l.replace(/^[-\d.•*]+\s*/,'').trim()).filter(Boolean).slice(0,10),
-          legalBasis: '',
-          requirements: '',
-          risks: '',
-          keywords: (doc.subject||'').split(/\s+/).filter(w=>w.length>3).slice(0,8),
-        }
-      }
-
-      await saveMemory({ ...parsed, fileName: fileName || doc.code, readChars: fullText.length, extractedText: extractedText || '' })
-      setAnalyzeStep('✅ Đã ghi nhớ thành công!')
+      await startPipeline({
+        docId: doc.id, fileUrl, fileName: doc.fileName || '',
+        onStatus: setAnalyzeStep,
+      })
       setShowChat(true)
-      setTimeout(() => setAnalyzeStep(''), 2000)
-    } catch(e) {
-      if (e.message === 'AI_RATE_LIMIT') {
-        const wait = e.waitSeconds || 60
-        startCountdownAndRetry(wait)
-      } else {
-        setAnalyzeStep('❌ Lỗi: ' + e.message)
-        setTimeout(() => setAnalyzeStep(''), 6000)
-      }
+    } catch (e) {
+      setAnalyzeStep('❌ ' + e.message)
     } finally { setAnalyzing(false) }
   }
 
@@ -627,44 +446,26 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     }
 
     try {
-      // RAG: Ưu tiên chunks Firestore, fallback memory.extractedText, fallback metadata
+      // Lấy markdown từ Firestore làm context
       let relevantText = ''
-      if (docChunks.length > 0) {
-        relevantText = findRelevantChunksFromFirestore(docChunks, q)
-      } else {
-        // Ưu tiên Markdown từ Firestore cho RAG
-        let rawText = memory?.extractedText || doc?.extractedText || ''
-        // Đọc markdown từ documentMarkdown/{docId} (key mới) hoặc markdownRef (key cũ)
-        if (!rawText) {
-          try {
-            const { doc: fsDoc, getDoc } = await import('firebase/firestore')
-            const { db } = await import('../firebase')
-            // Thử key mới (docId) trước
-            const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
-            if (mdSnap.exists()) {
-              rawText = mdSnap.data().markdown || ''
-            } else if (doc?.markdownRef) {
-              // Tương thích ngược: key cũ (random ID)
-              const mdSnap2 = await getDoc(fsDoc(db, 'documentMarkdown', doc.markdownRef))
-              if (mdSnap2.exists()) rawText = mdSnap2.data().markdown || ''
-            }
-          } catch {}
+      try {
+        const { doc: fsDoc, getDoc } = await import('firebase/firestore')
+        const { db } = await import('../firebase')
+        const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
+        if (mdSnap.exists()) {
+          relevantText = mdSnap.data().markdown || ''
         }
-        // Fallback: metadata văn bản làm context tối thiểu
-        if (!rawText && (doc?.subject || doc?.detail)) {
-          rawText = [
-            doc.code    ? `Số ký hiệu: ${doc.code}` : '',
-            doc.date    ? `Ngày ban hành: ${doc.date}` : '',
-            doc.org     ? `Cơ quan ban hành: ${doc.org}` : '',
-            doc.docType ? `Loại văn bản: ${doc.docType}` : '',
-            doc.subject ? `Nội dung/Về việc: ${doc.subject}` : '',
-            doc.detail  ? `Trích yếu: ${doc.detail}` : '',
-            doc.note    ? `Ghi chú: ${doc.note}` : '',
-          ].filter(Boolean).join('\n')
-        }
-        relevantText = rawText.length > 50 ? findRelevantChunks(rawText, q) : rawText
+      } catch {}
+      // Fallback: metadata văn bản
+      if (!relevantText) {
+        relevantText = [
+          doc.code    ? `Số ký hiệu: ${doc.code}` : '',
+          doc.date    ? `Ngày ban hành: ${doc.date}` : '',
+          doc.org     ? `Cơ quan ban hành: ${doc.org}` : '',
+          doc.subject ? `Nội dung: ${doc.subject}` : '',
+          doc.detail  ? `Trích yếu: ${doc.detail}` : '',
+        ].filter(Boolean).join('\n')
       }
-      // Truyền memory || {} để askDeep không crash khi memory chưa có
       const answer = await askDeep(q, memory || {}, chat, relevantText)
       setChat(c => [...c, { role:'ai', content: answer }])
     } catch(e) {
@@ -788,10 +589,6 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                           style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff', border:'0.5px solid #d1d5db', color:'#6b7280', cursor:'pointer' }}>
                           🔄 Phân tích lại
                         </button>
-                        <button onClick={handleLocalOcr} title="Đọc lại bằng ABBYY FineReader (cần chạy start-worker.bat)"
-                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#f3e8ff', border:'0.5px solid #c4b5fd', color:'#7c3aed', cursor:'pointer' }}>
-                          🖥️ ABBYY
-                        </button>
                       </div>
                     </div>
                     {memory.summary && (
@@ -808,48 +605,17 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                     )}
                   </>
 
-                /* ĐÃ XỬ LÝ — có chunks/jobDone nhưng chưa có memory (lỗi bước cuối) */
-                ) : (docChunks.length > 0 || jobDone) ? (
-                  <div>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:6 }}>
-                      <div style={{ fontSize:12, color:'#92400e' }}>
-                        ⚠️ Đã đọc file nhưng chưa tạo được bộ nhớ AI
-                      </div>
-                      <div style={{ display:'flex', gap:6 }}>
-                        <button onClick={() => setShowChat(v => !v)}
-                          style={{ padding:'5px 12px', borderRadius:7, fontSize:12, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
-                          💬 Hỏi đáp tài liệu
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (window.confirm('Tài liệu đã được đọc rồi.\nCó muốn phân tích lại từ đầu không?')) {
-                              handleForceReAnalyze()
-                            }
-                          }}
-                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff7ed', border:'0.5px solid #f59e0b', color:'#92400e', cursor:'pointer', fontWeight:600 }}>
-                          🔄 Phân tích lại
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
                 /* CHƯA PHÂN TÍCH LẦN NÀO */
                 ) : (
                   <>
                     <div style={{ fontSize:12, color:'#92400e', marginBottom:10 }}>
                       📋 <b>Tài liệu chưa được phân tích</b>
-                      {hasFile && <span style={{ color:'#555', fontWeight:400 }}> — AI sẽ đọc toàn bộ {(fileSize/1024/1024).toFixed(1)}MB và ghi nhớ để hỏi đáp sau này.</span>}
+                      {hasFile && <span style={{ color:'#555', fontWeight:400 }}> — AI sẽ đọc và ghi nhớ để hỏi đáp.</span>}
                     </div>
-                    <div style={{ display:'flex', gap:6 }}>
-                      <button onClick={handleForceReAnalyze}
-                        style={{ flex:1, padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
-                        📊 Phân tích (Cloud)
-                      </button>
-                      <button onClick={handleLocalOcr} title="Dùng ABBYY FineReader trên máy tính (cần chạy start-worker.bat)"
-                        style={{ padding:'9px 14px', borderRadius:8, fontSize:13, fontWeight:600, background:'#7c3aed', color:'#fff', border:'none', cursor:'pointer' }}>
-                        🖥️ ABBYY
-                      </button>
-                    </div>
+                    <button onClick={handleAnalyze}
+                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
+                      📊 Phân tích tài liệu
+                    </button>
                   </>
                 )}
               </div>
