@@ -221,13 +221,38 @@ export function useProcessPipeline() {
   }
   const abort = () => { abortRef.current = true }
 
-  const startPipeline = async ({ docId, fileUrl, fileName, onStatus, forceRestart = false }) => {
+  // ── Chế độ Local OCR (ABBYY trên máy tính) ─────────────────────────────
+  // Đặt stage='pending_local' trong Firestore, sau đó poll đến khi xong.
+  const startLocalOcr = async ({ docId, fileUrl, fileName, onStatus }) => {
+    const notify = (msg, pct) => { setStatus(msg); if (pct != null) setProgress(pct); if (onStatus) onStatus(msg) }
+    notify('⏳ Chờ ABBYY OCR trên máy tính...', 5)
+    setStage('pending_local')
+    await setDoc(jobRef(docId), { docId, fileUrl, fileName: fileName || '', stage: 'pending_local', updatedAt: serverTimestamp() })
+
+    // Poll đến khi stage != pending_local
+    for (let i = 0; i < 120; i++) { // tối đa 10 phút
+      await new Promise(r => setTimeout(r, 5000))
+      const snap = await getDoc(jobRef(docId))
+      const s = snap.exists() ? snap.data().stage : 'idle'
+      if (s === 'done') { notify('✅ ABBYY OCR hoàn tất!', 100); setStage('done'); return { ok: true } }
+      if (s === 'error') { const msg = snap.data().errorMessage || 'Lỗi không xác định'; notify('❌ ' + msg); return { ok: false, error: msg } }
+      if (s === 'extract') notify('🔍 ABBYY đang đọc file...', 30)
+      else if (s === 'memory') notify('🧠 Đang tổng hợp AI...', 80)
+      else notify('⏳ Chờ worker xử lý...', 10 + i * 0.5)
+    }
+    return { ok: false, error: 'Timeout — worker chưa xử lý sau 10 phút' }
+  }
+
+  const startPipeline = async ({ docId, fileUrl, fileName, onStatus, forceRestart = false, useLocalOcr = false }) => {
     abortRef.current = false
     const notify = (msg, pct) => {
       setStatus(msg)
       if (pct != null) setProgress(pct)
       if (onStatus) onStatus(msg)
     }
+
+    // Nếu bật Local OCR → delegate sang startLocalOcr
+    if (useLocalOcr) return startLocalOcr({ docId, fileUrl, fileName, onStatus })
 
     try {
       // ── 0. forceRestart: xóa data cũ ────────────────────────────
@@ -413,5 +438,5 @@ export function useProcessPipeline() {
     }
   }
 
-  return { startPipeline, abort, reset, status, progress, stage }
+  return { startPipeline, startLocalOcr, abort, reset, status, progress, stage }
 }

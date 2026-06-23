@@ -420,6 +420,22 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     setJobDone(true)
   }
 
+  // ── Local OCR bằng ABBYY (worker chạy trên máy tính) ──
+  const handleLocalOcr = async () => {
+    const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
+    if (!fileUrl) { alert('Không có file URL'); return }
+    setChat([]); setShowChat(false)
+    setMdPreview(null); setMdPreviewOpen(false)
+    setJobDone(false); setAutoPipeStarted(true)
+    setAnalyzeStep('🖥️ Đang gửi lệnh cho ABBYY worker trên máy tính...')
+    await startPipeline({
+      docId: doc.id, fileUrl, fileName: doc.fileName || '',
+      onStatus: setAnalyzeStep, forceRestart: true, useLocalOcr: true,
+    })
+    setAutoPipeStarted(false)
+    setJobDone(true)
+  }
+
   // ── Phân tích sâu & ghi nhớ ──
   const handleAnalyze = async () => {
     if (countdown > 0) {
@@ -772,6 +788,10 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                           style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#fff', border:'0.5px solid #d1d5db', color:'#6b7280', cursor:'pointer' }}>
                           🔄 Phân tích lại
                         </button>
+                        <button onClick={handleLocalOcr} title="Đọc lại bằng ABBYY FineReader (cần chạy start-worker.bat)"
+                          style={{ padding:'5px 10px', borderRadius:7, fontSize:11, background:'#f3e8ff', border:'0.5px solid #c4b5fd', color:'#7c3aed', cursor:'pointer' }}>
+                          🖥️ ABBYY
+                        </button>
                       </div>
                     </div>
                     {memory.summary && (
@@ -820,10 +840,16 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                       📋 <b>Tài liệu chưa được phân tích</b>
                       {hasFile && <span style={{ color:'#555', fontWeight:400 }}> — AI sẽ đọc toàn bộ {(fileSize/1024/1024).toFixed(1)}MB và ghi nhớ để hỏi đáp sau này.</span>}
                     </div>
-                    <button onClick={handleForceReAnalyze}
-                      style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
-                      📊 Phân tích tài liệu
-                    </button>
+                    <div style={{ display:'flex', gap:6 }}>
+                      <button onClick={handleForceReAnalyze}
+                        style={{ flex:1, padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
+                        📊 Phân tích (Cloud)
+                      </button>
+                      <button onClick={handleLocalOcr} title="Dùng ABBYY FineReader trên máy tính (cần chạy start-worker.bat)"
+                        style={{ padding:'9px 14px', borderRadius:8, fontSize:13, fontWeight:600, background:'#7c3aed', color:'#fff', border:'none', cursor:'pointer' }}>
+                        🖥️ ABBYY
+                      </button>
+                    </div>
                   </>
                 )}
               </div>
