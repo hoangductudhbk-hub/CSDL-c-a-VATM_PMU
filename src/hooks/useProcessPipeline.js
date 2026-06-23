@@ -223,6 +223,54 @@ export function useProcessPipeline() {
       let rawText = ''
       let totalPages = 1
       let isScan = false
+      const now = serverTimestamp()
+
+      // ── Đường tắt: .md và .csv → lưu thẳng vào memory, không qua AI ──
+      if (['md', 'csv'].includes(ext)) {
+        report(`📋 File ${ext.toUpperCase()} — lưu thẳng vào bộ nhớ...`, 50)
+        rawText = new TextDecoder('utf-8').decode(buf)
+        if (!rawText.trim()) throw new Error('File rỗng.')
+
+        // Với CSV, chuyển thành bảng markdown đẹp hơn
+        let markdown = rawText
+        if (ext === 'csv') {
+          const lines = rawText.trim().split('\n').filter(Boolean)
+          if (lines.length > 0) {
+            const header = lines[0]
+            const cols = header.split(',').length
+            const separator = Array(cols).fill('---').join(' | ')
+            markdown = lines.map((l, i) => `| ${l.replace(/,/g, ' | ')} |`)
+              .join('\n')
+            markdown = `# ${fileName}\n\n` +
+              lines.slice(0, 1).map(l => `| ${l.replace(/,/g, ' | ')} |`).join('\n') + '\n' +
+              `| ${separator} |\n` +
+              lines.slice(1).map(l => `| ${l.replace(/,/g, ' | ')} |`).join('\n')
+          }
+        }
+
+        report('💾 Đang lưu...', 85)
+        await setDoc(doc(db, 'documentMarkdown', docId), {
+          markdown,
+          rawText: rawText.slice(0, 50000),
+          fileName: fileName || '',
+          totalPages: 1,
+          charCount: markdown.length,
+          isScan: false,
+          source: ext,   // đánh dấu nguồn gốc
+          updatedAt: now,
+        })
+        const summary = rawText.slice(0, 500)
+        await setDoc(doc(db, 'documentMemory', docId), {
+          summary,
+          hasFullMarkdown: true,
+          fileName: fileName || '',
+          source: ext,
+          analyzedAt: now,
+        })
+        setProgress(100)
+        report(`✅ Đã lưu ${ext.toUpperCase()} vào bộ nhớ!`, 100)
+        return
+      }
 
       if (ext === 'pdf') {
         const { text, totalPages: tp } = await extractPdfText(buf.slice(0))
@@ -255,7 +303,6 @@ export function useProcessPipeline() {
       report('💾 Đang lưu kết quả...', 85)
 
       // ── 4. Lưu vào Firestore ───────────────────────────────────
-      const now = serverTimestamp()
       await setDoc(doc(db, 'documentMarkdown', docId), {
         markdown,
         rawText: rawText.slice(0, 50000),

@@ -174,9 +174,15 @@ export default function DocModal({ doc, onSave, onClose }) {
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['txt', 'md', 'csv'].includes(ext)) {
           const t = await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,100000));rd.readAsText(file,'utf-8')})
-          rawExtracted = t
+          rawExtracted = t.slice(0, 100000)
+          if (['md','csv'].includes(ext)) {
+            // .md/.csv: lưu thẳng vào bộ nhớ, không qua AI phân tích cấu trúc
+            setSt('📋 Lưu nội dung vào bộ nhớ...')
+            await saveMarkdownToFirestore(rawExtracted, file.name)
+            setSt('✅ Đã lưu vào bộ nhớ! Điền thêm thông tin văn bản nếu cần.')
+            setExtractedText(rawExtracted); setLoad(false); return
+          }
           result = await analyzeText(t.slice(0, 8000), file.name)
-          rawExtracted = rawExtracted.slice(0, 100000)
         } else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
         setExtractedText(rawExtracted)
         // Lưu markdown lên Firestore ngay (không cần docId)
