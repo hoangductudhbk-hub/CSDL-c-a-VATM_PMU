@@ -307,78 +307,29 @@ export function useAI() {
   }
 
   // ── analyzeImages ──
-  // Chain: Groq Vision → Gemini Vision → Tesseract.js OCR + AI text → basic JSON
+  // Tesseract.js OCR → regex (bỏ Vision API vì key không hợp lệ → chỉ làm chậm)
   const analyzeImages = async (base64Images, fileName = '') => {
     setLoading(true)
-    resetIdxIfNewDay()
     const hint = fileName ? ` (${fileName})` : ''
     try {
-      // 1. Groq Vision
-      const keys = getGroqKeys()
-      for (const key of keys) {
-        try {
-          const res = await fetch(GROQ_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-            body: JSON.stringify({
-              model: GROQ_VISION_MODEL, max_tokens: 1000, temperature: 0.05,
-              messages: [{ role: 'user', content: [
-                ...base64Images.slice(0, 3).map(b64 => ({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } })),
-                { type: 'text', text: `${SYSTEM}\n\nĐọc ảnh scan văn bản Việt Nam${hint} và trả về JSON.` }
-              ]}],
-            }),
-          })
-          if (!res.ok) { if (res.status === 429) continue; throw new Error(`HTTP ${res.status}`) }
-          const result = (await res.json()).choices?.[0]?.message?.content || ''
-          if (result) return result
-        } catch { continue }
+      // Tesseract.js — OCR 2 trang đầu
+      const { createWorker } = await import('tesseract.js')
+      const worker = await createWorker(['vie', 'eng'])
+      let ocrText = ''
+      for (const b64 of base64Images.slice(0, 2)) {
+        const { data: { text } } = await worker.recognize(`data:image/jpeg;base64,${b64}`)
+        ocrText += (text || '') + '\n'
       }
+      await worker.terminate()
 
-      // 2. Gemini Vision qua proxy
-      try {
-        const gemRes = await fetch('/api/gemini-proxy', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            parts: [
-              { text: `${SYSTEM}\n\nĐọc ảnh scan văn bản Việt Nam${hint} và trả về JSON.` },
-              ...base64Images.slice(0, 3).map(b64 => ({ inline_data: { mime_type: 'image/jpeg', data: b64 } })),
-            ],
-            maxTokens: 1000,
-          }),
-        })
-        if (gemRes.ok) {
-          const d = await gemRes.json()
-          if (d.text) return d.text
-        }
-      } catch {}
-
-      // 3. Tesseract.js — chỉ OCR trang 1 (metadata luôn ở trang đầu)
-      try {
-        const { createWorker } = await import('tesseract.js')
-        const worker = await createWorker(['vie', 'eng'])
-        // Chỉ cần 2 trang đầu: số ký hiệu, ngày, cơ quan, nội dung chính
-        let ocrText = ''
-        for (const b64 of base64Images.slice(0, 2)) {
-          const { data: { text } } = await worker.recognize(`data:image/jpeg;base64,${b64}`)
-          ocrText += (text || '') + '\n'
-        }
-        await worker.terminate()
-
-        if (ocrText.trim().length > 30) {
-          // Thử AI phân tích text vừa OCR (nhanh hơn vision)
-          const textPrompt = `${SYSTEM}\n\nPhân tích văn bản (OCR từ scan)${hint}:\n---\n${ocrText.slice(0, 4000)}\n---`
-          const aiResult = await callGemini(textPrompt, 1000) || await callGroq(textPrompt, 1000)
-          if (aiResult) return aiResult
-
-          // AI fail → regex trực tiếp từ OCR text (không cần AI)
-          return parseVietnameseDoc(ocrText, hint, fileName)
-        }
-      } catch (e) {
-        console.warn('[analyzeImages] Tesseract lỗi:', e.message)
+      if (ocrText.trim().length > 30) {
+        return parseVietnameseDoc(ocrText, hint, fileName)
       }
-
-      return ''
+      // OCR không ra gì → regex từ tên file
+      return parseVietnameseDoc('', hint, fileName)
+    } catch (e) {
+      console.warn('[analyzeImages] Tesseract lỗi:', e.message)
+      return parseVietnameseDoc('', hint, fileName)
     } finally { setLoading(false) }
   }
 
