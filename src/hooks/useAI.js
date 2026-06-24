@@ -176,7 +176,7 @@ export const parseVietnameseDoc = (text, hint = '', fileName = '') => {
 
   return JSON.stringify({ code, date, org, docType, subject,
     detail: lines.slice(0, 8).join(' ').slice(0, 300),
-    note: 'Trích xuất regex từ header văn bản',
+    note: '',
     status: 'done' })
 }
 
@@ -329,7 +329,7 @@ export function useAI() {
         const m = txt.match(/\{[\s\S]*\}/)
         if (m) {
           const parsed = JSON.parse(m[0])
-          return JSON.stringify({ ...parsed, note: 'Groq Vision', status: 'done' })
+          return JSON.stringify({ ...parsed, note: parsed.note || '', status: 'done' })
         }
       } catch { /* fallthrough */ }
     }
