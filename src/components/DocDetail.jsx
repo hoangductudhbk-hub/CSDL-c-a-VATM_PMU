@@ -46,60 +46,28 @@ const readPDFWithGemini = async (arrayBuf, fileName, onStep) => {
   for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
   const base64 = btoa(binary)
 
-  const gemKeys = [
-    import.meta.env.VITE_GEMINI_API_KEY,
-    import.meta.env.VITE_GEMINI_API_KEY_2,
-    import.meta.env.VITE_GEMINI_API_KEY_3,
-  ].filter(Boolean)
-
-  const GEM_URL = (key) =>
-    `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${key}`
-
-  for (let i = 0; i < gemKeys.length; i++) {
-    try {
-      if (onStep) onStep(`🔍 Đang đọc và nhận dạng văn bản${i > 0 ? ` (lần ${i+1})` : ''}...`)
-      const res = await fetch(GEM_URL(gemKeys[i]), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              {
-                inline_data: {
-                  mime_type: 'application/pdf',
-                  data: base64
-                }
-              },
-              {
-                text: `Trích xuất TOÀN BỘ nội dung văn bản trong file PDF này (tên file: ${fileName}).
+  // Gọi Gemini qua /api/gemini-proxy — key ở server, không lộ ra browser
+  if (onStep) onStep('🔍 Đang đọc và nhận dạng văn bản...')
+  const parts = [
+    { inline_data: { mime_type: 'application/pdf', data: base64 } },
+    { text: `Trích xuất TOÀN BỘ nội dung văn bản trong file PDF này (tên file: ${fileName}).
 Yêu cầu:
 - Giữ nguyên 100% câu chữ, số liệu, tên người, bảng biểu, điều khoản
 - Giữ nguyên cấu trúc: tiêu đề, điều, khoản, mục
 - Không tóm tắt, không bỏ bất kỳ thông tin nào
-- Chỉ trả về nội dung văn bản thuần túy`
-              }
-            ]
-          }],
-          generationConfig: { temperature: 0, maxOutputTokens: 8192 }
-        })
-      })
-
-      if (res.status === 429) {
-        if (i < gemKeys.length - 1) { await new Promise(r => setTimeout(r, 3000)); continue }
-        throw new Error('Gemini hết quota')
-      }
-      if (!res.ok) { continue }
-
-      const data = await res.json()
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      if (text.length > 100) {
-        if (onStep) onStep(`✅ Đã trích xuất ${text.length.toLocaleString()} ký tự`)
-        return text
-      }
-    } catch(e) {
-      if (i === gemKeys.length - 1) throw e
-      continue
-    }
+- Chỉ trả về nội dung văn bản thuần túy` }
+  ]
+  const res = await fetch('/api/gemini-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parts, maxTokens: 8192 }),
+  })
+  if (!res.ok) throw new Error(`Gemini proxy lỗi: ${res.status}`)
+  const data = await res.json()
+  const text = data.text || ''
+  if (text.length > 100) {
+    if (onStep) onStep(`✅ Đã trích xuất ${text.length.toLocaleString()} ký tự`)
+    return text
   }
   throw new Error('Không thể đọc PDF bằng Gemini')
 }
@@ -286,37 +254,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     if (showChat) setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
   }, [chat, showChat])
 
-  // Auto-pipeline: chạy khi mở văn bản mới chưa có memory
-  useEffect(() => {
-    if (memLoading) return
-    if (memory) return
-    if (autoPipeStarted) return
-    const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
-    if (!fileUrl) return
-
-    const timer = setTimeout(async () => {
-      // Kiểm tra đã có markdown chưa → không auto nếu đã có
-      try {
-        const { doc: fsDoc, getDoc } = await import('firebase/firestore')
-        const { db } = await import('../firebase')
-        const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
-        if (mdSnap.exists()) return
-      } catch {}
-
-      setAutoPipeStarted(true)
-      setAnalyzeStep('🚀 Đang tự động xử lý tài liệu mới...')
-      try {
-        await startPipeline({
-          docId: doc.id, fileUrl, fileName: doc.fileName || '',
-          onStatus: setAnalyzeStep, forceRestart: false,
-        })
-        setShowChat(true)
-      } catch {}
-      setAutoPipeStarted(false)
-    }, 1500)
-
-    return () => clearTimeout(timer)
-  }, [memLoading, memory, doc?.id, autoPipeStarted])
+  // Auto-pipeline đã bị tắt — người dùng tự nhấn nút khi cần để tiết kiệm token
 
   const code     = get(doc, 'code')
   const date     = get(doc, 'date')
@@ -514,12 +452,6 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                 <div style={{ marginBottom:12 }}>
                   <div style={{ fontSize:11, color:'#9b9b9b', marginBottom:3 }}>Trích yếu nội dung</div>
                   <div style={{ fontSize:13, color:'#1a1a1a', lineHeight:1.7, background:'#fafaf8', border:'0.5px solid #e5e4e0', borderRadius:8, padding:'10px 12px' }}>{detail}</div>
-                </div>
-              )}
-              {note && (
-                <div style={{ marginBottom:12 }}>
-                  <div style={{ fontSize:11, color:'#9b9b9b', marginBottom:3 }}>✨ Ghi chú AI</div>
-                  <div style={{ fontSize:13, color:'#555', lineHeight:1.7, fontStyle:'italic', background:'#f5f3ff', border:'0.5px solid #e9d5ff', borderRadius:8, padding:'10px 12px' }}>{note}</div>
                 </div>
               )}
 
