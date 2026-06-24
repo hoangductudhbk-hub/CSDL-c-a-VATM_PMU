@@ -43,16 +43,15 @@ const extractPdfFull = async (buf, fileName = '', docId = null, onStatus = null)
   return await extractPdfTextFull(buf.slice(0))
 }
 
-const renderPdfToImages = async (buf,max=3) => {
+// Chỉ render phần header (30% trên trang 1) ở scale thấp → OCR nhanh hơn 4-5x
+const renderPdfHeaderImage = async (buf) => {
   const lib=await loadPdfJs(); const pdf=await lib.getDocument({data:buf}).promise
-  const pages=Math.min(pdf.numPages,max); const imgs=[]
-  for(let i=1;i<=pages;i++){
-    const page=await pdf.getPage(i); const vp=page.getViewport({scale:1.2})
-    const canvas=document.createElement('canvas'); canvas.width=vp.width; canvas.height=vp.height
-    await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise
-    imgs.push(canvas.toDataURL('image/jpeg',0.65).split(',')[1])
-  }
-  return imgs
+  const page=await pdf.getPage(1); const vp=page.getViewport({scale:1.5})
+  const cropH=Math.floor(vp.height*0.30) // chỉ lấy 30% trên
+  const canvas=document.createElement('canvas'); canvas.width=vp.width; canvas.height=cropH
+  const ctx=canvas.getContext('2d')
+  await page.render({canvasContext:ctx,viewport:vp}).promise
+  return [canvas.toDataURL('image/jpeg',0.8).split(',')[1]]
 }
 const loadScript = (src,check) => new Promise((res,rej)=>{
   if(check()){res();return}
@@ -144,8 +143,10 @@ export default function DocModal({ doc, onSave, onClose }) {
       // Có text → regex ngay lập tức (không đợi AI)
       return parseVietnameseDoc(text, '', fileName)
     }
-    // PDF scan → parse từ tên file (nhanh, không cần OCR)
-    return parseVietnameseDoc('', '', fileName)
+    // PDF scan → OCR chỉ phần header (30% trên trang 1)
+    setSt('⏳ Đang nhận dạng header...')
+    const imgs = await renderPdfHeaderImage(buf.slice(0))
+    return await analyzeImages(imgs, fileName)
   }
 
   const handleFile = async (e) => {
@@ -173,7 +174,9 @@ export default function DocModal({ doc, onSave, onClose }) {
             // Có text → regex ngay (< 0.5s), chỉ cần 3000 ký tự đầu
             result = parseVietnameseDoc(rawExtracted.slice(0, 500), '', file.name)
           } else {
-            result = parseVietnameseDoc('', '', file.name)
+            setSt('⏳ Đang nhận dạng header...')
+            const imgs = await renderPdfHeaderImage(buf.slice(0))
+            result = await analyzeImages(imgs, file.name)
           }
         } else if (['doc','docx'].includes(ext)) {
           rawExtracted = await extractDocxText(buf)
@@ -224,7 +227,7 @@ export default function DocModal({ doc, onSave, onClose }) {
         const bBuf = await file.arrayBuffer()
         if (ext==='pdf') {
           batchExtracted = await extractPdfFull(bBuf.slice(0), file.name, null, (msg) => { queue[i].status=msg; setFQ([...queue]) })
-          result = isRealContent(batchExtracted) ? parseVietnameseDoc(batchExtracted.slice(0,3000),'',file.name) : await processOnePdf(bBuf,file.name)
+          result = isRealContent(batchExtracted) ? parseVietnameseDoc(batchExtracted.slice(0,500),'',file.name) : await processOnePdf(bBuf,file.name)
         } else if (['doc','docx'].includes(ext)) {
           batchExtracted = (await extractDocxText(bBuf)).slice(0,100000)
           result = parseVietnameseDoc(batchExtracted.slice(0,3000),'',file.name)
