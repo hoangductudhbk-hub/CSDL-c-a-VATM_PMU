@@ -110,43 +110,65 @@ const callAI = async (prompt, maxTokens = 1000) => {
 }
 
 // ── Regex parser khi AI không khả dụng ─────────────────────────
-const parseVietnameseDoc = (text, hint = '') => {
+const parseVietnameseDoc = (text, hint = '', fileName = '') => {
   const t = text.replace(/\s+/g, ' ')
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean)
 
-  // Số ký hiệu: 123/QĐ-ABCDE hoặc 123/NQ-HĐTV
-  const codeM = t.match(/[Ss]ố[:\s]*(\d+[\w\/\-\.]+(?:QĐ|NQ|CV|TT|BC|BB|TB|HD|QT|KH|CT|PL|TTLT|NĐ|TT|MT)[\w\/\-\.]*)/i)
-             || t.match(/(\d{1,4}\/[\w\-\/\.]{3,30})/i)
-  const code = codeM ? codeM[1].trim() : ''
+  // Số ký hiệu: ưu tiên từ text, fallback từ tên file
+  const codePatterns = [
+    /[Ss]ố[:\s]*(\d+[\w\/\-\.]+(?:QĐ|NQ|CV|TT|BC|BB|TB|HĐ|QT|KH|CT|NĐ|TTLT)[A-Z\-\/\.]*)/,
+    /(\d{1,4}[\/\-](?:QĐ|NQ|CV|TT|BC|BB|TB|HĐ|QT|KH|NĐ|TTLT)[A-Z\-\/\.]*)/i,
+    /(\d{1,4}\/[\w\-\.]{3,25})/,
+  ]
+  let code = ''
+  for (const rx of codePatterns) {
+    const m = t.match(rx); if (m) { code = m[1].trim(); break }
+  }
+  // Fallback: thử đọc từ tên file (vd: "157-QĐ-QLDA.pdf" → "157/QĐ-QLDA")
+  if (!code && fileName) {
+    const fn = fileName.replace(/\.pdf$/i, '')
+    const fm = fn.match(/^(\d{1,4})[_\-\/](.{2,20})$/)
+    if (fm) code = `${fm[1]}/${fm[2].replace(/_/g, '-')}`
+  }
 
   // Ngày: ngày DD tháng MM năm YYYY hoặc DD/MM/YYYY
   const dateM = t.match(/ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(20\d\d)/i)
              || t.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](20\d\d)/)
-  const date = dateM ? (dateM[3] ? `${dateM[1]}/${dateM[2]}/${dateM[3]}` : dateM[0]) : ''
+  const date = dateM ? `${dateM[1]}/${dateM[2]}/${dateM[3]}` : ''
 
-  // Cơ quan ban hành: dòng trước "Số:"
-  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean)
+  // Cơ quan ban hành: dòng ngay trước "Số:"
   const soIdx = lines.findIndex(l => /^[Ss]ố[:\s]/.test(l))
-  const org = soIdx > 0 ? lines.slice(Math.max(0, soIdx - 3), soIdx)
-    .filter(l => l.length > 5 && l.length < 80 && !/^(cộng hòa|việt nam)/i.test(l))
-    .pop() || '' : ''
+  const org = soIdx > 0
+    ? lines.slice(Math.max(0, soIdx - 4), soIdx)
+        .filter(l => l.length > 5 && l.length < 100 && !/^(cộng hòa|việt nam|độc lập)/i.test(l))
+        .pop() || ''
+    : ''
 
-  // Loại văn bản
+  // Loại văn bản: thử cả viết tắt (QĐ, NQ, CV...) và đầy đủ
   const docTypeMap = [
-    ['Quyết định', /quyết định/i], ['Nghị quyết', /nghị quyết/i],
-    ['Công văn', /công văn/i], ['Tờ trình', /tờ trình/i],
-    ['Báo cáo', /báo cáo/i], ['Hợp đồng', /hợp đồng/i],
-    ['Biên bản', /biên bản/i], ['Thông báo', /thông báo/i],
+    ['Quyết định', /quyết\s*định|\bQĐ\b/i],
+    ['Nghị quyết', /nghị\s*quyết|\bNQ\b/i],
+    ['Công văn',   /công\s*văn|\bCV\b/i],
+    ['Tờ trình',   /tờ\s*trình|\bTTr\b/i],
+    ['Báo cáo',    /báo\s*cáo|\bBC\b/i],
+    ['Hợp đồng',   /hợp\s*đồng|\bHĐ\b/i],
+    ['Biên bản',   /biên\s*bản|\bBB\b/i],
+    ['Thông báo',  /thông\s*báo|\bTB\b/i],
   ]
-  const docType = docTypeMap.find(([, rx]) => rx.test(t))?.[0] || 'Khác'
+  // Kiểm tra cả trong code (từ filename) và trong text
+  const searchIn = `${code} ${fileName} ${t}`
+  const docType = docTypeMap.find(([, rx]) => rx.test(searchIn))?.[0] || 'Khác'
 
-  // Chủ đề: dòng bắt đầu bằng "V/v" hoặc "về việc"
-  const subjM = t.match(/[Vv]\/[Vv][:\s]+(.{10,150}?)(?:\n|$)/)
-             || t.match(/[Vv]ề\s+việc[:\s]+(.{10,150}?)(?:\n|$)/)
-  const subject = subjM ? subjM[1].trim() : (lines.slice(0, 8).find(l => l.length > 20 && l.length < 150) || `Văn bản${hint}`)
+  // Chủ đề
+  const subjM = t.match(/[Vv]\/[Vv][:\s]+(.{10,150}?)(?:\.|$)/)
+             || t.match(/[Vv]ề\s+việc[:\s]+(.{10,150}?)(?:\.|$)/)
+  const subject = subjM
+    ? subjM[1].trim()
+    : (lines.find(l => l.length > 20 && l.length < 150 && !/^(số|ngày|căn cứ|cộng hòa)/i.test(l)) || `Văn bản${hint}`)
 
   return JSON.stringify({ code, date, org, docType, subject,
     detail: lines.slice(0, 10).join(' ').slice(0, 300),
-    note: 'Trích xuất bằng Tesseract.js + regex (AI không khả dụng)',
+    note: 'Trích xuất bằng regex (AI không khả dụng)',
     status: 'done' })
 }
 
@@ -277,7 +299,10 @@ export function useAI() {
     try {
       const gem = await callGemini(prompt, 1000)
       if (gem) return gem
-      return await callGroq(prompt, 1000, SYSTEM) || ''
+      const groq = await callGroq(prompt, 1000, SYSTEM)
+      if (groq) return groq
+      // AI không khả dụng → regex fallback (luôn trả về kết quả)
+      return parseVietnameseDoc(text, hint, fileName)
     } finally { setLoading(false) }
   }
 
@@ -347,7 +372,7 @@ export function useAI() {
           if (aiResult) return aiResult
 
           // AI fail → regex trực tiếp từ OCR text (không cần AI)
-          return parseVietnameseDoc(ocrText, hint)
+          return parseVietnameseDoc(ocrText, hint, fileName)
         }
       } catch (e) {
         console.warn('[analyzeImages] Tesseract lỗi:', e.message)
