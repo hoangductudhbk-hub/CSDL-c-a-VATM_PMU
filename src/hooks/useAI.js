@@ -327,30 +327,61 @@ export function useAI() {
   }
 
   // ── analyzeImages ──
-  // Tesseract.js OCR → regex (bỏ Vision API vì key không hợp lệ → chỉ làm chậm)
+  // 1) Groq Vision (timeout 4s) → nếu fail → 2) Tesseract → regex
   const analyzeImages = async (base64Images, fileName = '') => {
     setLoading(true)
     const hint = fileName ? ` (${fileName})` : ''
+    const b64 = base64Images[0]
+
+    // ── Thử Groq Vision trước (nhanh & chính xác khi key hợp lệ) ──
+    const keys = getGroqKeys()
+    for (const key of keys) {
+      try {
+        const ctrl = new AbortController()
+        const timer = setTimeout(() => ctrl.abort(), 4000) // timeout 4s
+        const res = await fetch(GROQ_URL, {
+          signal: ctrl.signal,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+          body: JSON.stringify({
+            model: GROQ_VISION_MODEL,
+            max_tokens: 400,
+            temperature: 0.1,
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'text', text: `Đọc header văn bản hành chính Việt Nam này. Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"cơ quan ban hành","docType":"loại văn bản","subject":"về việc gì"}` },
+                { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }
+              ]
+            }]
+          }),
+        })
+        clearTimeout(timer)
+        if (res.ok) {
+          const txt = (await res.json()).choices?.[0]?.message?.content || ''
+          if (txt) {
+            try {
+              const m = txt.match(/\{[\s\S]*\}/)
+              if (m) {
+                const parsed = JSON.parse(m[0])
+                return JSON.stringify({ ...parsed, note: 'Groq Vision', status: 'done' })
+              }
+            } catch { /* fallthrough */ }
+          }
+        }
+      } catch { /* timeout hoặc lỗi mạng → thử key kế */ }
+    }
+
+    // ── Fallback: Tesseract + regex ──
     try {
-      // Tesseract.js — OCR 2 trang đầu
       const { createWorker } = await import('tesseract.js')
       const worker = await createWorker(['vie', 'eng'])
-      let ocrText = ''
-      for (const b64 of base64Images.slice(0, 2)) {
-        const { data: { text } } = await worker.recognize(`data:image/jpeg;base64,${b64}`)
-        ocrText += (text || '') + '\n'
-      }
+      const { data: { text } } = await worker.recognize(`data:image/jpeg;base64,${b64}`)
       await worker.terminate()
+      if ((text || '').trim().length > 30) return parseVietnameseDoc(text, hint, fileName)
+    } catch { /* ignore */ }
 
-      if (ocrText.trim().length > 30) {
-        return parseVietnameseDoc(ocrText, hint, fileName)
-      }
-      // OCR không ra gì → regex từ tên file
-      return parseVietnameseDoc('', hint, fileName)
-    } catch (e) {
-      console.warn('[analyzeImages] Tesseract lỗi:', e.message)
-      return parseVietnameseDoc('', hint, fileName)
-    } finally { setLoading(false) }
+    return parseVietnameseDoc('', hint, fileName)
   }
 
   // ── analyzeDeepForMemory ──
