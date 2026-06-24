@@ -142,16 +142,21 @@ export const parseVietnameseDoc = (text, hint = '', fileName = '') => {
   const dateM = t.match(/ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(20\d{2})/i)
   const date = dateM ? `${dateM[1]}/${dateM[2]}/${dateM[3]}` : ''
 
-  // ── Cơ quan ban hành: dòng ngay trước "Số:" (bỏ qua header quốc hiệu) ──
+  // ── Cơ quan ban hành: dòng ngay trước "Số:" — chỉ lấy 1 dòng (đơn vị trực tiếp) ──
   const soIdx = lines.findIndex(l => /^[Ss]ố\s*[:\/]/.test(l))
   let org = ''
   if (soIdx > 0) {
-    org = lines.slice(Math.max(0, soIdx - 5), soIdx)
-      .filter(l =>
+    // Duyệt ngược từ dòng trước "Số:", lấy dòng hợp lệ đầu tiên (= đơn vị trực tiếp ban hành)
+    for (let i = soIdx - 1; i >= 0; i--) {
+      const l = lines[i]
+      if (
         l.length > 4 && l.length < 120 &&
         !/^(cộng\s*hòa|việt\s*nam|độc\s*lập|tự\s*do|hạnh\s*phúc|[-─═]+)/i.test(l)
-      )
-      .pop() || ''
+      ) {
+        org = l
+        break
+      }
+    }
   }
 
   // ── Nội dung/Về việc: dòng sau "QUYẾT ĐỊNH / CÔNG VĂN..." ──
@@ -317,7 +322,7 @@ export function useAI() {
     const b64 = base64Images[0]
 
     // Groq Vision qua /api/groq-proxy — key không ra browser
-    const visionPrompt = `Đọc header văn bản hành chính Việt Nam này. Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"cơ quan ban hành","docType":"loại văn bản","subject":"về việc gì"}`
+    const visionPrompt = `Đọc header văn bản hành chính Việt Nam này. Trường "org" chỉ lấy đơn vị TRỰC TIẾP ban hành (dòng ngay trên số ký hiệu, KHÔNG lấy tổng công ty/bộ chủ quản). Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"đơn vị trực tiếp ban hành","docType":"loại văn bản","subject":"về việc gì"}`
     const txt = await callGroqVision(b64, visionPrompt, 400)
     if (txt) {
       try {
@@ -359,4 +364,66 @@ export function useAI() {
 📋 Tóm tắt: ${memory.summary || ''}
 📌 Điểm quan trọng: ${(memory.keyPoints || []).join('; ')}
 👥 Thành viên: ${(memory.members || []).join('; ')}
-⚙️ Thông số kỹ thuật: ${(memory.technicalSp
+⚙️ Thông số kỹ thuật: ${(memory.technicalSpecs || []).join('; ')}
+💰 Tài chính: ${(memory.financial || []).join('; ')}
+⚖️ Pháp lý: ${(memory.legal || []).join('; ')}
+📅 Tiến độ: ${(memory.deadlines || []).join('; ')}
+📋 Yêu cầu: ${memory.requirements || ''}
+⚠️ Rủi ro: ${memory.risks || ''}
+📊 Dữ liệu khác: ${(memory.otherData || []).join('; ')}`
+
+    const ragSection = relevantText
+      ? `\n📄 ĐOẠN VĂN BẢN GỐC LIÊN QUAN:\n---\n${relevantText}\n---`
+      : ''
+
+    const historyCtx = chatHistory.slice(-4).map(m =>
+      `${m.role === 'user' ? 'Hỏi' : 'Trả lời'}: ${m.content}`).join('\n')
+
+    const prompt = `Bạn là trợ lý tra cứu văn bản hành chính Việt Nam.
+
+NGUYÊN TẮC:
+- Ưu tiên dùng ĐOẠN VĂN BẢN GỐC (nếu có) — chính xác nhất
+- Bổ sung từ BỘ NHỚ TỔNG HỢP nếu cần
+- Trích dẫn NGUYÊN VĂN câu chữ từ văn bản
+- KHÔNG bịa thêm thông tin
+- Nếu không có thông tin → nói: "Văn bản không có thông tin này"
+${ragSection}
+
+${ctx}
+${historyCtx ? '\nLỊCH SỬ:\n' + historyCtx : ''}
+
+CÂU HỎI: ${question}
+Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
+
+    try {
+      const gem = await callGemini(prompt, 2000)
+      if (gem) return gem
+      const groq = await callGroq(prompt, 2000)
+      if (groq) return groq
+      const err = new Error('AI_RATE_LIMIT')
+      err.waitSeconds = 30
+      throw err
+    } finally { setLoading(false) }
+  }
+
+  // ── ask: chat thông thường về dự án ──
+  const ask = async (question, context = '') => {
+    setLoading(true)
+    resetIdxIfNewDay()
+    const sys = `Bạn là trợ lý quản lý dự án VATM. Trả lời tiếng Việt, chi tiết và hữu ích.${context ? '\n\nDỮ LIỆU DỰ ÁN:\n' + context : ''}`
+    try {
+      const gem = await callGemini(`${sys}\n\nCâu hỏi: ${question}`, 1200)
+      if (gem) return gem
+      const groq = await callGroq(question, 1200, sys)
+      if (groq) return groq
+      const err = new Error('AI_RATE_LIMIT')
+      err.waitSeconds = 30
+      throw err
+    } finally { setLoading(false) }
+  }
+
+  return {
+    ask, analyzeText, analyzeImages, analyzeDeepForMemory, askDeep,
+    loading,
+  }
+}
