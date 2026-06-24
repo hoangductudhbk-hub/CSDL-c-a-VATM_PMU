@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAI } from '../hooks/useAI'
+import { useAI, parseVietnameseDoc } from '../hooks/useAI'
 import { useCloudinaryStorage } from '../hooks/useCloudinaryStorage'
 
 const ST = [{ value:'done',label:'✅ Hoàn thành'},{ value:'pending',label:'🔄 Đang thực hiện'},{ value:'prep',label:'⬜ Chưa thực hiện'}]
@@ -138,10 +138,15 @@ export default function DocModal({ doc, onSave, onClose }) {
   }
 
   const processOnePdf = async (buf, fileName='') => {
+    // Đọc text nhanh bằng pdfjs (< 0.5s)
     const text = await extractPdfText(buf.slice(0))
-    if (isRealContent(text)) return await analyzeText(text, fileName)
-    setSt('⏳ Đang trích xuất thông tin...')
-    const imgs = await renderPdfToImages(buf.slice(0), 2)  // chỉ 2 trang đầu cho form fill
+    if (isRealContent(text)) {
+      // Có text → regex ngay lập tức (không đợi AI)
+      return parseVietnameseDoc(text, '', fileName)
+    }
+    // PDF scan → Tesseract (chậm hơn, báo rõ)
+    setSt('⏳ PDF scan - đang nhận dạng chữ (lần đầu ~30s)...')
+    const imgs = await renderPdfToImages(buf.slice(0), 2)
     return await analyzeImages(imgs, fileName)
   }
 
@@ -161,9 +166,15 @@ export default function DocModal({ doc, onSave, onClose }) {
         if (ext === 'pdf') {
           setSt('⏳ Đang đọc PDF...')
           rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, setSt)
-          result = isRealContent(rawExtracted)
-            ? await analyzeText(rawExtracted.slice(0, 8000), file.name)
-            : await (async () => { setSt('⏳ Đang trích xuất thông tin...'); const imgs = await renderPdfToImages(buf.slice(0)); return await analyzeImages(imgs, file.name) })()
+          if (isRealContent(rawExtracted)) {
+            // Có text → regex ngay (< 0.5s), không cần AI
+            result = parseVietnameseDoc(rawExtracted.slice(0, 8000), '', file.name)
+          } else {
+            // PDF scan → Tesseract (lần đầu chậm)
+            setSt('⏳ PDF scan - đang nhận dạng chữ...')
+            const imgs = await renderPdfToImages(buf.slice(0), 2)
+            result = await analyzeImages(imgs, file.name)
+          }
         } else if (['doc','docx'].includes(ext)) {
           rawExtracted = await extractDocxText(buf)
           result = await analyzeText(rawExtracted.slice(0, 8000), file.name)

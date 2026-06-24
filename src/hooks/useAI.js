@@ -110,7 +110,7 @@ const callAI = async (prompt, maxTokens = 1000) => {
 }
 
 // ── Regex parser khi AI không khả dụng ─────────────────────────
-const parseVietnameseDoc = (text, hint = '', fileName = '') => {
+export const parseVietnameseDoc = (text, hint = '', fileName = '') => {
   const t = text.replace(/\s+/g, ' ')
   const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean)
 
