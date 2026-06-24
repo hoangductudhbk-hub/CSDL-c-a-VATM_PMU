@@ -50,10 +50,11 @@ export function useDocuments(projectId, userId, packageId = null) {
     // Xóa văn bản trong Firestore
     await deleteDoc(doc(db, 'documents', id))
 
-    // Xóa bộ nhớ AI + markdown — không catch silently, để lỗi lan ra ngoài
+    // Xóa bộ nhớ AI + markdown + job xử lý — không catch silently, để lỗi lan ra ngoài
     await Promise.allSettled([
       deleteDoc(doc(db, 'documentMemory', id)),
       deleteDoc(doc(db, 'documentMarkdown', id)),
+      deleteDoc(doc(db, 'processingJobs', id)),
     ])
 
     // Xóa nhật ký hoạt động

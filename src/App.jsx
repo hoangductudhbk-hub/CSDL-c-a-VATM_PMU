@@ -667,6 +667,7 @@ ${memCtx}`
                           <button onClick={async () => {
                             if (!confirm('Xác nhận xóa?')) return
                             try {
+                              await deleteFile(d)
                               await deleteDocument(d.id)
                             } catch (e) {
                               alert('❌ Xóa thất bại: ' + e.message)
