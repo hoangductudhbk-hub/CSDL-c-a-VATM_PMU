@@ -165,10 +165,15 @@ export default function DocModal({ doc, onSave, onClose }) {
         const buf = await file.arrayBuffer()
         if (ext === 'pdf') {
           setSt('⏳ Đang đọc PDF...')
-          rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, setSt)
+          // Chỉ đọc 2 trang đầu để lấy header (nhanh hơn extractPdfFull)
+          rawExtracted = await extractPdfText(buf.slice(0))
+          if (!isRealContent(rawExtracted)) {
+            // Thử lại với full extract (đề phòng extractPdfText bỏ sót)
+            rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, null)
+          }
           if (isRealContent(rawExtracted)) {
-            // Có text → regex ngay (< 0.5s), không cần AI
-            result = parseVietnameseDoc(rawExtracted.slice(0, 8000), '', file.name)
+            // Có text → regex ngay (< 0.5s), chỉ cần 3000 ký tự đầu
+            result = parseVietnameseDoc(rawExtracted.slice(0, 3000), '', file.name)
           } else {
             // PDF scan → Tesseract (lần đầu chậm)
             setSt('⏳ PDF scan - đang nhận dạng chữ...')

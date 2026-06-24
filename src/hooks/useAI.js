@@ -109,66 +109,86 @@ const callAI = async (prompt, maxTokens = 1000) => {
   throw err
 }
 
-// ── Regex parser khi AI không khả dụng ─────────────────────────
+// ── Regex parser — chỉ đọc phần header (60 dòng đầu) ───────────
 export const parseVietnameseDoc = (text, hint = '', fileName = '') => {
-  const t = text.replace(/\s+/g, ' ')
-  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean)
+  // Chỉ lấy 60 dòng đầu (phần header chứa đủ thông tin)
+  const allLines = text.split(/\n/).map(l => l.trim()).filter(Boolean)
+  const lines = allLines.slice(0, 60)
+  const t = lines.join(' ')
 
-  // Số ký hiệu: ưu tiên từ text, fallback từ tên file
-  const codePatterns = [
-    /[Ss]ố[:\s]*(\d+[\w\/\-\.]+(?:QĐ|NQ|CV|TT|BC|BB|TB|HĐ|QT|KH|CT|NĐ|TTLT)[A-Z\-\/\.]*)/,
-    /(\d{1,4}[\/\-](?:QĐ|NQ|CV|TT|BC|BB|TB|HĐ|QT|KH|NĐ|TTLT)[A-Z\-\/\.]*)/i,
-    /(\d{1,4}\/[\w\-\.]{3,25})/,
-  ]
-  let code = ''
-  for (const rx of codePatterns) {
-    const m = t.match(rx); if (m) { code = m[1].trim(); break }
-  }
-  // Fallback: thử đọc từ tên file (vd: "157-QĐ-QLDA.pdf" → "157/QĐ-QLDA")
-  if (!code && fileName) {
-    const fn = fileName.replace(/\.pdf$/i, '')
-    const fm = fn.match(/^(\d{1,4})[_\-\/](.{2,20})$/)
-    if (fm) code = `${fm[1]}/${fm[2].replace(/_/g, '-')}`
-  }
-
-  // Ngày: ngày DD tháng MM năm YYYY hoặc DD/MM/YYYY
-  const dateM = t.match(/ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(20\d\d)/i)
-             || t.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](20\d\d)/)
-  const date = dateM ? `${dateM[1]}/${dateM[2]}/${dateM[3]}` : ''
-
-  // Cơ quan ban hành: dòng ngay trước "Số:"
-  const soIdx = lines.findIndex(l => /^[Ss]ố[:\s]/.test(l))
-  const org = soIdx > 0
-    ? lines.slice(Math.max(0, soIdx - 4), soIdx)
-        .filter(l => l.length > 5 && l.length < 100 && !/^(cộng hòa|việt nam|độc lập)/i.test(l))
-        .pop() || ''
-    : ''
-
-  // Loại văn bản: thử cả viết tắt (QĐ, NQ, CV...) và đầy đủ
+  // ── Loại văn bản: ưu tiên nhận diện sớm để parse đúng code ──
   const docTypeMap = [
-    ['Quyết định', /quyết\s*định|\bQĐ\b/i],
-    ['Nghị quyết', /nghị\s*quyết|\bNQ\b/i],
-    ['Công văn',   /công\s*văn|\bCV\b/i],
-    ['Tờ trình',   /tờ\s*trình|\bTTr\b/i],
-    ['Báo cáo',    /báo\s*cáo|\bBC\b/i],
-    ['Hợp đồng',   /hợp\s*đồng|\bHĐ\b/i],
-    ['Biên bản',   /biên\s*bản|\bBB\b/i],
-    ['Thông báo',  /thông\s*báo|\bTB\b/i],
+    ['Quyết định', /quyết\s*định|QUYẾT\s*ĐỊNH|\bQĐ\b/],
+    ['Nghị quyết', /nghị\s*quyết|NGHỊ\s*QUYẾT|\bNQ\b/],
+    ['Công văn',   /công\s*văn|CÔNG\s*VĂN|\bCV\b/],
+    ['Tờ trình',   /tờ\s*trình|TỜ\s*TRÌNH|\bTTr\b/i],
+    ['Báo cáo',    /báo\s*cáo|BÁO\s*CÁO|\bBC\b/],
+    ['Hợp đồng',   /hợp\s*đồng|HỢP\s*ĐỒNG|\bHĐ\b/],
+    ['Biên bản',   /biên\s*bản|BIÊN\s*BẢN|\bBB\b/],
+    ['Thông báo',  /thông\s*báo|THÔNG\s*BÁO|\bTB\b/],
+    ['Kế hoạch',   /kế\s*hoạch|KẾ\s*HOẠCH|\bKH\b/],
   ]
-  // Kiểm tra cả trong code (từ filename) và trong text
-  const searchIn = `${code} ${fileName} ${t}`
+  const searchIn = `${fileName} ${t}`
   const docType = docTypeMap.find(([, rx]) => rx.test(searchIn))?.[0] || 'Khác'
 
-  // Chủ đề
-  const subjM = t.match(/[Vv]\/[Vv][:\s]+(.{10,150}?)(?:\.|$)/)
-             || t.match(/[Vv]ề\s+việc[:\s]+(.{10,150}?)(?:\.|$)/)
-  const subject = subjM
-    ? subjM[1].trim()
-    : (lines.find(l => l.length > 20 && l.length < 150 && !/^(số|ngày|căn cứ|cộng hòa)/i.test(l)) || `Văn bản${hint}`)
+  // ── Số ký hiệu: lấy dòng có "Số:" ──
+  let code = ''
+  const soLine = lines.find(l => /^[Ss]ố\s*[:\/]/.test(l))
+  if (soLine) {
+    // "Số: 157/QĐ-QLDA" hoặc "Số:157/QĐ-QLDA"
+    const m = soLine.match(/[Ss]ố\s*[:\/]\s*([\d]+[\/\-][\w\-\/\.]{2,30})/)
+    if (m) code = m[1].trim()
+  }
+  // Fallback: tìm pattern số/loại trong toàn header
+  if (!code) {
+    const m = t.match(/\b(\d{1,4}[\/\-](?:QĐ|NQ|CV|TTr|TT|BC|BB|TB|HĐ|KH|NĐ|TTLT)[A-Z0-9\-\/\.]*)/i)
+    if (m) code = m[1]
+  }
+  // Fallback cuối: đọc từ tên file
+  if (!code && fileName) {
+    const fn = fileName.replace(/\.\w+$/, '').replace(/[-_]/g, '/')
+    const m = fn.match(/^(\d{1,4}\/[\w\-\/]{2,20})/)
+    if (m) code = m[1]
+    else {
+      const m2 = fn.match(/^(\d{1,4})[\/](.+)$/)
+      if (m2) code = `${m2[1]}/${m2[2]}`
+    }
+  }
+
+  // ── Ngày: "ngày DD tháng MM năm YYYY" (bỏ qua DD/MM/YYYY vì hay bị lẫn số điều/khoản) ──
+  const dateM = t.match(/ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(20\d{2})/i)
+  const date = dateM ? `${dateM[1]}/${dateM[2]}/${dateM[3]}` : ''
+
+  // ── Cơ quan ban hành: dòng ngay trước "Số:" (bỏ qua header quốc hiệu) ──
+  const soIdx = lines.findIndex(l => /^[Ss]ố\s*[:\/]/.test(l))
+  let org = ''
+  if (soIdx > 0) {
+    org = lines.slice(Math.max(0, soIdx - 5), soIdx)
+      .filter(l =>
+        l.length > 4 && l.length < 120 &&
+        !/^(cộng\s*hòa|việt\s*nam|độc\s*lập|tự\s*do|hạnh\s*phúc|[-─═]+)/i.test(l)
+      )
+      .pop() || ''
+  }
+
+  // ── Nội dung/Về việc: dòng sau "QUYẾT ĐỊNH / CÔNG VĂN..." ──
+  const vvM = t.match(/[Vv]\/?[Vv][:\s]+(.{10,200}?)(?:\s{2,}|$)/)
+           || t.match(/[Vv]ề\s+việc[:\s]+(.{10,200}?)(?:\s{2,}|$)/)
+  let subject = ''
+  if (vvM) {
+    subject = vvM[1].replace(/\s+/g, ' ').trim()
+  } else {
+    // Lấy dòng sau loại văn bản (QUYẾT ĐỊNH, CÔNG VĂN...) có độ dài hợp lý
+    const typeIdx = lines.findIndex(l => /^(QUYẾT ĐỊNH|CÔNG VĂN|TỜ TRÌNH|BÁO CÁO|NGHỊ QUYẾT|HỢP ĐỒNG|BIÊN BẢN|THÔNG BÁO)/i.test(l))
+    if (typeIdx >= 0) {
+      subject = lines.slice(typeIdx + 1).find(l => l.length > 15 && l.length < 200 && !/^(căn cứ|theo|xét)/i.test(l)) || ''
+    }
+  }
+  if (!subject) subject = `Văn bản ${code || fileName}`
 
   return JSON.stringify({ code, date, org, docType, subject,
-    detail: lines.slice(0, 10).join(' ').slice(0, 300),
-    note: 'Trích xuất bằng regex (AI không khả dụng)',
+    detail: lines.slice(0, 8).join(' ').slice(0, 300),
+    note: 'Trích xuất regex từ header văn bản',
     status: 'done' })
 }
 
