@@ -375,6 +375,7 @@ ${memCtx}`
         <td style="padding:6px 10px;border:1px solid #ddd;font-weight:bold">${d.code||'—'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd">${d.date||'—'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd">${d.docType||'—'}</td>
+        <td style="padding:6px 10px;border:1px solid #ddd">${d.org||'—'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd">${d.subject||''}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;color:${s.color};font-weight:bold">${s.label}</td></tr>`
     }).join('')
@@ -382,7 +383,7 @@ ${memCtx}`
     const html = `<html><head><meta charset='utf-8'><style>body{font-family:'Times New Roman',serif;font-size:14pt}h1{font-size:16pt;font-weight:bold;text-align:center}table{border-collapse:collapse;width:100%}th{background:#1a1a1a;color:#fff;padding:6pt 8pt;border:1px solid #333}td{padding:5pt 8pt;border:1px solid #ccc}</style></head><body>
     <h1>BÁO CÁO TỔNG HỢP VĂN BẢN</h1><h1>${title}</h1>
     <p style="text-align:center">Ngày xuất: ${ngay} | Tổng: ${stats.total} | Tiến độ: ${progress}%</p>
-    <table><thead><tr><th>STT</th><th>Số hiệu</th><th>Ngày</th><th>Loại</th><th>Nội dung</th><th>Trạng thái</th></tr></thead><tbody>${rows}</tbody></table></body></html>`
+    <table><thead><tr><th>STT</th><th>Số hiệu</th><th>Ngày</th><th>Loại</th><th>Cơ quan ban hành</th><th>Nội dung</th><th>Trạng thái</th></tr></thead><tbody>${rows}</tbody></table></body></html>`
     logExportReport(proj?.name)
     const blob = new Blob(['\uFEFF' + html], { type:'application/msword;charset=utf-8' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
