@@ -250,6 +250,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
 
   const [analyzing,        setAnalyzing]        = useState(false)
   const [analyzeStep,      setAnalyzeStep]      = useState('')
+  const [analyzeError,     setAnalyzeError]     = useState('')
   const [showChat,         setShowChat]         = useState(false)
   const [chat,             setChat]             = useState([])
   const [chatInput,        setChatInput]        = useState('')
@@ -377,6 +378,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
     if (!fileUrl) { alert('Không có file URL'); return }
     setChat([]); setShowChat(false)
+    setAnalyzeError('')
     setAnalyzing(true)
     try {
       await startPipeline({
@@ -385,7 +387,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
       })
       setShowChat(true)
     } catch (e) {
-      setAnalyzeStep('❌ ' + e.message)
+      setAnalyzeError(e.message)
     } finally { setAnalyzing(false) }
   }
 
@@ -608,13 +610,19 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                 /* CHƯA PHÂN TÍCH LẦN NÀO */
                 ) : (
                   <>
-                    <div style={{ fontSize:12, color:'#92400e', marginBottom:10 }}>
-                      📋 <b>Tài liệu chưa được phân tích</b>
-                      {hasFile && <span style={{ color:'#555', fontWeight:400 }}> — AI sẽ đọc và ghi nhớ để hỏi đáp.</span>}
-                    </div>
+                    {analyzeError ? (
+                      <div style={{ fontSize:12, color:'#b91c1c', marginBottom:10, padding:'8px 10px', background:'#fef2f2', borderRadius:8, border:'0.5px solid #fecaca' }}>
+                        ❌ {analyzeError}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize:12, color:'#92400e', marginBottom:10 }}>
+                        📋 <b>Tài liệu chưa được phân tích</b>
+                        {hasFile && <span style={{ color:'#555', fontWeight:400 }}> — AI sẽ đọc và ghi nhớ để hỏi đáp.</span>}
+                      </div>
+                    )}
                     <button onClick={handleAnalyze}
                       style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
-                      📊 Phân tích tài liệu
+                      📊 {analyzeError ? 'Thử lại' : 'Phân tích tài liệu'}
                     </button>
                   </>
                 )}

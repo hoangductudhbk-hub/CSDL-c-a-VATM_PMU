@@ -276,9 +276,12 @@ export function useProcessPipeline() {
         const { text, totalPages: tp } = await extractPdfText(buf.slice(0))
         rawText = text; totalPages = tp
         const avgChars = rawText.length / Math.max(totalPages, 1)
-        isScan = avgChars < 80
+        // Phát hiện watermark hệ thống VATM/Voffice: text có nhưng là watermark chứ không phải nội dung
+        const hasWatermark = /tải\s+về\s+từ\s+(?:hệ\s+thống|vatm)|thông\s+tin\s+tải\s+về|phòng\s*nghiệp\s*vụ|da\.phongnv/i.test(rawText)
+        isScan = avgChars < 80 || hasWatermark
         if (isScan) {
-          report(`🔍 PDF scan (${totalPages} trang) — đang OCR...`, 30)
+          const reason = hasWatermark ? 'PDF có watermark hệ thống' : `PDF scan (${totalPages} trang)`
+          report(`🔍 ${reason} — đang OCR bằng AI Vision...`, 30)
           rawText = await ocrScanPdf(buf.slice(0), groqKeys[0], report)
         }
       } else if (['doc', 'docx'].includes(ext)) {
