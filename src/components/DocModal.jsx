@@ -182,11 +182,11 @@ export default function DocModal({ doc, onSave, onClose }) {
           }
         } else if (['doc','docx'].includes(ext)) {
           rawExtracted = await extractDocxText(buf)
-          result = await analyzeText(rawExtracted.slice(0, 8000), file.name)
+          result = parseVietnameseDoc(rawExtracted.slice(0, 3000), '', file.name)
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['xls','xlsx'].includes(ext)) {
           rawExtracted = await extractXlsxText(buf)
-          result = await analyzeText(rawExtracted.slice(0, 8000), file.name)
+          result = parseVietnameseDoc(rawExtracted.slice(0, 3000), '', file.name)
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['txt', 'md', 'csv'].includes(ext)) {
           const t = await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,100000));rd.readAsText(file,'utf-8')})
@@ -198,7 +198,7 @@ export default function DocModal({ doc, onSave, onClose }) {
             setSt('✅ Đã lưu vào bộ nhớ! Điền thêm thông tin văn bản nếu cần.')
             setExtractedText(rawExtracted); setLoad(false); return
           }
-          result = await analyzeText(t.slice(0, 8000), file.name)
+          result = parseVietnameseDoc(t.slice(0, 3000), '', file.name)
         } else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
         setExtractedText(rawExtracted)
         // Lưu markdown lên Firestore ngay (không cần docId)
@@ -229,13 +229,13 @@ export default function DocModal({ doc, onSave, onClose }) {
         const bBuf = await file.arrayBuffer()
         if (ext==='pdf') {
           batchExtracted = await extractPdfFull(bBuf.slice(0), file.name, null, (msg) => { queue[i].status=msg; setFQ([...queue]) })
-          result = isRealContent(batchExtracted) ? await analyzeText(batchExtracted.slice(0,8000),file.name) : await processOnePdf(bBuf,file.name)
+          result = isRealContent(batchExtracted) ? parseVietnameseDoc(batchExtracted.slice(0,3000),'',file.name) : await processOnePdf(bBuf,file.name)
         } else if (['doc','docx'].includes(ext)) {
           batchExtracted = (await extractDocxText(bBuf)).slice(0,100000)
-          result = await analyzeText(batchExtracted.slice(0,8000),file.name)
+          result = parseVietnameseDoc(batchExtracted.slice(0,3000),'',file.name)
         } else if (['xls','xlsx'].includes(ext)) {
           batchExtracted = (await extractXlsxText(bBuf)).slice(0,100000)
-          result = await analyzeText(batchExtracted.slice(0,8000),file.name)
+          result = parseVietnameseDoc(batchExtracted.slice(0,3000),'',file.name)
         } else { queue[i].status='⚠️ Không hỗ trợ'; setFQ([...queue]); continue }
         const p=parseJ(result)
         if (p) {
