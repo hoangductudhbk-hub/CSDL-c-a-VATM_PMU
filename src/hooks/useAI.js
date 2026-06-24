@@ -111,9 +111,9 @@ const callAI = async (prompt, maxTokens = 1000) => {
 
 // ── Regex parser — chỉ đọc phần header (60 dòng đầu) ───────────
 export const parseVietnameseDoc = (text, hint = '', fileName = '') => {
-  // Chỉ lấy 60 dòng đầu (phần header chứa đủ thông tin)
+  // Chỉ lấy 15 dòng đầu (header văn bản: quốc hiệu, cơ quan, số, ngày, loại)
   const allLines = text.split(/\n/).map(l => l.trim()).filter(Boolean)
-  const lines = allLines.slice(0, 60)
+  const lines = allLines.slice(0, 15)
   const t = lines.join(' ')
 
   // ── Loại văn bản: ưu tiên nhận diện sớm để parse đúng code ──

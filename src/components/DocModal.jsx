@@ -144,10 +144,8 @@ export default function DocModal({ doc, onSave, onClose }) {
       // Có text → regex ngay lập tức (không đợi AI)
       return parseVietnameseDoc(text, '', fileName)
     }
-    // PDF scan → Tesseract (chậm hơn, báo rõ)
-    setSt('⏳ PDF scan - đang nhận dạng chữ (lần đầu ~30s)...')
-    const imgs = await renderPdfToImages(buf.slice(0), 2)
-    return await analyzeImages(imgs, fileName)
+    // PDF scan → parse từ tên file (nhanh, không cần OCR)
+    return parseVietnameseDoc('', '', fileName)
   }
 
   const handleFile = async (e) => {
@@ -173,20 +171,17 @@ export default function DocModal({ doc, onSave, onClose }) {
           }
           if (isRealContent(rawExtracted)) {
             // Có text → regex ngay (< 0.5s), chỉ cần 3000 ký tự đầu
-            result = parseVietnameseDoc(rawExtracted.slice(0, 3000), '', file.name)
+            result = parseVietnameseDoc(rawExtracted.slice(0, 500), '', file.name)
           } else {
-            // PDF scan → Tesseract (lần đầu chậm)
-            setSt('⏳ PDF scan - đang nhận dạng chữ...')
-            const imgs = await renderPdfToImages(buf.slice(0), 2)
-            result = await analyzeImages(imgs, file.name)
+            result = parseVietnameseDoc('', '', file.name)
           }
         } else if (['doc','docx'].includes(ext)) {
           rawExtracted = await extractDocxText(buf)
-          result = parseVietnameseDoc(rawExtracted.slice(0, 3000), '', file.name)
+          result = parseVietnameseDoc(rawExtracted.slice(0, 500), '', file.name)
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['xls','xlsx'].includes(ext)) {
           rawExtracted = await extractXlsxText(buf)
-          result = parseVietnameseDoc(rawExtracted.slice(0, 3000), '', file.name)
+          result = parseVietnameseDoc(rawExtracted.slice(0, 500), '', file.name)
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['txt', 'md', 'csv'].includes(ext)) {
           const t = await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,100000));rd.readAsText(file,'utf-8')})
@@ -198,7 +193,7 @@ export default function DocModal({ doc, onSave, onClose }) {
             setSt('✅ Đã lưu vào bộ nhớ! Điền thêm thông tin văn bản nếu cần.')
             setExtractedText(rawExtracted); setLoad(false); return
           }
-          result = parseVietnameseDoc(t.slice(0, 3000), '', file.name)
+          result = parseVietnameseDoc(t.slice(0, 500), '', file.name)
         } else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
         setExtractedText(rawExtracted)
         // Lưu markdown lên Firestore ngay (không cần docId)
