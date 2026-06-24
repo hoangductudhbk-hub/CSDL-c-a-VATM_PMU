@@ -254,37 +254,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     if (showChat) setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
   }, [chat, showChat])
 
-  // Auto-pipeline: chạy khi mở văn bản mới chưa có memory
-  useEffect(() => {
-    if (memLoading) return
-    if (memory) return
-    if (autoPipeStarted) return
-    const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
-    if (!fileUrl) return
-
-    const timer = setTimeout(async () => {
-      // Kiểm tra đã có markdown chưa → không auto nếu đã có
-      try {
-        const { doc: fsDoc, getDoc } = await import('firebase/firestore')
-        const { db } = await import('../firebase')
-        const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
-        if (mdSnap.exists()) return
-      } catch {}
-
-      setAutoPipeStarted(true)
-      setAnalyzeStep('🚀 Đang tự động xử lý tài liệu mới...')
-      try {
-        await startPipeline({
-          docId: doc.id, fileUrl, fileName: doc.fileName || '',
-          onStatus: setAnalyzeStep, forceRestart: false,
-        })
-        setShowChat(true)
-      } catch {}
-      setAutoPipeStarted(false)
-    }, 1500)
-
-    return () => clearTimeout(timer)
-  }, [memLoading, memory, doc?.id, autoPipeStarted])
+  // Auto-pipeline đã bị tắt — người dùng tự nhấn nút khi cần để tiết kiệm token
 
   const code     = get(doc, 'code')
   const date     = get(doc, 'date')
@@ -484,12 +454,6 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                   <div style={{ fontSize:13, color:'#1a1a1a', lineHeight:1.7, background:'#fafaf8', border:'0.5px solid #e5e4e0', borderRadius:8, padding:'10px 12px' }}>{detail}</div>
                 </div>
               )}
-              {note && (
-                <div style={{ marginBottom:12 }}>
-                  <div style={{ fontSize:11, color:'#9b9b9b', marginBottom:3 }}>✨ Ghi chú AI</div>
-                  <div style={{ fontSize:13, color:'#555', lineHeight:1.7, fontStyle:'italic', background:'#f5f3ff', border:'0.5px solid #e9d5ff', borderRadius:8, padding:'10px 12px' }}>{note}</div>
-                </div>
-              )}
 
               {/* File đính kèm */}
               {hasFile ? (
@@ -669,4 +633,3 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     </div>
   )
 }
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
