@@ -30,20 +30,22 @@ import { useActivityLog } from './hooks/useActivityLog'
 import { useCloudinaryStorage } from './hooks/useCloudinaryStorage'
 import { UploadProvider, useUploadCtx } from './contexts/UploadContext'
 
+const pad2 = (n) => String(n).padStart(2, '0')
+
 const normDate = (raw = '') => {
   if (!raw) return '—'
   let s = raw.replace(/^[^,]+,\s*/i, '').trim()
   const m1 = s.match(/(?:ngày\s*)?(\d{1,2})\s*tháng\s*(\d{1,2})\s*năm\s*(\d{4})/i)
-  if (m1) return `${parseInt(m1[1])}/${parseInt(m1[2])}/${m1[3]}`
+  if (m1) return `${pad2(m1[1])}/${pad2(m1[2])}/${m1[3]}`
   const m2 = s.match(/tháng\s*(\d{1,2})\s*năm\s*(\d{4})/i)
-  if (m2) return `${parseInt(m2[1])}/${m2[2]}`
+  if (m2) return `${pad2(m2[1])}/${m2[2]}`
   const m3 = s.match(/năm\s*(\d{4})/i)
   if (m3) return m3[1]
   const m4 = s.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/)
-  if (m4) return `${parseInt(m4[1])}/${parseInt(m4[2])}/${m4[3].length===2?'20'+m4[3]:m4[3]}`
+  if (m4) return `${pad2(m4[1])}/${pad2(m4[2])}/${m4[3].length===2?'20'+m4[3]:m4[3]}`
   const nums = s.match(/\d+/g)
-  if (nums && nums.length >= 3) return `${parseInt(nums[0])}/${parseInt(nums[1])}/${nums[2]}`
-  if (nums && nums.length === 2) return `${parseInt(nums[0])}/${nums[1]}`
+  if (nums && nums.length >= 3) return `${pad2(nums[0])}/${pad2(nums[1])}/${nums[2]}`
+  if (nums && nums.length === 2) return `${pad2(nums[0])}/${nums[1]}`
   return s.slice(0, 15)
 }
 
@@ -373,7 +375,7 @@ ${memCtx}`
       const s = SM[d.status] || SM.prep
       return `<tr><td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${i+1}</td>
         <td style="padding:6px 10px;border:1px solid #ddd;font-weight:bold">${d.code||'—'}</td>
-        <td style="padding:6px 10px;border:1px solid #ddd">${d.date||'—'}</td>
+        <td style="padding:6px 10px;border:1px solid #ddd">${normDate(d.date)}</td>
         <td style="padding:6px 10px;border:1px solid #ddd">${d.docType||'—'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd">${d.org||'—'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd">${d.subject||''}</td>

@@ -158,6 +158,20 @@ const fmtDate = (ts) => {
   return d.toLocaleDateString('vi-VN') + ' ' + d.toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' })
 }
 
+// ── Chuẩn hoá ngày ban hành về dd/mm/yyyy (luôn pad số 0) ─────────
+const pad2 = (n) => String(n).padStart(2, '0')
+const normDate = (raw = '') => {
+  if (!raw) return ''
+  const s = raw.replace(/^[^,]+,\s*/i, '').trim()
+  const m1 = s.match(/(?:ngày\s*)?(\d{1,2})\s*tháng\s*(\d{1,2})\s*năm\s*(\d{4})/i)
+  if (m1) return `${pad2(m1[1])}/${pad2(m1[2])}/${m1[3]}`
+  const m4 = s.match(/(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/)
+  if (m4) return `${pad2(m4[1])}/${pad2(m4[2])}/${m4[3].length===2?'20'+m4[3]:m4[3]}`
+  const m5 = s.match(/^(\d{1,2})[\/-](\d{4})$/) // chỉ có tháng/năm
+  if (m5) return `${pad2(m5[1])}/${m5[2]}`
+  return s
+}
+
 // ── Load chunks từ Firestore theo docId ──────────────────────────
 // Đọc nội dung văn bản từ documentMarkdown (qua markdownRef trên documents/{docId}).
 // KHÔNG còn đọc documentChunks nữa — cơ chế cũ đã bỏ hẳn.
@@ -257,7 +271,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   // Auto-pipeline đã bị tắt — người dùng tự nhấn nút khi cần để tiết kiệm token
 
   const code     = get(doc, 'code')
-  const date     = get(doc, 'date')
+  const date     = normDate(get(doc, 'date'))
   const org      = get(doc, 'org')
   const docType  = get(doc, 'docType')
   const subject  = get(doc, 'subject')
