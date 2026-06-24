@@ -46,60 +46,28 @@ const readPDFWithGemini = async (arrayBuf, fileName, onStep) => {
   for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
   const base64 = btoa(binary)
 
-  const gemKeys = [
-    import.meta.env.VITE_GEMINI_API_KEY,
-    import.meta.env.VITE_GEMINI_API_KEY_2,
-    import.meta.env.VITE_GEMINI_API_KEY_3,
-  ].filter(Boolean)
-
-  const GEM_URL = (key) =>
-    `https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key=${key}`
-
-  for (let i = 0; i < gemKeys.length; i++) {
-    try {
-      if (onStep) onStep(`🔍 Đang đọc và nhận dạng văn bản${i > 0 ? ` (lần ${i+1})` : ''}...`)
-      const res = await fetch(GEM_URL(gemKeys[i]), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              {
-                inline_data: {
-                  mime_type: 'application/pdf',
-                  data: base64
-                }
-              },
-              {
-                text: `Trích xuất TOÀN BỘ nội dung văn bản trong file PDF này (tên file: ${fileName}).
+  // Gọi Gemini qua /api/gemini-proxy — key ở server, không lộ ra browser
+  if (onStep) onStep('🔍 Đang đọc và nhận dạng văn bản...')
+  const parts = [
+    { inline_data: { mime_type: 'application/pdf', data: base64 } },
+    { text: `Trích xuất TOÀN BỘ nội dung văn bản trong file PDF này (tên file: ${fileName}).
 Yêu cầu:
 - Giữ nguyên 100% câu chữ, số liệu, tên người, bảng biểu, điều khoản
 - Giữ nguyên cấu trúc: tiêu đề, điều, khoản, mục
 - Không tóm tắt, không bỏ bất kỳ thông tin nào
-- Chỉ trả về nội dung văn bản thuần túy`
-              }
-            ]
-          }],
-          generationConfig: { temperature: 0, maxOutputTokens: 8192 }
-        })
-      })
-
-      if (res.status === 429) {
-        if (i < gemKeys.length - 1) { await new Promise(r => setTimeout(r, 3000)); continue }
-        throw new Error('Gemini hết quota')
-      }
-      if (!res.ok) { continue }
-
-      const data = await res.json()
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      if (text.length > 100) {
-        if (onStep) onStep(`✅ Đã trích xuất ${text.length.toLocaleString()} ký tự`)
-        return text
-      }
-    } catch(e) {
-      if (i === gemKeys.length - 1) throw e
-      continue
-    }
+- Chỉ trả về nội dung văn bản thuần túy` }
+  ]
+  const res = await fetch('/api/gemini-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parts, maxTokens: 8192 }),
+  })
+  if (!res.ok) throw new Error(`Gemini proxy lỗi: ${res.status}`)
+  const data = await res.json()
+  const text = data.text || ''
+  if (text.length > 100) {
+    if (onStep) onStep(`✅ Đã trích xuất ${text.length.toLocaleString()} ký tự`)
+    return text
   }
   throw new Error('Không thể đọc PDF bằng Gemini')
 }
@@ -701,3 +669,4 @@ export default function DocDetail({ doc, onEdit, onClose }) {
     </div>
   )
 }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         

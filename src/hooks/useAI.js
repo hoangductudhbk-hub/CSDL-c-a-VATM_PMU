@@ -1,47 +1,12 @@
 // src/hooks/useAI.js
+// Keys KHÔNG bao giờ nằm ở browser — mọi call AI đi qua /api/groq-proxy và /api/gemini-proxy.
+// Vercel đọc process.env.GROQ_API_KEY và GEMINI_API_KEY ở server side (không có prefix VITE_).
 import { useState } from 'react'
-
-const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const GROQ_VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
-
-// ── Lấy keys ────────────────────────────────────────────────────
-const getGroqKeys = () => {
-  const fromEnv = [
-    import.meta.env.VITE_GROQ_API_KEY,
-    import.meta.env.VITE_GROQ_API_KEY_2,
-    import.meta.env.VITE_GROQ_API_KEY_3,
-  ].filter(Boolean)
-  if (fromEnv.length) return fromEnv
-  return (localStorage.getItem('groq_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
-}
-
-const getGemKeys = () => {
-  const fromEnv = [
-    import.meta.env.VITE_GEMINI_API_KEY,
-    import.meta.env.VITE_GEMINI_API_KEY_2,
-    import.meta.env.VITE_GEMINI_API_KEY_3,
-  ].filter(Boolean)
-  if (fromEnv.length) return fromEnv
-  return (localStorage.getItem('gemini_key') || '').split(/[,\n]/).map(k => k.trim()).filter(Boolean)
-}
-
-const saveKey = (k) => {
-  k = k.trim()
-  if (k.startsWith('gsk_')) {
-    const existing = (localStorage.getItem('groq_key') || '').split(',').map(x => x.trim()).filter(Boolean)
-    if (!existing.includes(k)) existing.push(k)
-    localStorage.setItem('groq_key', existing.join(','))
-  } else {
-    localStorage.setItem('gemini_key', k)
-  }
-}
 
 const resetIdxIfNewDay = () => {
   const today = new Date().toDateString()
   if (localStorage.getItem('ai_day') !== today) {
     localStorage.setItem('ai_day', today)
-    localStorage.setItem('ai_groq_idx', '0')
-    localStorage.setItem('ai_gem_idx', '0')
   }
 }
 
@@ -57,43 +22,61 @@ const SYSTEM = `Bạn là chuyên gia phân tích văn bản hành chính Việt
 - "status": "done" nếu đã ban hành, "prep" nếu chưa
 {"code":"","date":"","org":"","docType":"","subject":"","detail":"","note":"","status":"done"}`
 
-// ── Gọi Gemini qua /api/gemini-proxy (key nằm server, tránh CORS + AQ. key) ──
-// SỬA 22/6/2026: gọi trực tiếp từ browser fail với AQ. keys (CORS + format
-// key không đúng). Chuyển sang proxy server — xử lý đúng cả AIzaSy lẫn AQ.
-// Nếu proxy không khả dụng (dev local, lỗi) → return null, Groq fallback.
+// ── Gọi proxy server — key nằm server, browser không bao giờ thấy ──
+const withTimeout = (promise, ms) => Promise.race([
+  promise,
+  new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+])
+
 const callGemini = async (prompt, maxTokens = 1000) => {
   try {
-    const res = await fetch('/api/gemini-proxy', {
+    const res = await withTimeout(fetch('/api/gemini-proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, maxTokens }),
-    })
+    }), 5000)
     if (!res.ok) return null
     const data = await res.json()
     return data.text || null
   } catch { return null }
 }
 
-// ── Gọi Groq ────────────────────────────────────────────────────
+// callGroq → /api/groq-proxy (server đọc GROQ_API_KEY, browser không thấy key)
 const callGroq = async (prompt, maxTokens = 1000, system = null) => {
-  const keys = getGroqKeys()
-  for (const key of keys) {
-    try {
-      const messages = system
-        ? [{ role: 'system', content: system }, { role: 'user', content: prompt }]
-        : [{ role: 'user', content: prompt }]
-      const res = await fetch(GROQ_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model: 'llama-3.3-70b-versatile', max_tokens: maxTokens, temperature: 0.1, messages }),
-      })
-      if (res.status === 429) continue
-      if (!res.ok) continue
-      const result = (await res.json()).choices?.[0]?.message?.content || ''
-      if (result) return result
-    } catch { continue }
-  }
-  return null
+  try {
+    const messages = system
+      ? [{ role: 'system', content: system }, { role: 'user', content: prompt }]
+      : [{ role: 'user', content: prompt }]
+    const res = await withTimeout(fetch('/api/groq-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages, maxTokens }),
+    }), 5000)
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.text || null
+  } catch { return null }
+}
+
+// callGroqVision → /api/groq-proxy với vision:true + base64 image
+const callGroqVision = async (b64, promptText, maxTokens = 400) => {
+  try {
+    const messages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: promptText },
+        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }
+      ]
+    }]
+    const res = await withTimeout(fetch('/api/groq-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages, maxTokens, vision: true }),
+    }), 5000)
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.text || null
+  } catch { return null }
 }
 
 // ── Gọi AI: Gemini trước, Groq sau (tránh rate limit) ───────────
@@ -327,52 +310,26 @@ export function useAI() {
   }
 
   // ── analyzeImages ──
-  // 1) Groq Vision (timeout 4s) → nếu fail → 2) Tesseract → regex
+  // 1) Groq Vision qua proxy (key ở server) → 2) Tesseract → regex
   const analyzeImages = async (base64Images, fileName = '') => {
     setLoading(true)
     const hint = fileName ? ` (${fileName})` : ''
     const b64 = base64Images[0]
 
-    // ── Thử Groq Vision trước (nhanh & chính xác khi key hợp lệ) ──
-    const keys = getGroqKeys()
-    for (const key of keys) {
+    // Groq Vision qua /api/groq-proxy — key không ra browser
+    const visionPrompt = `Đọc header văn bản hành chính Việt Nam này. Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"cơ quan ban hành","docType":"loại văn bản","subject":"về việc gì"}`
+    const txt = await callGroqVision(b64, visionPrompt, 400)
+    if (txt) {
       try {
-        const ctrl = new AbortController()
-        const timer = setTimeout(() => ctrl.abort(), 4000) // timeout 4s
-        const res = await fetch(GROQ_URL, {
-          signal: ctrl.signal,
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-          body: JSON.stringify({
-            model: GROQ_VISION_MODEL,
-            max_tokens: 400,
-            temperature: 0.1,
-            messages: [{
-              role: 'user',
-              content: [
-                { type: 'text', text: `Đọc header văn bản hành chính Việt Nam này. Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"cơ quan ban hành","docType":"loại văn bản","subject":"về việc gì"}` },
-                { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }
-              ]
-            }]
-          }),
-        })
-        clearTimeout(timer)
-        if (res.ok) {
-          const txt = (await res.json()).choices?.[0]?.message?.content || ''
-          if (txt) {
-            try {
-              const m = txt.match(/\{[\s\S]*\}/)
-              if (m) {
-                const parsed = JSON.parse(m[0])
-                return JSON.stringify({ ...parsed, note: 'Groq Vision', status: 'done' })
-              }
-            } catch { /* fallthrough */ }
-          }
+        const m = txt.match(/\{[\s\S]*\}/)
+        if (m) {
+          const parsed = JSON.parse(m[0])
+          return JSON.stringify({ ...parsed, note: 'Groq Vision', status: 'done' })
         }
-      } catch { /* timeout hoặc lỗi mạng → thử key kế */ }
+      } catch { /* fallthrough */ }
     }
 
-    // ── Fallback: Tesseract + regex ──
+    // Fallback: Tesseract + regex
     try {
       const { createWorker } = await import('tesseract.js')
       const worker = await createWorker(['vie', 'eng'])
@@ -402,70 +359,4 @@ export function useAI() {
 📋 Tóm tắt: ${memory.summary || ''}
 📌 Điểm quan trọng: ${(memory.keyPoints || []).join('; ')}
 👥 Thành viên: ${(memory.members || []).join('; ')}
-⚙️ Thông số kỹ thuật: ${(memory.technicalSpecs || []).join('; ')}
-💰 Tài chính: ${(memory.financial || []).join('; ')}
-⚖️ Pháp lý: ${(memory.legal || []).join('; ')}
-📅 Tiến độ: ${(memory.deadlines || []).join('; ')}
-📋 Yêu cầu: ${memory.requirements || ''}
-⚠️ Rủi ro: ${memory.risks || ''}
-📊 Dữ liệu khác: ${(memory.otherData || []).join('; ')}`
-
-    const ragSection = relevantText
-      ? `\n📄 ĐOẠN VĂN BẢN GỐC LIÊN QUAN:\n---\n${relevantText}\n---`
-      : ''
-
-    const historyCtx = chatHistory.slice(-4).map(m =>
-      `${m.role === 'user' ? 'Hỏi' : 'Trả lời'}: ${m.content}`).join('\n')
-
-    const prompt = `Bạn là trợ lý tra cứu văn bản hành chính Việt Nam.
-
-NGUYÊN TẮC:
-- Ưu tiên dùng ĐOẠN VĂN BẢN GỐC (nếu có) — chính xác nhất
-- Bổ sung từ BỘ NHỚ TỔNG HỢP nếu cần
-- Trích dẫn NGUYÊN VĂN câu chữ từ văn bản
-- KHÔNG bịa thêm thông tin
-- Nếu không có thông tin → nói: "Văn bản không có thông tin này"
-${ragSection}
-
-${ctx}
-${historyCtx ? '\nLỊCH SỬ:\n' + historyCtx : ''}
-
-CÂU HỎI: ${question}
-Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
-
-    try {
-      // Gemini trước cho chat — nhanh và ít rate limit
-      const gem = await callGemini(prompt, 2000)
-      if (gem) return gem
-      const groq = await callGroq(prompt, 2000)
-      if (groq) return groq
-      const err = new Error('AI_RATE_LIMIT')
-      err.waitSeconds = 30
-      throw err
-    } finally { setLoading(false) }
-  }
-
-  // ── ask: chat thông thường về dự án ──
-  const ask = async (question, context = '') => {
-    setLoading(true)
-    resetIdxIfNewDay()
-    const sys = `Bạn là trợ lý quản lý dự án VATM. Trả lời tiếng Việt, chi tiết và hữu ích.${context ? '\n\nDỮ LIỆU DỰ ÁN:\n' + context : ''}`
-    try {
-      const gem = await callGemini(`${sys}\n\nCâu hỏi: ${question}`, 1200)
-      if (gem) return gem
-      const groq = await callGroq(question, 1200, sys)
-      if (groq) return groq
-      const err = new Error('AI_RATE_LIMIT')
-      err.waitSeconds = 30
-      throw err
-    } finally { setLoading(false) }
-  }
-
-  return {
-    ask, analyzeText, analyzeImages, analyzeDeepForMemory, askDeep,
-    getKey: () => getGroqKeys()[0] || getGemKeys()[0],
-    saveKey,
-    isReal: () => Boolean(getGroqKeys().length || getGemKeys().length),
-    loading,
-  }
-}
+⚙️ Thông số kỹ thuật: ${(memory.technicalSp

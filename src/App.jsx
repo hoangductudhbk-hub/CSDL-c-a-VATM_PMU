@@ -137,37 +137,23 @@ function FloatingUpload({ onOpen }) {
   )
 }
 
-function KeyModal({ onClose, saveKey }) {
-  const existing    = (localStorage.getItem('groq_key')    || '').split(',').map(k=>k.trim()).filter(Boolean)
-  const existingGem = (localStorage.getItem('gemini_key') || '').split(',').map(k=>k.trim()).filter(Boolean)
-  const [groq1, setG1]   = useState(existing[0]    || '')
-  const [groq2, setG2]   = useState(existing[1]    || '')
-  const [groq3, setG3]   = useState(existing[2]    || '')
-  const [gem1,  setGem1] = useState(existingGem[0] || '')
-  const [gem2,  setGem2] = useState(existingGem[1] || '')
-  const [gem3,  setGem3] = useState(existingGem[2] || '')
-  const save = () => {
-    localStorage.setItem('groq_key',    [groq1,groq2,groq3].map(k=>k.trim()).filter(Boolean).join(','))
-    const gemKeys = [gem1,gem2,gem3].map(k=>k.trim()).filter(Boolean)
-    if (gemKeys.length) localStorage.setItem('gemini_key', gemKeys.join(','))
-    onClose()
-  }
-  const iSt = { width:'100%', padding:'9px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:12, outline:'none', boxSizing:'border-box', marginBottom:8, fontFamily:'monospace' }
-  const lSt = { fontSize:12, fontWeight:600, color:'#444', display:'block', marginBottom:4, marginTop:10 }
+function KeyModal({ onClose }) {
+  // Keys được quản lý trên Vercel (Settings → Environment Variables), không lưu ở browser.
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:9999 }}>
-      <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:500, boxShadow:'0 8px 32px rgba(0,0,0,.2)', maxHeight:'90vh', overflowY:'auto' }}>
-        <h3 style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>⚙️ Cài API Key AI</h3>
-        <label style={lSt}>🔵 Groq key #1</label><input value={groq1} onChange={e=>setG1(e.target.value)} placeholder="gsk_..." autoFocus style={iSt}/>
-        <label style={lSt}>🔵 Groq key #2</label><input value={groq2} onChange={e=>setG2(e.target.value)} placeholder="gsk_..." style={iSt}/>
-        <label style={lSt}>🔵 Groq key #3</label><input value={groq3} onChange={e=>setG3(e.target.value)} placeholder="gsk_..." style={iSt}/>
-        <div style={{ margin:'12px 0', borderTop:'0.5px solid #eee' }}/>
-        <label style={lSt}>🟢 Gemini key #1</label><input value={gem1} onChange={e=>setGem1(e.target.value)} placeholder="AIza..." style={iSt}/>
-        <label style={lSt}>🟢 Gemini key #2</label><input value={gem2} onChange={e=>setGem2(e.target.value)} placeholder="AIza..." style={iSt}/>
-        <label style={lSt}>🟢 Gemini key #3</label><input value={gem3} onChange={e=>setGem3(e.target.value)} placeholder="AIza..." style={{...iSt, marginBottom:16}}/>
-        <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
-          <button onClick={onClose} style={{ padding:'8px 16px', border:'0.5px solid #ddd', borderRadius:8, cursor:'pointer', background:'#fff', fontSize:13 }}>Hủy</button>
-          <button onClick={save}    style={{ padding:'8px 20px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>💾 Lưu key</button>
+      <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:460, boxShadow:'0 8px 32px rgba(0,0,0,.2)' }}>
+        <h3 style={{ fontSize:15, fontWeight:600, marginBottom:8 }}>⚙️ Cài đặt API Key AI</h3>
+        <p style={{ fontSize:13, color:'#555', lineHeight:1.6, marginBottom:16 }}>
+          API key được lưu an toàn trên server (Vercel), không lưu trong trình duyệt.<br/>
+          Để cập nhật key mới, vào <b>Vercel → Settings → Environment Variables</b> và điền:
+        </p>
+        <ul style={{ fontSize:12, color:'#444', lineHeight:2, paddingLeft:20, marginBottom:16 }}>
+          <li><code>GROQ_API_KEY</code> — lấy tại <a href="https://console.groq.com" target="_blank" rel="noreferrer">console.groq.com</a></li>
+          <li><code>GROQ_API_KEY_2</code>, <code>GROQ_API_KEY_3</code> (tùy chọn, dự phòng)</li>
+          <li><code>GEMINI_API_KEY</code> — lấy tại <a href="https://aistudio.google.com" target="_blank" rel="noreferrer">aistudio.google.com</a></li>
+        </ul>
+        <div style={{ display:'flex', justifyContent:'flex-end' }}>
+          <button onClick={onClose} style={{ padding:'8px 20px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>Đóng</button>
         </div>
       </div>
     </div>
@@ -244,7 +230,7 @@ function AppInner() {
 
   const { docs, allDocs, addDocument, updateDocument, deleteDocument } = useDocuments(proj?.id, user?.uid, selPkg)
   const { deleteFile }    = useCloudinaryStorage()
-  const { ask, getKey, saveKey } = useAI()
+  const { ask } = useAI()
 
   // Load memories của tất cả văn bản trong dự án
   const [projMemories, setProjMemories] = useState({})
@@ -839,7 +825,7 @@ ${memCtx}`
         </div>
       )}
 
-      {showKeyModal && <KeyModal onClose={() => setShowKeyModal(false)} saveKey={saveKey}/>}
+      {showKeyModal && <KeyModal onClose={() => setShowKeyModal(false)}/>}
       <FloatingUpload onOpen={openFromDraft}/>
     </div>
   )
@@ -848,3 +834,4 @@ ${memCtx}`
 export default function App() {
   return <UploadProvider><AppInner /></UploadProvider>
 }
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
