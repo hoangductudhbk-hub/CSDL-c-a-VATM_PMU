@@ -1,7 +1,8 @@
 // src/hooks/useDocMemory.js
 // Lưu và đọc bộ nhớ phân tích sâu từng văn bản
+// Dùng onSnapshot để real-time — tự cập nhật khi pipeline lưu xong
 import { useState, useEffect } from 'react'
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '../firebase'
 
 export function useDocMemory(docId) {
@@ -10,9 +11,16 @@ export function useDocMemory(docId) {
 
   useEffect(() => {
     if (!docId) { setLoading(false); return }
-    getDoc(doc(db, 'documentMemory', docId))
-      .then(snap => setMemory(snap.exists() ? snap.data() : null))
-      .finally(() => setLoading(false))
+    setLoading(true)
+    const unsub = onSnapshot(
+      doc(db, 'documentMemory', docId),
+      snap => {
+        setMemory(snap.exists() ? snap.data() : null)
+        setLoading(false)
+      },
+      () => setLoading(false)   // lỗi → dừng loading
+    )
+    return () => unsub()
   }, [docId])
 
   const saveMemory = async (data) => {
