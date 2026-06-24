@@ -58,38 +58,55 @@ const renderPageToJpeg = async (page) => {
   return canvas.toDataURL('image/jpeg', 0.8).split(',')[1]
 }
 
-// ─── OCR scan PDF bằng Groq Vision (tối đa 8 trang) ───────────────────────
+// ─── OCR scan PDF bằng Groq Vision → fallback Gemini Vision ───────────────
 const ocrScanPdf = async (buf, groqKey, onStatus) => {
   const lib = await loadPdfJs()
   const pdf = await lib.getDocument({ data: buf }).promise
-  const maxOcr = Math.min(pdf.numPages, 8)
+  const maxOcr = Math.min(pdf.numPages, 10)
   let allText = ''
+  let groqWorking = !!groqKey  // nếu không có key → dùng Gemini ngay
+
   for (let i = 1; i <= maxOcr; i++) {
     if (onStatus) onStatus(`🔍 OCR trang ${i}/${maxOcr}...`)
     const page = await pdf.getPage(i)
     const b64 = await renderPageToJpeg(page)
-    try {
-      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${groqKey}` },
-        body: JSON.stringify({
-          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-          max_tokens: 2000,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'text', text: 'Đọc toàn bộ văn bản trong ảnh này. Trả về đúng text, giữ nguyên số liệu và tên.' },
-              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }
-            ]
-          }]
+    let pageText = ''
+
+    // Thử Groq Vision trước
+    if (groqWorking && groqKey) {
+      try {
+        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${groqKey}` },
+          body: JSON.stringify({
+            model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+            max_tokens: 2000,
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'text', text: 'Đọc toàn bộ văn bản trong ảnh này. Trả về đúng text, giữ nguyên số liệu và tên.' },
+                { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }
+              ]
+            }]
+          })
         })
-      })
-      if (res.ok) {
-        const data = await res.json()
-        allText += (data.choices?.[0]?.message?.content || '') + '\n'
-      }
-    } catch {}
-    await new Promise(r => setTimeout(r, 1200))
+        if (res.status === 401 || res.status === 403) {
+          groqWorking = false  // key hết hạn → chuyển hẳn sang Gemini
+        } else if (res.ok) {
+          const data = await res.json()
+          pageText = data.choices?.[0]?.message?.content || ''
+        }
+        if (pageText) { allText += pageText + '\n'; await new Promise(r => setTimeout(r, 1200)); continue }
+      } catch {}
+    }
+
+    // Fallback: Gemini Vision qua proxy server
+    if (!pageText) {
+      if (onStatus) onStatus(`🔍 OCR trang ${i}/${maxOcr} (Gemini)...`)
+      pageText = await ocrPageWithGemini(b64, i)
+      allText += pageText + '\n'
+      await new Promise(r => setTimeout(r, 500))
+    }
   }
   return allText
 }
@@ -118,8 +135,8 @@ const extractXlsxText = async (buf) => {
 }
 
 // ─── AI tổng hợp text → markdown ──────────────────────────────────────────
-const analyzeWithAI = async (text, fileName, groqKeys) => {
-  const prompt = `Bạn là chuyên gia phân tích văn bản hành chính Việt Nam.
+const buildPrompt = (text, fileName) =>
+  `Bạn là chuyên gia phân tích văn bản hành chính Việt Nam.
 Đây là nội dung văn bản: "${fileName}"
 
 Hãy tổng hợp thành bộ nhớ hoàn chỉnh dạng Markdown với các mục:
@@ -146,8 +163,13 @@ Hãy tổng hợp thành bộ nhớ hoàn chỉnh dạng Markdown với các m�
 (5-15 từ khóa đặc trưng)
 
 NỘI DUNG VĂN BẢN:
-${text.slice(0, 12000)}`
+${text.slice(0, 14000)}`
 
+// Thử Groq → nếu 401/fail toàn bộ → fallback Gemini proxy server-side
+const analyzeWithAI = async (text, fileName, groqKeys) => {
+  const prompt = buildPrompt(text, fileName)
+
+  // 1. Thử Groq trước
   for (const key of groqKeys) {
     try {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -160,14 +182,51 @@ ${text.slice(0, 12000)}`
           messages: [{ role: 'user', content: prompt }]
         })
       })
-      if (res.status === 429) continue
+      if (res.status === 429 || res.status === 401) continue
       if (!res.ok) continue
       const data = await res.json()
       const result = data.choices?.[0]?.message?.content || ''
       if (result.length > 100) return result
     } catch { continue }
   }
+
+  // 2. Groq thất bại → thử Gemini qua proxy server (không bị CORS, key server-side)
+  try {
+    const res = await fetch('/api/gemini-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt, maxTokens: 3000 }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      const result = data.text || ''
+      if (result.length > 100) return result
+    }
+  } catch {}
+
   return null
+}
+
+// ─── OCR scan PDF bằng Groq Vision → fallback Gemini Vision ───────────────
+const ocrPageWithGemini = async (b64, pageNum) => {
+  try {
+    const res = await fetch('/api/gemini-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parts: [
+          { text: `Đọc toàn bộ văn bản trong trang ${pageNum} này. Trả về đúng text, giữ nguyên số liệu và tên.` },
+          { inlineData: { mimeType: 'image/jpeg', data: b64 } }
+        ],
+        maxTokens: 2000,
+      }),
+    })
+    if (res.ok) {
+      const data = await res.json()
+      return data.text || ''
+    }
+  } catch {}
+  return ''
 }
 
 // ─── Hook chính ────────────────────────────────────────────────────────────
@@ -273,16 +332,42 @@ export function useProcessPipeline() {
       }
 
       if (ext === 'pdf') {
-        const { text, totalPages: tp } = await extractPdfText(buf.slice(0))
-        rawText = text; totalPages = tp
-        const avgChars = rawText.length / Math.max(totalPages, 1)
-        // Phát hiện watermark hệ thống VATM/Voffice: text có nhưng là watermark chứ không phải nội dung
-        const hasWatermark = /tải\s+về\s+từ\s+(?:hệ\s+thống|vatm)|thông\s+tin\s+tải\s+về|phòng\s*nghiệp\s*vụ|da\.phongnv/i.test(rawText)
-        isScan = avgChars < 80 || hasWatermark
-        if (isScan) {
-          const reason = hasWatermark ? 'PDF có watermark hệ thống' : `PDF scan (${totalPages} trang)`
-          report(`🔍 ${reason} — đang OCR bằng AI Vision...`, 30)
-          rawText = await ocrScanPdf(buf.slice(0), groqKeys[0], report)
+        // ── A. Mistral OCR qua server (1 call, chất lượng cao, hỗ trợ 125+ trang) ──
+        report('🤖 Đang OCR toàn bộ PDF (Mistral)...', 15)
+        let mistralDone = false
+        try {
+          const mRes = await fetch('/api/ocr-document', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileUrl, fileName: fileName || '' }),
+          })
+          if (mRes.ok) {
+            const mData = await mRes.json()
+            if (mData.ok && mData.markdown?.length > 200) {
+              rawText = mData.markdown
+              totalPages = mData.pages || 1
+              isScan = true
+              mistralDone = true
+              report(`✅ OCR xong: ${totalPages} trang, ${(rawText.length/1000).toFixed(0)}K ký tự (${mData.engine})`, 55)
+            }
+          }
+        } catch (e) {
+          console.warn('[pipeline] Mistral OCR lỗi:', e.message)
+        }
+
+        // ── B. Fallback: pdf.js extract, detect watermark, Vision OCR ──
+        if (!mistralDone) {
+          report('📄 Thử đọc text layer PDF...', 20)
+          const { text, totalPages: tp } = await extractPdfText(buf.slice(0))
+          rawText = text; totalPages = tp
+          const avgChars = rawText.length / Math.max(totalPages, 1)
+          const hasWatermark = /tải\s+về\s+từ\s+(?:hệ\s+thống|vatm)|thông\s+tin\s+tải\s+về|phòng\s*nghiệp\s*vụ|da\.phongnv/i.test(rawText)
+          isScan = avgChars < 80 || hasWatermark
+          if (isScan) {
+            const reason = hasWatermark ? 'PDF watermark hệ thống' : `PDF scan (${totalPages} trang)`
+            report(`🔍 ${reason} — đang Vision OCR...`, 30)
+            rawText = await ocrScanPdf(buf.slice(0), groqKeys[0], report)
+          }
         }
       } else if (['doc', 'docx'].includes(ext)) {
         rawText = await extractDocxText(buf)
