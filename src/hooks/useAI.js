@@ -109,6 +109,47 @@ const callAI = async (prompt, maxTokens = 1000) => {
   throw err
 }
 
+// ── Regex parser khi AI không khả dụng ─────────────────────────
+const parseVietnameseDoc = (text, hint = '') => {
+  const t = text.replace(/\s+/g, ' ')
+
+  // Số ký hiệu: 123/QĐ-ABCDE hoặc 123/NQ-HĐTV
+  const codeM = t.match(/[Ss]ố[:\s]*(\d+[\w\/\-\.]+(?:QĐ|NQ|CV|TT|BC|BB|TB|HD|QT|KH|CT|PL|TTLT|NĐ|TT|MT)[\w\/\-\.]*)/i)
+             || t.match(/(\d{1,4}\/[\w\-\/\.]{3,30})/i)
+  const code = codeM ? codeM[1].trim() : ''
+
+  // Ngày: ngày DD tháng MM năm YYYY hoặc DD/MM/YYYY
+  const dateM = t.match(/ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(20\d\d)/i)
+             || t.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](20\d\d)/)
+  const date = dateM ? (dateM[3] ? `${dateM[1]}/${dateM[2]}/${dateM[3]}` : dateM[0]) : ''
+
+  // Cơ quan ban hành: dòng trước "Số:"
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean)
+  const soIdx = lines.findIndex(l => /^[Ss]ố[:\s]/.test(l))
+  const org = soIdx > 0 ? lines.slice(Math.max(0, soIdx - 3), soIdx)
+    .filter(l => l.length > 5 && l.length < 80 && !/^(cộng hòa|việt nam)/i.test(l))
+    .pop() || '' : ''
+
+  // Loại văn bản
+  const docTypeMap = [
+    ['Quyết định', /quyết định/i], ['Nghị quyết', /nghị quyết/i],
+    ['Công văn', /công văn/i], ['Tờ trình', /tờ trình/i],
+    ['Báo cáo', /báo cáo/i], ['Hợp đồng', /hợp đồng/i],
+    ['Biên bản', /biên bản/i], ['Thông báo', /thông báo/i],
+  ]
+  const docType = docTypeMap.find(([, rx]) => rx.test(t))?.[0] || 'Khác'
+
+  // Chủ đề: dòng bắt đầu bằng "V/v" hoặc "về việc"
+  const subjM = t.match(/[Vv]\/[Vv][:\s]+(.{10,150}?)(?:\n|$)/)
+             || t.match(/[Vv]ề\s+việc[:\s]+(.{10,150}?)(?:\n|$)/)
+  const subject = subjM ? subjM[1].trim() : (lines.slice(0, 8).find(l => l.length > 20 && l.length < 150) || `Văn bản${hint}`)
+
+  return JSON.stringify({ code, date, org, docType, subject,
+    detail: lines.slice(0, 10).join(' ').slice(0, 300),
+    note: 'Trích xuất bằng Tesseract.js + regex (AI không khả dụng)',
+    status: 'done' })
+}
+
 // ── Prompt chunk trích xuất chi tiết ────────────────────────────
 const buildChunkPrompt = (chunk, idx, total, fileName) => `
 Bạn là chuyên gia trích xuất thông tin văn bản hành chính Việt Nam.
@@ -287,32 +328,26 @@ export function useAI() {
         }
       } catch {}
 
-      // 3. Tesseract.js — OCR trong browser, không cần API key
+      // 3. Tesseract.js — chỉ OCR trang 1 (metadata luôn ở trang đầu)
       try {
         const { createWorker } = await import('tesseract.js')
         const worker = await createWorker(['vie', 'eng'])
+        // Chỉ cần 2 trang đầu: số ký hiệu, ngày, cơ quan, nội dung chính
         let ocrText = ''
-        for (const b64 of base64Images.slice(0, 10)) {
+        for (const b64 of base64Images.slice(0, 2)) {
           const { data: { text } } = await worker.recognize(`data:image/jpeg;base64,${b64}`)
           ocrText += (text || '') + '\n'
         }
         await worker.terminate()
 
         if (ocrText.trim().length > 30) {
-          // Thử AI phân tích text vừa OCR
-          const textPrompt = `${SYSTEM}\n\nPhân tích văn bản (OCR từ scan)${hint}:\n---\n${ocrText.slice(0, 6000)}\n---`
+          // Thử AI phân tích text vừa OCR (nhanh hơn vision)
+          const textPrompt = `${SYSTEM}\n\nPhân tích văn bản (OCR từ scan)${hint}:\n---\n${ocrText.slice(0, 4000)}\n---`
           const aiResult = await callGemini(textPrompt, 1000) || await callGroq(textPrompt, 1000)
           if (aiResult) return aiResult
 
-          // AI cũng fail → trả JSON cơ bản từ text OCR
-          const lines = ocrText.split('\n').filter(l => l.trim()).slice(0, 5).join(' ')
-          return JSON.stringify({
-            code: '', date: '', org: '', docType: 'Khác',
-            subject: lines.slice(0, 150) || `Văn bản scan${hint}`,
-            detail: ocrText.slice(0, 300),
-            note: 'Trích xuất bằng Tesseract.js (AI không khả dụng)',
-            status: 'done',
-          })
+          // AI fail → regex trực tiếp từ OCR text (không cần AI)
+          return parseVietnameseDoc(ocrText, hint)
         }
       } catch (e) {
         console.warn('[analyzeImages] Tesseract lỗi:', e.message)

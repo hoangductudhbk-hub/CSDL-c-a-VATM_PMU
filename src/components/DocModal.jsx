@@ -141,7 +141,7 @@ export default function DocModal({ doc, onSave, onClose }) {
     const text = await extractPdfText(buf.slice(0))
     if (isRealContent(text)) return await analyzeText(text, fileName)
     setSt('⏳ Đang trích xuất thông tin...')
-    const imgs = await renderPdfToImages(buf.slice(0))
+    const imgs = await renderPdfToImages(buf.slice(0), 2)  // chỉ 2 trang đầu cho form fill
     return await analyzeImages(imgs, fileName)
   }
 
