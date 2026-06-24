@@ -8,9 +8,9 @@ const TEXT_MODEL = 'llama-3.3-70b-versatile'
 const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 
 const getGroqKeys = () => [
-  process.env.GROQ_API_KEY,
-  process.env.GROQ_API_KEY_2,
-  process.env.GROQ_API_KEY_3,
+  process.env.VITE_GROQ_API_KEY,
+  process.env.VITE_GROQ_API_KEY_2,
+  process.env.VITE_GROQ_API_KEY_3,
 ].filter(Boolean)
 
 export default async function handler(req, res) {

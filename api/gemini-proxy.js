@@ -9,9 +9,9 @@
 // gemini-2.5-flash / gemini-2.5-flash-lite.
 
 const getGeminiKeys = () => [
-  process.env.GEMINI_API_KEY,
-  process.env.GEMINI_API_KEY_2,
-  process.env.GEMINI_API_KEY_3,
+  process.env.VITE_GEMINI_API_KEY,
+  process.env.VITE_GEMINI_API_KEY_2,
+  process.env.VITE_GEMINI_API_KEY_3,
 ].filter(Boolean)
 
 const geminiUrl = (model, key) =>
