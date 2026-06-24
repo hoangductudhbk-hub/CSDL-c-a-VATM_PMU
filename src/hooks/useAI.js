@@ -241,12 +241,13 @@ export function useAI() {
   }
 
   // ── analyzeImages ──
+  // Chain: Groq Vision → Gemini Vision → Tesseract.js OCR + AI text → basic JSON
   const analyzeImages = async (base64Images, fileName = '') => {
     setLoading(true)
     resetIdxIfNewDay()
     const hint = fileName ? ` (${fileName})` : ''
     try {
-      // Groq Vision
+      // 1. Groq Vision
       const keys = getGroqKeys()
       for (const key of keys) {
         try {
@@ -266,7 +267,8 @@ export function useAI() {
           if (result) return result
         } catch { continue }
       }
-      // Gemini fallback — gửi ảnh qua proxy (proxy nhận parts[])
+
+      // 2. Gemini Vision qua proxy
       try {
         const gemRes = await fetch('/api/gemini-proxy', {
           method: 'POST',
@@ -284,6 +286,38 @@ export function useAI() {
           if (d.text) return d.text
         }
       } catch {}
+
+      // 3. Tesseract.js — OCR trong browser, không cần API key
+      try {
+        const { createWorker } = await import('tesseract.js')
+        const worker = await createWorker(['vie', 'eng'])
+        let ocrText = ''
+        for (const b64 of base64Images.slice(0, 10)) {
+          const { data: { text } } = await worker.recognize(`data:image/jpeg;base64,${b64}`)
+          ocrText += (text || '') + '\n'
+        }
+        await worker.terminate()
+
+        if (ocrText.trim().length > 30) {
+          // Thử AI phân tích text vừa OCR
+          const textPrompt = `${SYSTEM}\n\nPhân tích văn bản (OCR từ scan)${hint}:\n---\n${ocrText.slice(0, 6000)}\n---`
+          const aiResult = await callGemini(textPrompt, 1000) || await callGroq(textPrompt, 1000)
+          if (aiResult) return aiResult
+
+          // AI cũng fail → trả JSON cơ bản từ text OCR
+          const lines = ocrText.split('\n').filter(l => l.trim()).slice(0, 5).join(' ')
+          return JSON.stringify({
+            code: '', date: '', org: '', docType: 'Khác',
+            subject: lines.slice(0, 150) || `Văn bản scan${hint}`,
+            detail: ocrText.slice(0, 300),
+            note: 'Trích xuất bằng Tesseract.js (AI không khả dụng)',
+            status: 'done',
+          })
+        }
+      } catch (e) {
+        console.warn('[analyzeImages] Tesseract lỗi:', e.message)
+      }
+
       return ''
     } finally { setLoading(false) }
   }

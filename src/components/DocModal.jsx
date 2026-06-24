@@ -148,7 +148,7 @@ export default function DocModal({ doc, onSave, onClose }) {
   const handleFile = async (e) => {
     const files = Array.from(e.target.files)
     if (!files.length) return
-    if (!getKey()) { alert('Chưa có Groq API key! Nhấn ⚙️ Cài key AI bên dưới.'); return }
+    // Không bắt buộc API key — Tesseract.js sẽ OCR nếu AI không khả dụng
 
     if (files.length === 1) {
       const file = files[0]; const ext = file.name.split('.').pop().toLowerCase()
