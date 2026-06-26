@@ -67,7 +67,23 @@ const extractXlsxText = async (buf) => {
   wb.SheetNames.slice(0,3).forEach(n=>{text+=`[${n}]\n`+window.XLSX.utils.sheet_to_txt(wb.Sheets[n])+'\n'})
   return text.slice(0,8000)
 }
-const parseJ = (s) => { try{const m=s.match(/\{[\s\S]*\}/);return JSON.parse(m?m[0]:s.replace(/```json|```/g,'').trim())}catch{return null} }
+// Xóa quốc hiệu/tiêu ngữ bị dính vào "Cơ quan ban hành" do PDF header 2 cột
+// (cột trái: cơ quan ban hành, cột phải: quốc hiệu/tiêu ngữ) bị gộp chung 1 dòng khi extract text
+const cleanOrgField = (s = '') => {
+  if (!s) return s
+  return s
+    .split(/(?=Cộng\s*hòa\s*xã\s*hội|Độc\s*lập\s*[-–—]?\s*Tự\s*do)/i)[0]
+    .replace(/[-–—,.\s]+$/, '')
+    .trim()
+}
+const parseJ = (s) => {
+  try {
+    const m = s.match(/\{[\s\S]*\}/)
+    const obj = JSON.parse(m ? m[0] : s.replace(/```json|```/g, '').trim())
+    if (obj && obj.org) obj.org = cleanOrgField(obj.org)
+    return obj
+  } catch { return null }
+}
 
 // ── Lưu Markdown lên Firestore documentMarkdown ──────────────────
 const saveMarkdownToFirestore = async (markdown, fileName) => {
@@ -89,7 +105,7 @@ const saveMarkdownToFirestore = async (markdown, fileName) => {
 
 export default function DocModal({ doc, onSave, onClose }) {
   const isEdit = Boolean(doc?.id)
-  const { ask, analyzeText, analyzeImages, getKey, saveKey, isReal } = useAI()
+  const { ask, analyzeText, analyzeImages } = useAI()
   const { uploadFile, uploading, getCloudName, saveCloudName } = useCloudinaryStorage()
 
   const [form, setForm] = useState({ code:'',date:'',org:'',subject:'',docType:'Công văn',status:'prep',detail:'',note:'', ...(doc||{}) })
@@ -140,11 +156,10 @@ export default function DocModal({ doc, onSave, onClose }) {
     // Đọc text nhanh bằng pdfjs (< 0.5s)
     const text = await extractPdfText(buf.slice(0))
     if (isRealContent(text)) {
-      // Có text → regex ngay lập tức (không đợi AI)
-      return parseVietnameseDoc(text, '', fileName)
+      return await analyzeText(text.slice(0, 1500), fileName)
     }
-    // PDF scan → OCR chỉ phần header (30% trên trang 1)
-    setSt('⏳ Đang nhận dạng header...')
+    // PDF scan → Groq Vision header (30% trên trang 1, timeout 5s)
+    setSt('⏳ Đang đọc header văn bản...')
     const imgs = await renderPdfHeaderImage(buf.slice(0))
     return await analyzeImages(imgs, fileName)
   }
@@ -171,32 +186,30 @@ export default function DocModal({ doc, onSave, onClose }) {
             rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, null)
           }
           if (isRealContent(rawExtracted)) {
-            // Có text → regex ngay (< 0.5s), chỉ cần 3000 ký tự đầu
-            result = parseVietnameseDoc(rawExtracted.slice(0, 500), '', file.name)
+            result = await analyzeText(rawExtracted.slice(0, 1500), file.name)
           } else {
-            setSt('⏳ Đang nhận dạng header...')
+            setSt('⏳ Đang đọc header văn bản...')
             const imgs = await renderPdfHeaderImage(buf.slice(0))
             result = await analyzeImages(imgs, file.name)
           }
         } else if (['doc','docx'].includes(ext)) {
           rawExtracted = await extractDocxText(buf)
-          result = parseVietnameseDoc(rawExtracted.slice(0, 500), '', file.name)
+          result = await analyzeText(rawExtracted.slice(0, 1500), file.name)
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['xls','xlsx'].includes(ext)) {
           rawExtracted = await extractXlsxText(buf)
-          result = parseVietnameseDoc(rawExtracted.slice(0, 500), '', file.name)
+          result = await analyzeText(rawExtracted.slice(0, 1500), file.name)
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['txt', 'md', 'csv'].includes(ext)) {
           const t = await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,100000));rd.readAsText(file,'utf-8')})
           rawExtracted = t.slice(0, 100000)
           if (['md','csv'].includes(ext)) {
-            // .md/.csv: lưu thẳng vào bộ nhớ, không qua AI phân tích cấu trúc
             setSt('📋 Lưu nội dung vào bộ nhớ...')
             await saveMarkdownToFirestore(rawExtracted, file.name)
             setSt('✅ Đã lưu vào bộ nhớ! Điền thêm thông tin văn bản nếu cần.')
             setExtractedText(rawExtracted); setLoad(false); return
           }
-          result = parseVietnameseDoc(t.slice(0, 500), '', file.name)
+          result = await analyzeText(t.slice(0, 1500), file.name)
         } else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
         setExtractedText(rawExtracted)
         // Lưu markdown lên Firestore ngay (không cần docId)
@@ -227,10 +240,10 @@ export default function DocModal({ doc, onSave, onClose }) {
         const bBuf = await file.arrayBuffer()
         if (ext==='pdf') {
           batchExtracted = await extractPdfFull(bBuf.slice(0), file.name, null, (msg) => { queue[i].status=msg; setFQ([...queue]) })
-          result = isRealContent(batchExtracted) ? parseVietnameseDoc(batchExtracted.slice(0,500),'',file.name) : await processOnePdf(bBuf,file.name)
+          result = isRealContent(batchExtracted) ? await analyzeText(batchExtracted.slice(0,1500),file.name) : await processOnePdf(bBuf,file.name)
         } else if (['doc','docx'].includes(ext)) {
           batchExtracted = (await extractDocxText(bBuf)).slice(0,100000)
-          result = parseVietnameseDoc(batchExtracted.slice(0,3000),'',file.name)
+          result = await analyzeText(batchExtracted.slice(0,1500),file.name)
         } else if (['xls','xlsx'].includes(ext)) {
           batchExtracted = (await extractXlsxText(bBuf)).slice(0,100000)
           result = parseVietnameseDoc(batchExtracted.slice(0,3000),'',file.name)

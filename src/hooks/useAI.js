@@ -12,9 +12,28 @@ const resetIdxIfNewDay = () => {
 
 const SYSTEM = `Bạn là chuyên gia phân tích văn bản hành chính Việt Nam.
 Đọc nội dung (3 trang đầu) và trả về JSON duy nhất, không giải thích thêm.
-- "code": số ký hiệu dạng "404/NQ-HĐTV"
-- "date": CHỈ dạng số D/M/YYYY hoặc M/YYYY
-- "org": cơ quan BAN HÀNH
+
+BƯỚC 1 — Xác định loại văn bản trước, vì mỗi loại có cách đọc khác nhau:
+
+(A) NẾU là Quyết định/Nghị quyết/Công văn/Tờ trình/Báo cáo/Thông báo:
+Header LUÔN có cấu trúc cố định 2 cột:
+[Cơ quan chủ quản cấp trên]          [CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM]
+[Cơ quan ban hành]                   [Độc lập - Tự do - Hạnh phúc]
+[Số: .../...]                        [Địa danh, ngày ... tháng ... năm ...]
+(PDF có thể gộp 2 cột dính liền thành 1 dòng — tự suy luận tách đúng theo cấu trúc trên)
+→ "org" CHỈ lấy [Cơ quan ban hành] (dòng ngay TRƯỚC "Số:"). TUYỆT ĐỐI KHÔNG lấy [Cơ quan chủ quản cấp trên] (dòng phía trên, ví dụ Tổng công ty/Bộ/UBND cấp trên — khác cấp, không lấy), KHÔNG lấy "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", KHÔNG lấy "Độc lập - Tự do - Hạnh phúc".
+
+(B) NẾU là Hợp đồng/Biên bản/Hồ sơ/Bản vẽ hoặc bất kỳ loại nào KHÔNG theo mẫu trên:
+KHÔNG áp đặt cấu trúc 2 cột — tự đọc và suy luận từ ngữ cảnh trang đầu:
+- "code": tìm cụm "Số:" hoặc "Hợp đồng số:" xuất hiện ở bất kỳ vị trí nào trong trang đầu (có thể ở đầu, giữa dòng tiêu đề, hoặc cuối trang).
+- "date": tìm ngày ký/lập — với Hợp đồng/Biên bản thường nằm trong câu mở đầu dạng "Hôm nay, ngày... tháng... năm..., tại...", hoặc gần phần ký tên cuối văn bản.
+- "org": đơn vị/cơ quan chủ trì chính, hoặc "Bên A" nếu là hợp đồng giữa 2 bên. Nếu không xác định rõ → để trống, KHÔNG suy đoán bừa.
+
+QUY TẮC CHUNG cho cả 2 trường hợp:
+- "code": chỉ lấy số/ký hiệu thật của văn bản, KHÔNG lấy số điều/khoản/trang/năm.
+- "date": đọc CHÍNH XÁC từng chữ số ngày/tháng/năm, không đoán. Nếu chữ số bị mờ/không rõ → để chuỗi rỗng "", TUYỆT ĐỐI KHÔNG bịa số. Trả về dạng "D/M/YYYY".
+- "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM" và "Độc lập - Tự do - Hạnh phúc" là quốc hiệu/tiêu ngữ CỐ ĐỊNH có trong MỌI văn bản — không bao giờ là tên cơ quan/đơn vị, loại bỏ hoàn toàn khỏi tất cả các trường.
+
 - "docType": Quyết định|Nghị quyết|Công văn|Tờ trình|Báo cáo|Hợp đồng|Biên bản|Thông báo|Hồ sơ|Bản vẽ|Khác
 - "subject": câu mô tả NỘI DUNG VỀ VIỆC GÌ
 - "detail": tóm tắt 2-3 điểm quan trọng
@@ -118,14 +137,14 @@ export const parseVietnameseDoc = (text, hint = '', fileName = '') => {
   let code = ''
   const soLine = lines.find(l => /^[Ss]ố\s*[:\/]/.test(l))
   if (soLine) {
-    // "Số: 157/QĐ-QLDA" hoặc "Số:157/QĐ-QLDA"
-    const m = soLine.match(/[Ss]ố\s*[:\/]\s*([\d]+[\/\-][\w\-\/\.]{2,30})/)
-    if (m) code = m[1].trim()
+    // "Số: 157/QĐ-QLDA" hoặc "Số:157/QĐ-QLDA" hoặc "Số: 386 /QĐ-QLDA" (có khoảng trắng quanh dấu /)
+    const m = soLine.match(/[Ss]ố\s*[:\/]\s*(\d+\s*[\/\-]\s*[\w\-\/\.ĐđƠơƯư]{2,30})/)
+    if (m) code = m[1].replace(/\s+/g, '').trim()
   }
   // Fallback: tìm pattern số/loại trong toàn header
   if (!code) {
-    const m = t.match(/\b(\d{1,4}[\/\-](?:QĐ|NQ|CV|TTr|TT|BC|BB|TB|HĐ|KH|NĐ|TTLT)[A-Z0-9\-\/\.]*)/i)
-    if (m) code = m[1]
+    const m = t.match(/\b(\d{1,4}\s*[\/\-]\s*(?:QĐ|NQ|CV|TTr|TT|BC|BB|TB|HĐ|KH|NĐ|TTLT)[A-Z0-9\-\/\.]*)/i)
+    if (m) code = m[1].replace(/\s+/g, '')
   }
   // Fallback cuối: đọc từ tên file
   if (!code && fileName) {
@@ -158,6 +177,11 @@ export const parseVietnameseDoc = (text, hint = '', fileName = '') => {
       }
     }
   }
+  // Phòng trường hợp PDF 2 cột gộp quốc hiệu/tiêu ngữ dính liền vào cuối dòng org
+  org = org
+    .split(/(?=Cộng\s*hòa\s*xã\s*hội|Độc\s*lập\s*[-–—]?\s*Tự\s*do)/i)[0]
+    .replace(/[-–—,.\s]+$/, '')
+    .trim()
 
   // ── Nội dung/Về việc: dòng sau "QUYẾT ĐỊNH / CÔNG VĂN..." ──
   const vvM = t.match(/[Vv]\/?[Vv][:\s]+(.{10,200}?)(?:\s{2,}|$)/)
@@ -322,7 +346,7 @@ export function useAI() {
     const b64 = base64Images[0]
 
     // Groq Vision qua /api/groq-proxy — key không ra browser
-    const visionPrompt = `Đọc header văn bản hành chính Việt Nam này. Trường "org" chỉ lấy đơn vị TRỰC TIẾP ban hành (dòng ngay trên số ký hiệu, KHÔNG lấy tổng công ty/bộ chủ quản). Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"đơn vị trực tiếp ban hành","docType":"loại văn bản","subject":"về việc gì"}`
+    const visionPrompt = `Đọc header văn bản hành chính Việt Nam này. Header có 2 cột: cột trái là [Cơ quan chủ quản]/[Cơ quan ban hành]/[Số:...], cột phải là [CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM]/[Độc lập - Tự do - Hạnh phúc]/[Địa danh, ngày...tháng...năm...]. Trường "org" CHỈ lấy [Cơ quan ban hành] (dòng ngay trên "Số:", KHÔNG lấy cơ quan chủ quản cấp trên, KHÔNG lấy "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", KHÔNG lấy "Độc lập - Tự do - Hạnh phúc"). Đọc ngày/tháng/năm chính xác từng chữ số, nếu không rõ thì để trống. Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"đơn vị trực tiếp ban hành","docType":"loại văn bản","subject":"về việc gì"}`
     const txt = await callGroqVision(b64, visionPrompt, 400)
     if (txt) {
       try {
