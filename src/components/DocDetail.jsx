@@ -276,7 +276,6 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   const docType  = get(doc, 'docType')
   const subject  = get(doc, 'subject')
   const detail   = get(doc, 'detail')
-  const note     = get(doc, 'note')
   const fileName = get(doc, 'fileName')
   const fileSize = doc.fileSize || 0
   const fileUrl  = get(doc, 'fileUrl', 'downloadUrl', 'secureUrl')
@@ -462,7 +461,6 @@ export default function DocDetail({ doc, onEdit, onClose }) {
               </div>
               <Row label="Cơ quan ban hành"   value={org}/>
               <Row label="Nội dung / Về việc" value={subject}/>
-              <Row label="Ghi chú"            value={note}/>
               {detail && (
                 <div style={{ marginBottom:12 }}>
                   <div style={{ fontSize:11, color:'#9b9b9b', marginBottom:3 }}>Trích yếu nội dung</div>
