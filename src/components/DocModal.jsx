@@ -147,8 +147,18 @@ export default function DocModal({ doc, onSave, onClose }) {
     onSave(final)
   }
 
+  // Phát hiện lớp text bị lỗi bảng mã (CMap hỏng) — chữ hiển thị đúng khi xem/in
+  // nhưng dữ liệu text ẩn bên dưới bị trỏ sai ký tự (VD: "QUYÊT ĐINH" → "QUYET D1NH",
+  // mất dấu "Đ"→"D" v.v). Tín hiệu: tỷ lệ ký tự CÓ DẤU bất thường thấp.
+  // Văn bản hành chính VN thật ~16-19%, văn bản lỗi CMap ~4.68% (đã verify dữ liệu thật).
+  const accentRatio = (text) => {
+    const matches = text.match(/[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/gi) || []
+    return matches.length / Math.max(text.length, 1)
+  }
+
   const isRealContent = (text) => {
     if (text.length < 150) return false
+    if (accentRatio(text) < 0.08) return false // text có vẻ dài/hợp lệ nhưng lỗi CMap → để rơi xuống nhánh OCR ảnh
     return /căn cứ|điều \d|khoản|quyết định|nghị quyết|tờ trình|báo cáo|cộng hòa|chương \d/i.test(text)
   }
 
