@@ -611,7 +611,7 @@ ${memCtx}`
             </div>
           </div>
           <div style={{ padding:'0 24px', background:'#fff', borderBottom:'0.5px solid #e5e4e0', display:'flex' }}>
-            {[['docs','Văn bản'],['progress','Tiến độ pháp lý'],['report','Xuất báo cáo']].map(([v,l]) => (
+            {[['docs','Văn bản'],['report','Xuất báo cáo']].map(([v,l]) => (
               <button key={v} onClick={() => setTab(v)}
                 style={{ padding:'12px 16px', border:'none', borderBottom:tab===v?'2px solid #1a1a1a':'2px solid transparent', background:'transparent', cursor:'pointer', fontSize:13, fontWeight:tab===v?600:400, color:tab===v?'#1a1a1a':'#888' }}>{l}</button>
             ))}
@@ -838,3 +838,4 @@ ${memCtx}`
 export default function App() {
   return <UploadProvider><AppInner /></UploadProvider>
 }
+                                      
