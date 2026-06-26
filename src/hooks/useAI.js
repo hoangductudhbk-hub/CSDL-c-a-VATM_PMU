@@ -427,7 +427,3 @@ Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
     loading,
   }
 }
-alyzeImages, analyzeDeepForMemory, askDeep,
-    loading,
-  }
-}
