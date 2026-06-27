@@ -146,7 +146,7 @@ Quy tắc cho từng trang:
 // ─── OCR bằng AI Vision (Gemini→Groq), đọc theo LÔ nhiều trang/lệnh gọi ──
 // Nhờ gộp lô, có thể nâng giới hạn trang lên nhiều mà vẫn tiết kiệm quota
 // (125 trang ÷ 4 trang/lô ≈ 32 lệnh gọi, thay vì 125 lệnh nếu đọc từng trang).
-const ocrWithAIVision = async (buf, onStatus) => {
+const ocrWithAIVision = async (buf, onStatus, docId, resumeState = null) => {
   const lib = await loadPdfJs()
   const pdf = await lib.getDocument({ data: buf }).promise
   const totalPgs = Math.min(pdf.numPages, 150) // trần an toàn, đủ cho hầu hết văn bản thực tế
@@ -157,11 +157,20 @@ const ocrWithAIVision = async (buf, onStatus) => {
     batches.push(Array.from({ length: end - i + 1 }, (_, k) => i + k))
   }
 
-  onStatus?.(`👁️ AI Vision đọc văn bản (${totalPgs} trang, ${batches.length} lượt gọi)...`)
+  // Nếu có tiến độ cũ khớp đúng văn bản này (cùng tổng số lô) → tiếp tục từ lô bị
+  // dừng, KHÔNG đọc lại từ đầu — tránh tốn token/thời gian gấp đôi cho file dài
+  // khi bị dừng giữa đường (mất mạng, đóng tab, lỗi 502/504 từ proxy AI...).
+  let startBatch = 0, allText = '', failedPages = 0
+  if (resumeState && resumeState.totalBatches === batches.length && resumeState.completedBatches < batches.length) {
+    startBatch = resumeState.completedBatches
+    allText = resumeState.partialText || ''
+    failedPages = resumeState.failedPages || 0
+    onStatus?.(`⏩ Tiếp tục từ lô ${startBatch + 1}/${batches.length} (đã đọc xong ${startBatch} lô trước đó, không đọc lại)...`)
+  } else {
+    onStatus?.(`👁️ AI Vision đọc văn bản (${totalPgs} trang, ${batches.length} lượt gọi)...`)
+  }
 
-  let allText = ''
-  let failedPages = 0
-  for (let b = 0; b < batches.length; b++) {
+  for (let b = startBatch; b < batches.length; b++) {
     const pageNums = batches[b]
     onStatus?.(`👁️ AI Vision đọc trang ${pageNums[0]}-${pageNums[pageNums.length - 1]}/${totalPgs} (lô ${b + 1}/${batches.length})...`)
     try {
@@ -176,6 +185,19 @@ const ocrWithAIVision = async (buf, onStatus) => {
     } catch (e) {
       console.warn(`[AI Vision] lô trang ${pageNums.join(',')} lỗi:`, e.message)
       failedPages += pageNums.length
+    }
+
+    // Lưu tiến độ NGAY sau MỖI lô — nếu bị dừng giữa đường, lần "Phân tích tiếp"
+    // sau sẽ đọc tiếp từ đây, không mất công các lô đã đọc xong.
+    if (docId) {
+      try {
+        await setDoc(doc(db, 'documentMarkdown', docId), {
+          ocrProgress: {
+            completedBatches: b + 1, totalBatches: batches.length,
+            partialText: allText.slice(0, 150000), failedPages,
+          },
+        }, { merge: true })
+      } catch (e) { console.warn('[AI Vision] lưu tiến độ lỗi:', e.message) }
     }
   }
   return { text: allText.trim(), failedCount: failedPages, totalPgs }
@@ -375,15 +397,20 @@ export function useProcessPipeline() {
     }
 
     try {
-      // Kiểm tra đã có markdown chưa
+      // Kiểm tra đã có markdown chưa — nếu có nghĩa là đã phân tích xong hoàn toàn.
+      // Nếu chưa xong nhưng có tiến độ OCR cũ (ocrProgress) → giữ lại để TIẾP TỤC,
+      // không đọc lại từ đầu (trừ khi forceRestart=true, tức người dùng bấm "Phân tích lại").
+      let existingOcrProgress = null
       if (!forceRestart) {
         const snap = await getDoc(doc(db, 'documentMarkdown', docId))
-        if (snap.exists() && snap.data().markdown) {
-          report('✅ Đã có dữ liệu phân tích')
-          return
+        if (snap.exists()) {
+          if (snap.data().markdown) {
+            report('✅ Đã có dữ liệu phân tích')
+            return
+          }
+          existingOcrProgress = snap.data().ocrProgress || null
         }
       }
-
 
       // ── 1. Fetch file ──────────────────────────────────────────
       report('📥 Đang tải file...', 5)
@@ -462,7 +489,7 @@ export function useProcessPipeline() {
             ? `PDF lỗi bảng mã CMap (chỉ ${(ratio * 100).toFixed(1)}% ký tự có dấu, văn bản thật ~16-19%)`
             : hasWatermark ? 'PDF watermark VATM' : `PDF scan (${totalPages} trang)`
           report(`👁️ ${reason} — AI Vision đọc văn bản...`, 25)
-          const { text: visionText, failedCount, totalPgs } = await ocrWithAIVision(buf.slice(0), report)
+          const { text: visionText, failedCount, totalPgs } = await ocrWithAIVision(buf.slice(0), report, docId, existingOcrProgress)
 
           if (visionText.length > 100 && failedCount < totalPgs / 2) {
             rawText = visionText

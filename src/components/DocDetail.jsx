@@ -571,7 +571,7 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                     )}
                     <button onClick={handleAnalyze}
                       style={{ width:'100%', padding:'9px', borderRadius:8, fontSize:13, fontWeight:600, background:'#0a2342', color:'#fff', border:'none', cursor:'pointer' }}>
-                      📊 {analyzeError ? 'Thử lại' : 'Phân tích tài liệu'}
+                      📊 {analyzeError ? 'Tiếp tục phân tích' : 'Phân tích tài liệu'}
                     </button>
                   </>
                 )}
