@@ -64,7 +64,10 @@ const renderPageToCanvas = async (page, scale = 2.0) => {
   return canvas
 }
 
-const canvasToBase64 = (canvas) => canvas.toDataURL('image/jpeg', 0.85).split(',')[1]
+// Giảm chất lượng JPEG (0.85→0.7) để giảm dung lượng base64 — văn bản scan độ
+// phân giải cao (như file 36MB/125 trang) dễ làm 1 lô 4 ảnh vượt giới hạn 4.5MB
+// request body của Vercel, gây 502 Bad Gateway ở MỌI lần gọi (đã xác nhận thực tế).
+const canvasToBase64 = (canvas) => canvas.toDataURL('image/jpeg', 0.7).split(',')[1]
 
 // Phát hiện lớp text bị lỗi bảng mã (CMap hỏng) — chữ hiển thị đúng khi xem/in
 // nhưng dữ liệu text ẩn bên dưới bị trỏ sai ký tự (mất dấu tiếng Việt có hệ thống).
@@ -151,9 +154,25 @@ const ocrWithAIVision = async (buf, onStatus, docId, resumeState = null) => {
   const pdf = await lib.getDocument({ data: buf }).promise
   const totalPgs = Math.min(pdf.numPages, 150) // trần an toàn, đủ cho hầu hết văn bản thực tế
 
+  // Đo nhanh dung lượng ảnh trang đầu để CHỌN SỐ TRANG/LÔ AN TOÀN — văn bản scan độ
+  // phân giải cao (vd file 36MB/125 trang) tạo ảnh nặng hơn nhiều so với văn bản
+  // thường, dễ làm 1 lô vượt giới hạn 4.5MB request body của Vercel → gây 502 Bad
+  // Gateway ở MỌI lô (đã xác nhận xảy ra thực tế, không phải lỗi ngẫu nhiên).
+  const SAFE_BATCH_BYTES = 3 * 1024 * 1024 // để dư margin so với trần 4.5MB của Vercel
+  let dynamicBatchSize = PAGES_PER_VISION_BATCH
+  try {
+    const samplePage = await pdf.getPage(1)
+    const sampleCanvas = await renderPageToCanvas(samplePage, 1.5)
+    const estPageBytes = canvasToBase64(sampleCanvas).length * 0.75 // base64 → byte thật
+    dynamicBatchSize = Math.max(1, Math.min(PAGES_PER_VISION_BATCH, Math.floor(SAFE_BATCH_BYTES / Math.max(estPageBytes, 80000))))
+    if (dynamicBatchSize < PAGES_PER_VISION_BATCH) {
+      onStatus?.(`📏 Trang scan nặng (~${(estPageBytes/1024).toFixed(0)}KB/trang) — dùng lô ${dynamicBatchSize} trang để tránh vượt giới hạn server...`)
+    }
+  } catch { /* đo lỗi → dùng mặc định */ }
+
   const batches = []
-  for (let i = 1; i <= totalPgs; i += PAGES_PER_VISION_BATCH) {
-    const end = Math.min(i + PAGES_PER_VISION_BATCH - 1, totalPgs)
+  for (let i = 1; i <= totalPgs; i += dynamicBatchSize) {
+    const end = Math.min(i + dynamicBatchSize - 1, totalPgs)
     batches.push(Array.from({ length: end - i + 1 }, (_, k) => i + k))
   }
 
@@ -204,12 +223,22 @@ const ocrWithAIVision = async (buf, onStatus, docId, resumeState = null) => {
 }
 
 // ─── OCR bằng Tesseract.js (chạy trong browser, không cần API) ───────────
-const ocrWithTesseract = async (buf, onStatus) => {
+const ocrWithTesseract = async (buf, onStatus, docId, resumeState = null) => {
   const lib = await loadPdfJs()
   const pdf = await lib.getDocument({ data: buf }).promise
-  const totalPgs = pdf.numPages
+  // Tesseract rất chậm (có thể hàng giờ cho văn bản 100+ trang) — giới hạn 60 trang
+  // làm phương án CUỐI CÙNG, vì nếu đã rơi đến đây nghĩa là cả 3 lớp AI Vision đều
+  // thất bại, không nên buộc người dùng chờ quá lâu cho 1 phương án chất lượng thấp.
+  const totalPgs = Math.min(pdf.numPages, 60)
 
-  onStatus?.(`🔤 Khởi động Tesseract OCR (${totalPgs} trang)...`)
+  let startPage = 1, allText = ''
+  if (resumeState && resumeState.engine === 'tesseract' && resumeState.lastPage < totalPgs) {
+    startPage = resumeState.lastPage + 1
+    allText = resumeState.partialText || ''
+    onStatus?.(`⏩ Tesseract tiếp tục từ trang ${startPage}/${totalPgs}...`)
+  } else {
+    onStatus?.(`🔤 Khởi động Tesseract OCR (${totalPgs} trang)...`)
+  }
 
   // Tạo worker Tesseract với tiếng Việt + tiếng Anh
   const worker = await createWorker(['vie', 'eng'], 1, {
@@ -221,8 +250,7 @@ const ocrWithTesseract = async (buf, onStatus) => {
     },
   })
 
-  let allText = ''
-  for (let i = 1; i <= totalPgs; i++) {
+  for (let i = startPage; i <= totalPgs; i++) {
     onStatus?.(`🔤 Tesseract OCR trang ${i}/${totalPgs}...`)
     try {
       const page = await pdf.getPage(i)
@@ -231,6 +259,16 @@ const ocrWithTesseract = async (buf, onStatus) => {
       allText += (text || '') + '\n'
     } catch (e) {
       console.warn(`[Tesseract] trang ${i} lỗi:`, e.message)
+    }
+
+    // Lưu tiến độ sau MỖI trang — cùng nguyên tắc với AI Vision, tránh mất công
+    // nếu bị dừng giữa đường (Tesseract chạy lâu, rủi ro gián đoạn cao hơn).
+    if (docId) {
+      try {
+        await setDoc(doc(db, 'documentMarkdown', docId), {
+          ocrProgress: { engine: 'tesseract', lastPage: i, totalPages: totalPgs, partialText: allText.slice(0, 150000) },
+        }, { merge: true })
+      } catch (e) { console.warn('[Tesseract] lưu tiến độ lỗi:', e.message) }
     }
   }
 
@@ -498,7 +536,7 @@ export function useProcessPipeline() {
           } else {
             // C. AI Vision thất bại phần lớn → Tesseract OCR toàn bộ file (luôn thành công, chất lượng thấp hơn)
             report(`🔤 AI Vision không đọc được — chuyển sang Tesseract OCR...`, 25)
-            rawText = await ocrWithTesseract(buf.slice(0), report)
+            rawText = await ocrWithTesseract(buf.slice(0), report, docId, existingOcrProgress)
             ocrSource = 'tesseract'
             report(`✅ Tesseract OCR xong: ${(rawText.length / 1000).toFixed(0)}K ký tự`, 55)
           }
