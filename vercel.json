@@ -1,17 +1,15 @@
 {
   "functions": {
     "api/test-keys.js": { "maxDuration": 15 },
-    "api/process-batch.js": {
-      "maxDuration": 60
-    },
-    "api/process-document.js": {
-      "maxDuration": 10
-    },
-    "api/delete-file.js": {
-      "maxDuration": 15
-    },
-    "api/read-file.js": {
-      "maxDuration": 30
-    }
+    "api/process-batch.js": { "maxDuration": 60 },
+    "api/process-document.js": { "maxDuration": 10 },
+    "api/delete-file.js": { "maxDuration": 15 },
+    "api/read-file.js": { "maxDuration": 30 },
+    "api/gemini-proxy.js": { "maxDuration": 30 },
+    "api/groq-proxy.js": { "maxDuration": 30 },
+    "api/ocr-page.js": { "maxDuration": 30 },
+    "api/ocr-document.js": { "maxDuration": 60 },
+    "api/cleanup-files.js": { "maxDuration": 30 },
+    "api/reset-password.js": { "maxDuration": 10 }
   }
 }
