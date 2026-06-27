@@ -406,7 +406,11 @@ export default function DocDetail({ doc, onEdit, onClose }) {
         const { db } = await import('../firebase')
         const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', doc.id))
         if (mdSnap.exists()) {
-          relevantText = mdSnap.data().markdown || ''
+          const d = mdSnap.data()
+          // Ưu tiên rawText (text gốc đầy đủ từ OCR/Vision, CHƯA qua bước tổng hợp AI
+          // có thể gộp nhầm/làm mất các mục con riêng) — markdown chỉ dùng khi
+          // rawText không có (văn bản cũ tạo trước khi có field này).
+          relevantText = d.rawText || d.markdown || ''
         }
       } catch {}
       // Fallback: metadata văn bản
