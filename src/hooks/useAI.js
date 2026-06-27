@@ -60,6 +60,27 @@ const callGemini = async (prompt, maxTokens = 1000) => {
   } catch { return null }
 }
 
+// callGeminiVision → /api/gemini-proxy với parts (text + inline_data ảnh)
+// Dùng route riêng (/api/gemini-proxy) — không bị ảnh hưởng nếu /api/groq-proxy lỗi route.
+const callGeminiVision = async (b64, promptText, maxTokens = 700) => {
+  try {
+    const res = await withTimeout(fetch('/api/gemini-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        parts: [
+          { text: promptText },
+          { inline_data: { mime_type: 'image/jpeg', data: b64 } },
+        ],
+        maxTokens,
+      }),
+    }), 25000)
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.text || null
+  } catch { return null }
+}
+
 // callGroq → /api/groq-proxy (server đọc GROQ_API_KEY, browser không thấy key)
 const callGroq = async (prompt, maxTokens = 1000, system = null) => {
   try {
@@ -255,7 +276,6 @@ export function useAI() {
     try {
       const b64 = base64Images[0]
 
-      // Groq Vision qua /api/groq-proxy — key không ra browser
       const visionPrompt = `Đọc kỹ ảnh này — đây là phần đầu trang 1 của văn bản hành chính Việt Nam (header + tiêu đề + trích yếu).
 
 Header thường có 2 cột: cột trái [Cơ quan chủ quản]/[Cơ quan ban hành]/[Số:...], cột phải [CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM]/[Độc lập - Tự do - Hạnh phúc]/[Địa danh, ngày...tháng...năm...]. Áp dụng nếu là Quyết định/Nghị quyết/Công văn/Tờ trình/Báo cáo/Thông báo. Nếu là Hợp đồng/Biên bản/loại khác không theo mẫu này, tự đọc và suy luận từ nội dung thấy trong ảnh.
@@ -271,18 +291,28 @@ Header thường có 2 cột: cột trái [Cơ quan chủ quản]/[Cơ quan ban 
 
 Trả về CHỈ 1 JSON duy nhất, không giải thích thêm:
 {"code":"","date":"","org":"","docType":"","subject":"","detail":"","note":"","status":"done"}`
-      const txt = await callGroqVision(b64, visionPrompt, 700)
-      if (txt) {
+
+      const tryParseVisionJson = (txt) => {
+        if (!txt) return null
         const m = txt.match(/\{[\s\S]*\}/)
-        if (m) {
-          try {
-            const parsed = JSON.parse(m[0])
-            return JSON.stringify({ ...parsed, note: parsed.note || '', status: 'done' })
-          } catch { /* JSON hỏng, thử cách khác bên dưới */ }
-        }
+        if (!m) return null
+        try {
+          const parsed = JSON.parse(m[0])
+          return JSON.stringify({ ...parsed, note: parsed.note || '', status: 'done' })
+        } catch { return null }
       }
 
-      // Groq Vision không đọc trực tiếp được → OCR Tesseract lấy text thô,
+      // 1) Gemini Vision trước — Groq Vision (Llama 4 Scout) đã bị Groq deprecate
+      //    ngày 27/6/2026, ngừng hẳn 17/7/2026, model thay thế Groq đề xuất
+      //    (GPT-OSS-120B/Qwen3.6-27B) KHÔNG đọc được ảnh. Ưu tiên Gemini cho ổn định dài hạn.
+      const geminiResult = tryParseVisionJson(await callGeminiVision(b64, visionPrompt, 700))
+      if (geminiResult) return geminiResult
+
+      // 2) Gemini lỗi → thử Groq Vision (vẫn còn dùng được đến 17/7/2026)
+      const groqResult = tryParseVisionJson(await callGroqVision(b64, visionPrompt, 700))
+      if (groqResult) return groqResult
+
+      // 3) Cả 2 AI Vision đều không đọc trực tiếp được → OCR Tesseract lấy text thô,
       // sau đó đưa qua AI text (Gemini/Groq) để trích xuất — KHÔNG dùng regex.
       try {
         const { createWorker } = await import('tesseract.js')

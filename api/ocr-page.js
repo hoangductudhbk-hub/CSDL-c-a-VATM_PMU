@@ -20,6 +20,8 @@ export default async function handler(req, res) {
 
   if (!keys.length) return res.status(500).json({ error: 'Chưa cấu hình VITE_GROQ_API_KEY' })
 
+  // ⚠️ DEPRECATED 27/6/2026, NGỪNG HOẠT ĐỘNG 17/7/2026 (email Groq) — xem ghi chú
+  // tương tự trong api/groq-proxy.js. Cần model vision thay thế trước hạn này.
   const MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
   const prompt = `Bạn là chuyên gia OCR văn bản hành chính Việt Nam.
 Đọc toàn bộ nội dung trong ảnh trang này và trả về dạng markdown.
