@@ -498,7 +498,13 @@ ${memCtx}`
                   borderTop: idx>0 ? '1px solid #e5e4e0' : 'none',
                 }}>
                   <button
-                    onClick={() => setExpandedCats(s => { const n=new Set(s); n.has(g.key)?n.delete(g.key):n.add(g.key); return n })}
+                    onClick={() => {
+                      setExpandedCats(s => { const n=new Set(s); n.has(g.key)?n.delete(g.key):n.add(g.key); return n })
+                      // Đồng thời hiển thị ngay nội dung bên phải — chọn dự án/quy định/biểu mẫu
+                      // ĐẦU TIÊN trong nhóm (nếu có), tránh phải bấm sâu thêm 1-2 cấp mới thấy gì
+                      // khi đang ở trang khác (Quản lý người dùng/Lịch sử truy cập...).
+                      if (catProjects.length > 0) selectProject(catProjects[0].id)
+                    }}
                     style={{ width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:6, padding:'8px 8px 4px', background:'none', border:'none', cursor:'pointer' }}>
                     <span style={{ fontSize:9, color:'#aaa' }}>{catOpen ? '▼' : '▶'}</span>
                     <span style={{ fontSize:13, color:'#1a1a1a', fontWeight:600 }}>{g.label}</span>
