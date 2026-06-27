@@ -36,7 +36,7 @@ export default async function handler(req, res) {
   for (const key of keys) {
     try {
       const ctrl = new AbortController()
-      const timer = setTimeout(() => ctrl.abort(), 8000)
+      const timer = setTimeout(() => ctrl.abort(), 25000)
       const r = await fetch(GROQ_URL, {
         signal: ctrl.signal,
         method: 'POST',
