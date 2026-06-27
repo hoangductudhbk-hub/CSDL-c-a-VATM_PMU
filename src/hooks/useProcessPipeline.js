@@ -452,7 +452,7 @@ export function useProcessPipeline() {
 
       // ── 3. AI tổng hợp → markdown ─────────────────────────────
       report('🧠 Phân tích nội dung...', 60)
-      const { markdown, source: aiSource } = await analyzeWithAI(rawText, fileName || 'văn bản', groqKeys)
+      const { markdown, source: aiSource } = await analyzeWithAI(rawText, fileName || 'văn bản')
 
       if (aiSource === 'local') {
         report('📝 Định dạng tự động (Groq/Gemini không khả dụng)...', 80)
