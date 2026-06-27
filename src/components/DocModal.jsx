@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useAI, parseVietnameseDoc } from '../hooks/useAI'
+import { useAI } from '../hooks/useAI'
 import { useCloudinaryStorage } from '../hooks/useCloudinaryStorage'
 
 const ST = [{ value:'done',label:'✅ Hoàn thành'},{ value:'pending',label:'🔄 Đang thực hiện'},{ value:'prep',label:'⬜ Chưa thực hiện'}]
@@ -76,12 +76,22 @@ const cleanOrgField = (s = '') => {
     .replace(/[-–—,.\s]+$/, '')
     .trim()
 }
+
+// Chỉ enrich dữ liệu AI đã trích — KHÔNG đoán/lấy từ tên file (tên file do người
+// dùng đặt tùy ý, không phản ánh nội dung văn bản thật, không đáng tin để điền dữ liệu).
+const enrichParsed = (obj) => {
+  if (!obj) return obj
+  if (obj.org) obj.org = cleanOrgField(obj.org)
+  // Đánh dấu để người dùng biết cần tự kiểm tra lại — không để sai lệch âm thầm
+  if (!obj.code || !obj.date || /^Văn bản /i.test(obj.subject || '')) obj.needsReview = true
+  return obj
+}
+
 const parseJ = (s) => {
   try {
     const m = s.match(/\{[\s\S]*\}/)
     const obj = JSON.parse(m ? m[0] : s.replace(/```json|```/g, '').trim())
-    if (obj && obj.org) obj.org = cleanOrgField(obj.org)
-    return obj
+    return enrichParsed(obj)
   } catch { return null }
 }
 
@@ -229,10 +239,16 @@ export default function DocModal({ doc, onSave, onClose }) {
           })
         }
         const p = parseJ(result)
-        if (p) { setForm(f=>({...f,...p,fileName:file.name})); setMode('manual'); setSt('✅ AI điền xong!') }
+        if (p) {
+          setForm(f=>({...f,...p,fileName:file.name})); setMode('manual')
+          setSt(p.needsReview
+            ? '⚠️ AI điền xong nhưng thiếu Số/Ngày hoặc chưa chắc đúng — vui lòng kiểm tra lại trước khi lưu'
+            : '✅ AI điền xong!')
+        }
         else setSt('⚠️ Không phân tích được. Điền thủ công.')
       } catch(e) {
         if (e.message==='NO_KEY') alert('Chưa có API key!')
+        else if (e.message === 'AI_EXTRACT_FAILED') setSt('⚠️ Cả Gemini và Groq đều không đọc được văn bản này. Vui lòng thử lại hoặc điền thủ công.')
         else setSt(e.message === 'AI_QUOTA' ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!' : '❌ Lỗi: '+e.message)
       } finally { setLoad(false) }
       return
@@ -256,7 +272,7 @@ export default function DocModal({ doc, onSave, onClose }) {
           result = await analyzeText(batchExtracted.slice(0,1500),file.name)
         } else if (['xls','xlsx'].includes(ext)) {
           batchExtracted = (await extractXlsxText(bBuf)).slice(0,100000)
-          result = parseVietnameseDoc(batchExtracted.slice(0,3000),'',file.name)
+          result = await analyzeText(batchExtracted.slice(0,1500),file.name)
         } else { queue[i].status='⚠️ Không hỗ trợ'; setFQ([...queue]); continue }
         const p=parseJ(result)
         if (p) {
@@ -275,9 +291,9 @@ export default function DocModal({ doc, onSave, onClose }) {
             markdownRef = await saveMarkdownToFirestore(batchExtracted, file.name)
           }
           onSave({...p, fileName:file.name, fileSize:file.size, extractedText: batchExtracted, ...(markdownRef ? {markdownRef} : {}), ...fi}, true)
-          queue[i].status='✅ Xong'
+          queue[i].status = p.needsReview ? '⚠️ Xong (thiếu Số/Ngày — cần kiểm tra)' : '✅ Xong'
         } else queue[i].status='⚠️ Không đọc được'
-      } catch(e) { queue[i].status='❌ '+(e.message||'Lỗi') }
+      } catch(e) { queue[i].status = e.message === 'AI_EXTRACT_FAILED' ? '⚠️ AI không đọc được, cần điền tay' : '❌ '+(e.message||'Lỗi') }
       setFQ([...queue])
     }
     setProc(false); setSt(`✅ Xong ${queue.filter(q=>q.status==='✅ Xong').length}/${files.length} văn bản`)
@@ -288,9 +304,16 @@ export default function DocModal({ doc, onSave, onClose }) {
     setLoad(true); setSt('🤖 AI đang phân tích...')
     try {
       const r=await analyzeText(rawText); const p=parseJ(r)
-      if (p) { setForm(f=>({...f,...p})); setMode('manual'); setSt('✅ Xong!') }
+      if (p) {
+        setForm(f=>({...f,...p})); setMode('manual')
+        setSt(p.needsReview ? '⚠️ Xong nhưng thiếu Số/Ngày — vui lòng kiểm tra lại' : '✅ Xong!')
+      }
       else setSt('⚠️ Không phân tích được')
-    } catch(e) { if(e.message==='NO_KEY') alert('Chưa có key!'); else setSt(e.message === 'AI_QUOTA' ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!' : '❌ Lỗi: '+e.message) }
+    } catch(e) {
+      if(e.message==='NO_KEY') alert('Chưa có key!')
+      else if (e.message === 'AI_EXTRACT_FAILED') setSt('⚠️ Cả Gemini và Groq đều không đọc được. Vui lòng thử lại hoặc điền thủ công.')
+      else setSt(e.message === 'AI_QUOTA' ? '⚠️ AI đã hết lượt sử dụng hôm nay. Vui lòng quay lại sau!' : '❌ Lỗi: '+e.message)
+    }
     finally { setLoad(false) }
   }
 

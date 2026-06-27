@@ -53,7 +53,7 @@ const callGemini = async (prompt, maxTokens = 1000) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt, maxTokens }),
-    }), 5000)
+    }), 25000)
     if (!res.ok) return null
     const data = await res.json()
     return data.text || null
@@ -70,7 +70,7 @@ const callGroq = async (prompt, maxTokens = 1000, system = null) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages, maxTokens }),
-    }), 5000)
+    }), 25000)
     if (!res.ok) return null
     const data = await res.json()
     return data.text || null
@@ -91,7 +91,7 @@ const callGroqVision = async (b64, promptText, maxTokens = 400) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages, maxTokens, vision: true }),
-    }), 5000)
+    }), 25000)
     if (!res.ok) return null
     const data = await res.json()
     return data.text || null
@@ -109,99 +109,6 @@ const callAI = async (prompt, maxTokens = 1000) => {
   const err = new Error('AI_RATE_LIMIT')
   err.waitSeconds = 30
   throw err
-}
-
-// ── Regex parser — chỉ đọc phần header (60 dòng đầu) ───────────
-export const parseVietnameseDoc = (text, hint = '', fileName = '') => {
-  // Chỉ lấy 15 dòng đầu (header văn bản: quốc hiệu, cơ quan, số, ngày, loại)
-  const allLines = text.split(/\n/).map(l => l.trim()).filter(Boolean)
-  const lines = allLines.slice(0, 15)
-  const t = lines.join(' ')
-
-  // ── Loại văn bản: ưu tiên nhận diện sớm để parse đúng code ──
-  const docTypeMap = [
-    ['Quyết định', /quyết\s*định|QUYẾT\s*ĐỊNH|\bQĐ\b/],
-    ['Nghị quyết', /nghị\s*quyết|NGHỊ\s*QUYẾT|\bNQ\b/],
-    ['Công văn',   /công\s*văn|CÔNG\s*VĂN|\bCV\b/],
-    ['Tờ trình',   /tờ\s*trình|TỜ\s*TRÌNH|\bTTr\b/i],
-    ['Báo cáo',    /báo\s*cáo|BÁO\s*CÁO|\bBC\b/],
-    ['Hợp đồng',   /hợp\s*đồng|HỢP\s*ĐỒNG|\bHĐ\b/],
-    ['Biên bản',   /biên\s*bản|BIÊN\s*BẢN|\bBB\b/],
-    ['Thông báo',  /thông\s*báo|THÔNG\s*BÁO|\bTB\b/],
-    ['Kế hoạch',   /kế\s*hoạch|KẾ\s*HOẠCH|\bKH\b/],
-  ]
-  const searchIn = `${fileName} ${t}`
-  const docType = docTypeMap.find(([, rx]) => rx.test(searchIn))?.[0] || 'Khác'
-
-  // ── Số ký hiệu: lấy dòng có "Số:" ──
-  let code = ''
-  const soLine = lines.find(l => /^[Ss]ố\s*[:\/]/.test(l))
-  if (soLine) {
-    // "Số: 157/QĐ-QLDA" hoặc "Số:157/QĐ-QLDA" hoặc "Số: 386 /QĐ-QLDA" (có khoảng trắng quanh dấu /)
-    const m = soLine.match(/[Ss]ố\s*[:\/]\s*(\d+\s*[\/\-]\s*[\w\-\/\.ĐđƠơƯư]{2,30})/)
-    if (m) code = m[1].replace(/\s+/g, '').trim()
-  }
-  // Fallback: tìm pattern số/loại trong toàn header
-  if (!code) {
-    const m = t.match(/\b(\d{1,4}\s*[\/\-]\s*(?:QĐ|NQ|CV|TTr|TT|BC|BB|TB|HĐ|KH|NĐ|TTLT)[A-Z0-9\-\/\.]*)/i)
-    if (m) code = m[1].replace(/\s+/g, '')
-  }
-  // Fallback cuối: đọc từ tên file
-  if (!code && fileName) {
-    const fn = fileName.replace(/\.\w+$/, '').replace(/[-_]/g, '/')
-    const m = fn.match(/^(\d{1,4}\/[\w\-\/]{2,20})/)
-    if (m) code = m[1]
-    else {
-      const m2 = fn.match(/^(\d{1,4})[\/](.+)$/)
-      if (m2) code = `${m2[1]}/${m2[2]}`
-    }
-  }
-
-  // ── Ngày: "ngày DD tháng MM năm YYYY" (bỏ qua DD/MM/YYYY vì hay bị lẫn số điều/khoản) ──
-  const dateM = t.match(/ngày\s+(\d{1,2})\s+tháng\s+(\d{1,2})\s+năm\s+(20\d{2})/i)
-  const date = dateM ? `${dateM[1]}/${dateM[2]}/${dateM[3]}` : ''
-
-  // ── Cơ quan ban hành: dòng ngay trước "Số:" — chỉ lấy 1 dòng (đơn vị trực tiếp) ──
-  const soIdx = lines.findIndex(l => /^[Ss]ố\s*[:\/]/.test(l))
-  let org = ''
-  if (soIdx > 0) {
-    // Duyệt ngược từ dòng trước "Số:", lấy dòng hợp lệ đầu tiên (= đơn vị trực tiếp ban hành)
-    for (let i = soIdx - 1; i >= 0; i--) {
-      const l = lines[i]
-      if (
-        l.length > 4 && l.length < 120 &&
-        !/^(cộng\s*hòa|việt\s*nam|độc\s*lập|tự\s*do|hạnh\s*phúc|[-─═]+)/i.test(l)
-      ) {
-        org = l
-        break
-      }
-    }
-  }
-  // Phòng trường hợp PDF 2 cột gộp quốc hiệu/tiêu ngữ dính liền vào cuối dòng org
-  org = org
-    .split(/(?=Cộng\s*hòa\s*xã\s*hội|Độc\s*lập\s*[-–—]?\s*Tự\s*do)/i)[0]
-    .replace(/[-–—,.\s]+$/, '')
-    .trim()
-
-  // ── Nội dung/Về việc: dòng sau "QUYẾT ĐỊNH / CÔNG VĂN..." ──
-  const vvM = t.match(/[Vv]\/?[Vv][:\s]+(.{10,200}?)(?:\s{2,}|$)/)
-           || t.match(/[Vv]ề\s+việc[:\s]+(.{10,200}?)(?:\s{2,}|$)/)
-  let subject = ''
-  if (vvM) {
-    subject = vvM[1].replace(/\s+/g, ' ').trim()
-  } else {
-    // Lấy dòng sau loại văn bản (QUYẾT ĐỊNH, CÔNG VĂN...) có độ dài hợp lý
-    const typeIdx = lines.findIndex(l => /^(QUYẾT ĐỊNH|CÔNG VĂN|TỜ TRÌNH|BÁO CÁO|NGHỊ QUYẾT|HỢP ĐỒNG|BIÊN BẢN|THÔNG BÁO)/i.test(l))
-    if (typeIdx >= 0) {
-      subject = lines.slice(typeIdx + 1).find(l => l.length > 15 && l.length < 200 && !/^(căn cứ|theo|xét)/i.test(l)) || ''
-    }
-  }
-  if (!subject) subject = `Văn bản ${code || fileName}`
-
-  return JSON.stringify({ code, date, org, docType, subject,
-    detail: lines.slice(0, 8).join(' ').slice(0, 300),
-    note: '',
-    status: 'done' })
 }
 
 // ── Prompt chunk trích xuất chi tiết ────────────────────────────
@@ -333,41 +240,46 @@ export function useAI() {
       if (gem) return gem
       const groq = await callGroq(prompt, 1000, SYSTEM)
       if (groq) return groq
-      // AI không khả dụng → regex fallback (luôn trả về kết quả)
-      return parseVietnameseDoc(text, hint, fileName)
+      // Cả Gemini và Groq đều không đọc được — KHÔNG đoán bằng regex/tên file.
+      // Báo lỗi rõ ràng để người dùng biết và điền tay, thay vì âm thầm lưu dữ liệu sai.
+      throw new Error('AI_EXTRACT_FAILED')
     } finally { setLoading(false) }
   }
 
   // ── analyzeImages ──
-  // 1) Groq Vision qua proxy (key ở server) → 2) Tesseract → regex
+  // Chỉ dùng AI để đọc: 1) Groq Vision đọc ảnh trực tiếp → 2) nếu không đọc được,
+  // OCR bằng Tesseract lấy text thô RỒI ĐƯA QUA AI (Gemini/Groq text) để trích xuất —
+  // không dùng regex ở bất kỳ bước nào.
   const analyzeImages = async (base64Images, fileName = '') => {
     setLoading(true)
-    const hint = fileName ? ` (${fileName})` : ''
-    const b64 = base64Images[0]
+    try {
+      const b64 = base64Images[0]
 
-    // Groq Vision qua /api/groq-proxy — key không ra browser
-    const visionPrompt = `Đọc header văn bản hành chính Việt Nam này. Header có 2 cột: cột trái là [Cơ quan chủ quản]/[Cơ quan ban hành]/[Số:...], cột phải là [CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM]/[Độc lập - Tự do - Hạnh phúc]/[Địa danh, ngày...tháng...năm...]. Trường "org" CHỈ lấy [Cơ quan ban hành] (dòng ngay trên "Số:", KHÔNG lấy cơ quan chủ quản cấp trên, KHÔNG lấy "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", KHÔNG lấy "Độc lập - Tự do - Hạnh phúc"). Đọc ngày/tháng/năm chính xác từng chữ số, nếu không rõ thì để trống. Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"đơn vị trực tiếp ban hành","docType":"loại văn bản","subject":"về việc gì"}`
-    const txt = await callGroqVision(b64, visionPrompt, 400)
-    if (txt) {
-      try {
+      // Groq Vision qua /api/groq-proxy — key không ra browser
+      const visionPrompt = `Đọc header văn bản hành chính Việt Nam này. Header có 2 cột: cột trái là [Cơ quan chủ quản]/[Cơ quan ban hành]/[Số:...], cột phải là [CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM]/[Độc lập - Tự do - Hạnh phúc]/[Địa danh, ngày...tháng...năm...]. Trường "org" CHỈ lấy [Cơ quan ban hành] (dòng ngay trên "Số:", KHÔNG lấy cơ quan chủ quản cấp trên, KHÔNG lấy "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", KHÔNG lấy "Độc lập - Tự do - Hạnh phúc"). Đọc ngày/tháng/năm chính xác từng chữ số, nếu không rõ thì để trống. Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"đơn vị trực tiếp ban hành","docType":"loại văn bản","subject":"về việc gì"}`
+      const txt = await callGroqVision(b64, visionPrompt, 400)
+      if (txt) {
         const m = txt.match(/\{[\s\S]*\}/)
         if (m) {
-          const parsed = JSON.parse(m[0])
-          return JSON.stringify({ ...parsed, note: parsed.note || '', status: 'done' })
+          try {
+            const parsed = JSON.parse(m[0])
+            return JSON.stringify({ ...parsed, note: parsed.note || '', status: 'done' })
+          } catch { /* JSON hỏng, thử cách khác bên dưới */ }
         }
-      } catch { /* fallthrough */ }
-    }
+      }
 
-    // Fallback: Tesseract + regex
-    try {
-      const { createWorker } = await import('tesseract.js')
-      const worker = await createWorker(['vie', 'eng'])
-      const { data: { text } } = await worker.recognize(`data:image/jpeg;base64,${b64}`)
-      await worker.terminate()
-      if ((text || '').trim().length > 30) return parseVietnameseDoc(text, hint, fileName)
-    } catch { /* ignore */ }
+      // Groq Vision không đọc trực tiếp được → OCR Tesseract lấy text thô,
+      // sau đó đưa qua AI text (Gemini/Groq) để trích xuất — KHÔNG dùng regex.
+      try {
+        const { createWorker } = await import('tesseract.js')
+        const worker = await createWorker(['vie', 'eng'])
+        const { data: { text } } = await worker.recognize(`data:image/jpeg;base64,${b64}`)
+        await worker.terminate()
+        if ((text || '').trim().length > 30) return await analyzeText(text, fileName)
+      } catch { /* ignore, rơi xuống lỗi cuối */ }
 
-    return parseVietnameseDoc('', hint, fileName)
+      throw new Error('AI_EXTRACT_FAILED')
+    } finally { setLoading(false) }
   }
 
   // ── analyzeDeepForMemory ──
