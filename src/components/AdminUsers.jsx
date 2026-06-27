@@ -118,7 +118,13 @@ export default function AdminUsers() {
 
       const mdSnap = await getDocs(collection(db, 'documentMarkdown'))
       for (const md of mdSnap.docs) {
-        if (!validMdRefs.has(md.id)) { await deleteDoc(doc(db, 'documentMarkdown', md.id)); removed.markdown++ }
+        // documentMarkdown được tham chiếu theo 2 cách khác nhau tùy luồng tạo ra nó:
+        // 1. Khóa TRỰC TIẾP = docId (pipeline đọc sâu hiện tại, useProcessPipeline.js)
+        // 2. Tham chiếu qua field "markdownRef" trên documents (luồng batch cũ, DocModal.jsx)
+        // Phải coi "còn dùng" nếu khớp MỘT TRONG HAI cách — chỉ check 1 cách sẽ xóa
+        // nhầm dữ liệu của văn bản vẫn đang hoạt động bình thường ở cách còn lại.
+        const stillUsed = validIds.has(md.id) || validMdRefs.has(md.id)
+        if (!stillUsed) { await deleteDoc(doc(db, 'documentMarkdown', md.id)); removed.markdown++ }
       }
 
       // documentChunks — cơ chế cũ đã bỏ hẳn, xoá TOÀN BỘ không điều kiện
