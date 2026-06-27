@@ -7,7 +7,7 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   if (req.method === 'OPTIONS') return res.status(200).end()
 
-  const results = { groq: [], gemini: [], mistral: [], github: null, env: {} }
+  const results = { groq: [], gemini: [], mistral: [], openrouter: [], github: null, env: {} }
 
   results.env = {
     VITE_GROQ_API_KEY:    process.env.VITE_GROQ_API_KEY    ? process.env.VITE_GROQ_API_KEY.slice(0,16)+'...'    : 'MISSING',
@@ -15,6 +15,7 @@ export default async function handler(req, res) {
     VITE_GEMINI_API_KEY:  process.env.VITE_GEMINI_API_KEY  ? process.env.VITE_GEMINI_API_KEY.slice(0,16)+'...'  : 'MISSING',
     VITE_GEMINI_API_KEY_2:process.env.VITE_GEMINI_API_KEY_2? process.env.VITE_GEMINI_API_KEY_2.slice(0,16)+'...': 'MISSING',
     VITE_MISTRAL_API_KEY: process.env.VITE_MISTRAL_API_KEY ? process.env.VITE_MISTRAL_API_KEY.slice(0,16)+'...' : 'MISSING',
+    VITE_OPENROUTER_API_KEY: process.env.VITE_OPENROUTER_API_KEY ? process.env.VITE_OPENROUTER_API_KEY.slice(0,16)+'...' : 'MISSING',
     VITE_GH_TOKEN:        process.env.VITE_GH_TOKEN        ? process.env.VITE_GH_TOKEN.slice(0,12)+'...'        : 'MISSING',
   }
 
@@ -76,6 +77,23 @@ export default async function handler(req, res) {
     } catch(e) { results.mistral.push({ ok: false, error: e.message }) }
   } else {
     results.mistral.push({ ok: false, error: 'VITE_MISTRAL_API_KEY chưa set trong Vercel' })
+  }
+
+  // Test OpenRouter (Llama 4 Maverick :free — lớp dự phòng Vision độc lập thứ 3)
+  const orKey = process.env.VITE_OPENROUTER_API_KEY
+  if (orKey) {
+    try {
+      const t0 = Date.now()
+      const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${orKey}` },
+        body: JSON.stringify({ model: 'meta-llama/llama-4-maverick:free', messages: [{ role:'user', content:'Say OK' }], max_tokens: 5 })
+      })
+      const d = await r.json()
+      results.openrouter.push({ ok: r.ok, status: r.status, response: d.choices?.[0]?.message?.content || d.error?.message, ms: Date.now()-t0 })
+    } catch(e) { results.openrouter.push({ ok: false, error: e.message }) }
+  } else {
+    results.openrouter.push({ ok: false, error: 'VITE_OPENROUTER_API_KEY chưa set trong Vercel' })
   }
 
   // Test GitHub
