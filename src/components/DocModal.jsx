@@ -32,12 +32,15 @@ const extractPdfFull = async (buf, fileName = '', docId = null, onStatus = null)
   return await extractPdfTextFull(buf.slice(0))
 }
 
-// Render phần đầu trang 1 (38% trên — đủ lấy header + tiêu đề + trích yếu) ở scale thấp → OCR nhanh
+// Render TOÀN BỘ trang 1 (không cắt theo %) — Quyết định/Tờ trình có header+Số/Ngày ở
+// đầu trang, nhưng Hợp đồng/Biên bản thường có "Số:" ở giữa trang (trong khối tiêu đề)
+// và ngày tháng ở CUỐI trang ("Hà Nội, ngày... tháng... năm..." hoặc "Hôm nay, ngày...").
+// Cắt theo % sẽ làm mất thông tin với các loại văn bản này — chụp cả trang để Vision
+// tự tìm đúng vị trí bất kể văn bản thuộc loại nào.
 const renderPdfHeaderImage = async (buf) => {
   const lib=await loadPdfJs(); const pdf=await lib.getDocument({data:buf}).promise
   const page=await pdf.getPage(1); const vp=page.getViewport({scale:1.5})
-  const cropH=Math.floor(vp.height*0.38)
-  const canvas=document.createElement('canvas'); canvas.width=vp.width; canvas.height=cropH
+  const canvas=document.createElement('canvas'); canvas.width=vp.width; canvas.height=vp.height
   const ctx=canvas.getContext('2d')
   await page.render({canvasContext:ctx,viewport:vp}).promise
   return [canvas.toDataURL('image/jpeg',0.8).split(',')[1]]

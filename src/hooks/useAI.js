@@ -276,16 +276,25 @@ export function useAI() {
     try {
       const b64 = base64Images[0]
 
-      const visionPrompt = `Đọc kỹ ảnh này — đây là phần đầu trang 1 của văn bản hành chính Việt Nam (header + tiêu đề + trích yếu).
+      const visionPrompt = `Đọc kỹ ảnh này — đây là TOÀN BỘ trang 1 của 1 văn bản tiếng Việt (có thể là văn bản hành chính nhà nước, hợp đồng, hoặc biên bản).
 
-Header thường có 2 cột: cột trái [Cơ quan chủ quản]/[Cơ quan ban hành]/[Số:...], cột phải [CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM]/[Độc lập - Tự do - Hạnh phúc]/[Địa danh, ngày...tháng...năm...]. Áp dụng nếu là Quyết định/Nghị quyết/Công văn/Tờ trình/Báo cáo/Thông báo. Nếu là Hợp đồng/Biên bản/loại khác không theo mẫu này, tự đọc và suy luận từ nội dung thấy trong ảnh.
+(A) NẾU là Quyết định/Nghị quyết/Công văn/Tờ trình/Báo cáo/Thông báo:
+Header thường có 2 cột ở ĐẦU trang: cột trái [Cơ quan chủ quản]/[Cơ quan ban hành]/[Số:...], cột phải [CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM]/[Độc lập - Tự do - Hạnh phúc]/[Địa danh, ngày...tháng...năm...].
+→ "org" CHỈ lấy [Cơ quan ban hành] (dòng ngay trên "Số:"). KHÔNG lấy cơ quan chủ quản cấp trên, KHÔNG lấy quốc hiệu/tiêu ngữ.
 
-- "code": lấy đúng số/ký hiệu NGAY SAU "Số:" — đọc CHÍNH XÁC từng chữ số/chữ cái nhìn thấy trong ảnh, không suy đoán.
-- "date": tìm cụm "ngày...tháng...năm..." — đọc CHÍNH XÁC từng chữ số. Nếu chữ số nào không rõ/không chắc → để trống, TUYỆT ĐỐI không bịa.
-- "org": CHỈ lấy [Cơ quan ban hành] (dòng ngay trên "Số:"). KHÔNG lấy cơ quan chủ quản cấp trên, KHÔNG lấy "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", KHÔNG lấy "Độc lập - Tự do - Hạnh phúc".
+(B) NẾU là Hợp đồng: "Số:" thường nằm GIỮA trang (trong khối tiêu đề "HỢP ĐỒNG..."), KHÔNG ở đầu trang như (A). Ngày ký thường nằm Ở CUỐI trang (dạng "Hà Nội, ngày... tháng... năm..."), KHÔNG ở đầu trang — phải nhìn xuống cuối ảnh để tìm. "org" lấy 1 trong 2 bên ký hợp đồng (Bên A, thường là bên mời/chủ đầu tư) nếu xác định được.
+
+(C) NẾU là Biên bản (họp/nghiệm thu/...): thường KHÔNG có header quốc hiệu — văn bản bắt đầu ngay bằng câu "Hôm nay, ngày... tháng... năm..., tại..., chúng tôi gồm có:". Đọc đúng ngày/tháng/năm trong câu này. "Số:" có thể không có — nếu không thấy, để trống.
+
+(D) Loại khác không theo mẫu nào trên: tự đọc và suy luận từ toàn bộ nội dung nhìn thấy trong ảnh, không ép theo cấu trúc (A)/(B)/(C).
+
+QUY TẮC CHUNG:
+- "code": lấy đúng số/ký hiệu của văn bản — đọc CHÍNH XÁC từng chữ số/chữ cái nhìn thấy, không suy đoán. Nếu không tìm thấy ở đâu trong ảnh → để trống.
+- "date": đọc CHÍNH XÁC từng chữ số ngày/tháng/năm, dù nó nằm ở đầu hay cuối trang. Nếu chữ số nào không rõ/không chắc → để trống, TUYỆT ĐỐI không bịa.
+- "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM" và "Độc lập - Tự do - Hạnh phúc" là quốc hiệu/tiêu ngữ cố định — không bao giờ là tên cơ quan/đơn vị, loại bỏ khỏi mọi trường.
 - "docType": Quyết định|Nghị quyết|Công văn|Tờ trình|Báo cáo|Hợp đồng|Biên bản|Thông báo|Hồ sơ|Bản vẽ|Khác
-- "subject": câu mô tả NỘI DUNG VỀ VIỆC GÌ (thường ở dòng "V/v:" hoặc ngay dưới tiêu đề loại văn bản)
-- "detail": tóm tắt ngắn những gì thấy được trong ảnh (có thể chưa đầy đủ vì chỉ là phần đầu trang)
+- "subject": câu mô tả NỘI DUNG VỀ VIỆC GÌ (dòng "V/v:", tên gói thầu/dự án trong hợp đồng, hoặc nội dung cuộc họp trong biên bản)
+- "detail": tóm tắt ngắn 1-2 điểm chính thấy được trong ảnh
 - "note": để trống ""
 - "status": "done"
 
