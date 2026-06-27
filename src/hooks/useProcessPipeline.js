@@ -2,9 +2,10 @@
 // Pipeline: fileUrl → extract text/OCR → AI analysis → Firestore
 //
 // OCR chain (PDF scan, khi lớp text PDF không đọc được/có watermark/lỗi CMap):
-//   1. AI Vision — Gemini trước, Groq sau, OpenRouter (Llama 4 Maverick) thứ 3
-//      (đọc theo lô nhiều trang/lệnh gọi, chất lượng cao, 3 hạ tầng độc lập)
-//   2. Tesseract.js (chạy trong browser, KHÔNG cần API key, dự phòng cuối — luôn thành công)
+//   1. AI Vision — Gemini trước, Groq sau, OpenRouter (Llama 4 Maverick) thứ 3,
+//      OCR.space (OCR thuần, không phải AI) thứ 4 — đọc theo lô nhiều trang/lệnh
+//      gọi (riêng OCR.space xử lý từng trang lẻ trong lô)
+//   2. Tesseract.js (chạy trong browser, KHÔNG cần API key, dự phòng cuối cùng)
 //
 // AI chain (phân tích/format markdown):
 //   1. Groq (nếu có key hợp lệ)
@@ -141,6 +142,27 @@ Quy tắc cho từng trang:
       const data = await res.json()
       if (data.text && data.text.trim().length > 20) return data.text
     }
+  } catch {}
+
+  // 4) OCR.space (OCR thuần, không phải AI) — phương án cuối trước Tesseract.
+  // Khác 3 lớp trên: chỉ nhận 1 ảnh/lần nên phải xử lý riêng từng trang trong lô,
+  // và chỉ trả text thô (không hiểu cấu trúc bảng tốt như AI Vision thật).
+  try {
+    const pageTexts = await Promise.all(b64Images.map(async (b64, idx) => {
+      try {
+        const res = await fetch('/api/ocrspace-proxy', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageBase64: b64 }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.text) return `## Trang ${pageNumbers[idx]}\n${data.text}`
+        }
+      } catch {}
+      return null
+    }))
+    const validPages = pageTexts.filter(Boolean)
+    if (validPages.length > 0) return validPages.join('\n\n')
   } catch {}
 
   return null
