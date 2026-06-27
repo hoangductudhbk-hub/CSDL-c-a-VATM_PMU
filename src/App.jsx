@@ -465,11 +465,18 @@ ${memCtx}`
                               style={{ padding:'2px 6px', background:'none', border:'none', cursor:'pointer', color:'#ccc', fontSize:10, flexShrink:0 }}>✕</button>
                         </div>
                       ))}
-                      {/* Nút thêm gói thầu */}
-                      <button onClick={() => setShowAddPkg(p.id)}
-                        style={{ fontSize:11, color:'#888', background:'none', border:'none', cursor:'pointer', padding:'4px 6px', width:'100%', textAlign:'left' }}>
-                        {subItemLabel(catKey)}
-                      </button>
+                      {/* Nút thêm gói thầu (chỉ DỰ ÁN mới có lớp thứ 3 này) / thêm văn bản trực tiếp (Quy định, Biểu mẫu) */}
+                      {catKey === 'project' ? (
+                        <button onClick={() => setShowAddPkg(p.id)}
+                          style={{ fontSize:11, color:'#888', background:'none', border:'none', cursor:'pointer', padding:'4px 6px', width:'100%', textAlign:'left' }}>
+                          {subItemLabel(catKey)}
+                        </button>
+                      ) : (
+                        <button onClick={() => { setSelProj(p.id); setSelPkg(null); setTab('docs'); setEditDoc(null); setModal('add') }}
+                          style={{ fontSize:11, color:'#888', background:'none', border:'none', cursor:'pointer', padding:'4px 6px', width:'100%', textAlign:'left' }}>
+                          {subItemLabel(catKey)}
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -502,24 +509,6 @@ ${memCtx}`
                       style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:'#888', fontSize:12, marginTop:2, fontWeight:600 }}>
                       {g.addLabel}
                     </button>
-                    {g.key === 'form' && (
-                      <button onClick={async () => {
-                        // Biểu mẫu được phép thêm văn bản ngay ở lớp tổng — tự tạo (hoặc dùng lại)
-                        // 1 project ẩn mặc định để chứa, vì data model vẫn cần 1 projectId cụ thể.
-                        const DEFAULT_NAME = 'Biểu mẫu chung'
-                        let target = catProjects.find(p => p.name === DEFAULT_NAME)
-                        if (!target) {
-                          const ref = await addProject({ name: DEFAULT_NAME, code:'', budget:'', period:'', address:'', category:'form' })
-                          logAddProj(DEFAULT_NAME)
-                          target = { id: ref.id }
-                        }
-                        setSelProj(target.id); setSelPkg(null); setTab('docs')
-                        setEditDoc(null); setModal('add')
-                      }}
-                        style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:'#888', fontSize:12, fontWeight:600 }}>
-                        + Thêm văn bản
-                      </button>
-                    )}
                   </>}
                 </div>
               )
