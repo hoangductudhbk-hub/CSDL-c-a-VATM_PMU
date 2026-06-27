@@ -85,7 +85,7 @@ const PAGES_PER_VISION_BATCH = 4 // gộp tối đa 4 trang/lệnh gọi (Groq V
 // ─── Đọc 1 LÔ nhiều trang (ảnh base64[]) bằng AI Vision trong 1 lệnh gọi ──
 // Gộp nhiều trang/lệnh gọi để giảm số lượt cần dùng — quan trọng với văn bản
 // nhiều trang (vd 100+ trang), tránh dùng hết quota AI Vision chỉ cho 1 văn bản.
-const ocrBatchWithVision = async (b64Images, pageNumbers) => {
+const ocrBatchWithVision = async (b64Images, pageNumbers, providerState) => {
   const prompt = `Đọc toàn bộ nội dung trong ${b64Images.length} ảnh sau — đây là các trang ${pageNumbers.join(', ')} của 1 văn bản tiếng Việt (có thể là văn bản hành chính, hợp đồng, hoặc biên bản).
 
 Với MỖI ảnh, trả về nội dung theo đúng cấu trúc:
@@ -99,54 +99,67 @@ Quy tắc cho từng trang:
 - KHÔNG thêm bình luận ngoài nội dung trang, KHÔNG thêm "Dưới đây là nội dung..."
 - PHẢI có đủ "## Trang N" cho TẤT CẢ ${b64Images.length} trang, đúng thứ tự: ${pageNumbers.join(', ')}`
 
-  // 1) Gemini Vision trước (hỗ trợ nhiều ảnh/lệnh gọi tốt)
-  try {
-    const parts = [{ text: prompt }]
-    b64Images.forEach(b64 => parts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } }))
-    const res = await fetch('/api/gemini-proxy', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ parts, maxTokens: 10000 }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      if (data.text && data.text.trim().length > 20) return data.text
-    }
-  } catch {}
+  // 1) Gemini Vision trước — BỎ QUA nếu vừa fail liên tục ở các lô trước trong
+  // LƯỢT CHẠY NÀY (đỡ tốn thời gian/lượt gọi thử lại 1 nhà cung cấp chắc chắn
+  // đang không hoạt động). Lượt "Phân tích lại"/"Tiếp tục" SAU sẽ thử lại từ đầu.
+  if ((providerState?.gemini || 0) < 2) {
+    try {
+      const parts = [{ text: prompt }]
+      b64Images.forEach(b64 => parts.push({ inline_data: { mime_type: 'image/jpeg', data: b64 } }))
+      const res = await fetch('/api/gemini-proxy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parts, maxTokens: 10000 }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.text && data.text.trim().length > 20) { if (providerState) providerState.gemini = 0; return data.text }
+      }
+      if (providerState) providerState.gemini = (providerState.gemini || 0) + 1
+    } catch { if (providerState) providerState.gemini = (providerState.gemini || 0) + 1 }
+  }
 
   // 2) Groq Vision sau (Llama 4 Scout — tối đa 5 ảnh/lệnh gọi; ⚠️ Groq deprecate
   // 27/6/2026, ngừng hẳn 17/7/2026 — xem ghi chú trong api/groq-proxy.js)
-  try {
-    const content = [{ type: 'text', text: prompt }]
-    b64Images.forEach(b64 => content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }))
-    const res = await fetch('/api/groq-proxy', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vision: true, maxTokens: 10000, messages: [{ role: 'user', content }] }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      if (data.text && data.text.trim().length > 20) return data.text
-    }
-  } catch {}
+  if ((providerState?.groq || 0) < 2) {
+    try {
+      const content = [{ type: 'text', text: prompt }]
+      b64Images.forEach(b64 => content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }))
+      const res = await fetch('/api/groq-proxy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vision: true, maxTokens: 10000, messages: [{ role: 'user', content }] }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.text && data.text.trim().length > 20) { if (providerState) providerState.groq = 0; return data.text }
+      }
+      if (providerState) providerState.groq = (providerState.groq || 0) + 1
+    } catch { if (providerState) providerState.groq = (providerState.groq || 0) + 1 }
+  }
 
   // 3) OpenRouter Vision (Llama 4 Maverick :free) — hạ tầng RIÊNG của OpenRouter,
   // không liên quan đến việc Groq khai tử bản họ tự host. Đây là lớp dự phòng
   // độc lập thứ 3, chỉ chạy khi cả Gemini và Groq đều thất bại cho lô trang này.
-  try {
-    const content = [{ type: 'text', text: prompt }]
-    b64Images.forEach(b64 => content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }))
-    const res = await fetch('/api/openrouter-proxy', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ maxTokens: 10000, messages: [{ role: 'user', content }] }),
-    })
-    if (res.ok) {
-      const data = await res.json()
-      if (data.text && data.text.trim().length > 20) return data.text
-    }
-  } catch {}
+  if ((providerState?.openrouter || 0) < 2) {
+    try {
+      const content = [{ type: 'text', text: prompt }]
+      b64Images.forEach(b64 => content.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${b64}` } }))
+      const res = await fetch('/api/openrouter-proxy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ maxTokens: 10000, messages: [{ role: 'user', content }] }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        if (data.text && data.text.trim().length > 20) { if (providerState) providerState.openrouter = 0; return data.text }
+      }
+      if (providerState) providerState.openrouter = (providerState.openrouter || 0) + 1
+    } catch { if (providerState) providerState.openrouter = (providerState.openrouter || 0) + 1 }
+  }
 
   // 4) OCR.space (OCR thuần, không phải AI) — phương án cuối trước Tesseract.
   // Khác 3 lớp trên: chỉ nhận 1 ảnh/lần nên phải xử lý riêng từng trang trong lô,
-  // và chỉ trả text thô (không hiểu cấu trúc bảng tốt như AI Vision thật).
+  // và chỉ trả text thô (không hiểu cấu trúc bảng tốt như AI Vision thật). Không
+  // áp dụng bỏ-qua-khi-fail-liên-tục vì OCR.space giới hạn theo IP cố định 500/ngày,
+  // không có khái niệm "tạm thời quá tải" như rate-limit AI.
   try {
     const pageTexts = await Promise.all(b64Images.map(async (b64, idx) => {
       try {
@@ -211,9 +224,18 @@ const ocrWithAIVision = async (buf, onStatus, docId, resumeState = null) => {
     onStatus?.(`👁️ AI Vision đọc văn bản (${totalPgs} trang, ${batches.length} lượt gọi)...`)
   }
 
+  // Theo dõi nhà cung cấp nào đang fail liên tục TRONG LƯỢT CHẠY NÀY — nếu 1 nhà
+  // cung cấp fail 2 lần liên tiếp (vd hết quota), bỏ qua nó cho các lô còn lại
+  // thay vì cứ thử lại vô ích mỗi lô. Lượt "Phân tích lại"/"Tiếp tục" SAU sẽ reset
+  // lại, thử từ đầu (quota có thể đã hồi).
+  const providerState = { gemini: 0, groq: 0, openrouter: 0 }
+  const labelOf = { gemini: 'Gemini', groq: 'Groq', openrouter: 'OpenRouter' }
+
   for (let b = startBatch; b < batches.length; b++) {
     const pageNums = batches[b]
-    onStatus?.(`👁️ AI Vision đọc trang ${pageNums[0]}-${pageNums[pageNums.length - 1]}/${totalPgs} (lô ${b + 1}/${batches.length})...`)
+    const skipped = Object.entries(providerState).filter(([,v]) => v >= 2).map(([k]) => labelOf[k])
+    const skipNotice = skipped.length ? ` (đang bỏ qua: ${skipped.join(', ')})` : ''
+    onStatus?.(`👁️ AI Vision đọc trang ${pageNums[0]}-${pageNums[pageNums.length - 1]}/${totalPgs} (lô ${b + 1}/${batches.length})${skipNotice}...`)
     try {
       const images = []
       for (const pNum of pageNums) {
@@ -221,7 +243,7 @@ const ocrWithAIVision = async (buf, onStatus, docId, resumeState = null) => {
         const canvas = await renderPageToCanvas(page, 1.5)
         images.push(canvasToBase64(canvas))
       }
-      const text = await ocrBatchWithVision(images, pageNums)
+      const text = await ocrBatchWithVision(images, pageNums, providerState)
       if (text) { allText += text + '\n\n' } else { failedPages += pageNums.length }
     } catch (e) {
       console.warn(`[AI Vision] lô trang ${pageNums.join(',')} lỗi:`, e.message)
