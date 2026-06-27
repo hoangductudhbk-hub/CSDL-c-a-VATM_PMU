@@ -153,7 +153,7 @@ export default function DocModal({ doc, onSave, onClose }) {
     // Luôn đọc header bằng Vision (ảnh thật trang 1) — KHÔNG dựa vào lớp text trích từ PDF
     // để lấy Số/Ngày/Cơ quan, vì lớp text có thể lỗi CMap/watermark đúng ở vị trí chứa số
     // mà không làm tụt tổng thể "trông có vẻ ổn" — Vision đọc đúng những gì mắt thấy.
-    setSt('⏳ Đang đọc header văn bản (Vision)...')
+    setSt('⏳ Đang đọc văn bản...')
     const imgs = await renderPdfHeaderImage(buf.slice(0))
     return await analyzeImages(imgs, fileName)
   }
@@ -178,7 +178,7 @@ export default function DocModal({ doc, onSave, onClose }) {
           // tổng thể "trông có vẻ ổn".
           rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, null)
           // Luôn đọc Số/Ngày/Cơ quan bằng Vision (ảnh thật trang 1) — miễn nhiễm với lỗi lớp text.
-          setSt('⏳ Đang đọc header văn bản (Vision)...')
+          setSt('⏳ Đang đọc văn bản...')
           const imgs = await renderPdfHeaderImage(buf.slice(0))
           result = await analyzeImages(imgs, file.name)
         } else if (['doc','docx'].includes(ext)) {
