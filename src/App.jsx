@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import React from 'react'
-import { collection, query, where, getDocs, updateDoc, doc as fsDoc } from 'firebase/firestore'
+import { collection, query, where, getDocs, getDoc, updateDoc, doc as fsDoc } from 'firebase/firestore'
 import { db } from './firebase'
 
 // Dự án cũ chưa có field category → suy luận theo tên để không mất dữ liệu
@@ -249,6 +249,22 @@ function AppInner() {
     loadMemories()
   }, [proj?.id, allDocs?.length])
 
+  // Trạng thái "cấp 1" — đang xem tổng quan cả nhóm (DỰ ÁN/QUY ĐỊNH/BIỂU MẪU),
+  // chưa chọn dự án/quy định cụ thể nào bên trong.
+  const [selCategory, setSelCategory] = useState(null)
+
+  // Toàn bộ văn bản hệ thống — chỉ tải khi cần tổng hợp ở cấp 1 (tải lười, tránh
+  // tải dư khi người dùng chỉ xem 1 dự án cụ thể như bình thường).
+  const [allSystemDocs, setAllSystemDocs] = useState([])
+  useEffect(() => {
+    if (!selCategory) return
+    const loadAll = async () => {
+      const snap = await getDocs(collection(db, 'documents'))
+      setAllSystemDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+    }
+    loadAll()
+  }, [selCategory])
+
   const [tab,         setTab]         = useState('docs')
   const [search,      setSearch]      = useState('')
   const [searchDebounced, setSearchDebounced] = useState('')
@@ -296,12 +312,12 @@ function AppInner() {
   }
 
   const selectProject = (projId) => {
-    setSelProj(projId); setSelPkg(null); setTab('docs')
+    setSelProj(projId); setSelPkg(null); setTab('docs'); setSelCategory(null)
     setExpandedProjs(prev => { const next = new Set(prev); next.add(projId); return next })
   }
 
   const selectPackage = (projId, pkgId) => {
-    setSelProj(projId); setSelPkg(pkgId); setTab('docs')
+    setSelProj(projId); setSelPkg(pkgId); setTab('docs'); setSelCategory(null)
   }
 
   const openFromDraft = (projectId) => {
@@ -342,23 +358,63 @@ function AppInner() {
     if (!silent) { setModal(null); setEditDoc(null) }
   }
 
+  // Lấy toàn văn (rawText đầy đủ, ưu tiên hơn markdown đã tóm tắt) cho 1 danh sách
+  // văn bản — dùng để Trợ lý AI hiểu SÂU từng văn bản trong phạm vi, không chỉ tóm tắt
+  // ngắn (lý do trước đây hỏi sâu — tên người, số tiền hợp đồng... — không trả lời được).
+  // Giới hạn mỗi văn bản tối đa 30K ký tự để tránh 1 văn bản quá dài chiếm hết context
+  // khi phạm vi có nhiều văn bản (cấp 2/cấp 1).
+  const buildFullTextContext = async (docsInScope, labelFn) => {
+    const parts = await Promise.all(docsInScope.map(async d => {
+      const label = labelFn(d)
+      try {
+        const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', d.id))
+        if (mdSnap.exists()) {
+          const data = mdSnap.data()
+          const full = (data.rawText || data.markdown || '').slice(0, 30000)
+          if (full) return `=== ${label} ===\n${full}`
+        }
+      } catch {}
+      // Chưa có bộ nhớ đầy đủ (văn bản chưa được phân tích sâu) → dùng tạm metadata cơ bản
+      const mem = projMemories[d.id]
+      if (mem?.summary) return `=== ${label} ===\n${mem.summary}`
+      return `=== ${label} ===\n${d.subject || ''} (${d.status})`
+    }))
+    return parts.join('\n\n')
+  }
+
   const handleAsk = async (q) => {
     if (!q.trim() || aiLoading) return
-    // Tạo context từ memories đã lưu + metadata cơ bản
-    const memCtx = safeDocs.map(d => {
-      const mem = projMemories[d.id]
-      if (mem?.summary) return `[${d.code||d.subject}]: ${mem.summary}${mem.keyPoints?.length ? '\nĐiểm quan trọng: ' + mem.keyPoints.slice(0,5).join('; ') : ''}`
-      return `[${d.code||'—'}] ${d.subject||''} (${d.status})`
-    }).join('\n\n')
-    const ctx = `Dự án: ${proj?.name}${selPkgObj?' › '+selPkgObj.name:''}
-Tổng: ${stats.total} văn bản | Hoàn thành: ${stats.done} | Đang thực hiện: ${stats.pending}
-
-DANH SÁCH VĂN BẢN VÀ NỘI DUNG:
-${memCtx}`
     setChat(c => [...c, { role:'user', content:q }])
     setChatInput(''); setAiLoad(true)
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior:'smooth' }), 100)
     try {
+      let ctx = ''
+      if (selCategory && !proj) {
+        // Cấp 1 — hiểu sâu TOÀN BỘ văn bản của TẤT CẢ dự án/quy định/biểu mẫu trong nhóm
+        const catLabel = { project:'DỰ ÁN', regulation:'QUY ĐỊNH', form:'BIỂU MẪU' }[selCategory] || selCategory
+        const catProjects = projects.filter(p => getCategory(p) === selCategory)
+        const catDocs = allSystemDocs.filter(d => catProjects.some(p => p.id === d.projectId))
+        const fullCtx = await buildFullTextContext(catDocs, d => {
+          const projName = catProjects.find(p => p.id === d.projectId)?.name || '—'
+          return `[${projName} › ${d.code || d.subject || '—'}]`
+        })
+        ctx = `Nhóm: ${catLabel}
+Danh sách các mục trong nhóm (${catProjects.length}): ${catProjects.map(p => p.name).join(', ') || '(chưa có mục nào)'}
+Tổng số văn bản trong toàn nhóm: ${catDocs.length}
+
+NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
+${fullCtx || '(chưa có văn bản nào)'}`
+      } else {
+        // Cấp 2 (dự án/quy định, xem hết các gói thầu) hoặc cấp 3 (1 gói thầu cụ thể)
+        // — đều hiểu sâu TOÀN BỘ văn bản trong đúng phạm vi đang chọn (safeDocs đã tự
+        // lọc theo selPkg nếu có, hoặc cả dự án nếu chưa chọn gói thầu).
+        const fullCtx = await buildFullTextContext(safeDocs, d => `[${d.code || d.subject || '—'}]`)
+        ctx = `Dự án: ${proj?.name}${selPkgObj ? ' › ' + selPkgObj.name : ''}
+Tổng: ${stats.total} văn bản | Hoàn thành: ${stats.done} | Đang thực hiện: ${stats.pending}
+
+NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
+${fullCtx}`
+      }
       const res = await ask(q, ctx)
       setChat(c => [...c, { role:'ai', content:res }])
     } catch {
@@ -500,10 +556,10 @@ ${memCtx}`
                   <button
                     onClick={() => {
                       setExpandedCats(s => { const n=new Set(s); n.has(g.key)?n.delete(g.key):n.add(g.key); return n })
-                      // Đồng thời hiển thị ngay nội dung bên phải — chọn dự án/quy định/biểu mẫu
-                      // ĐẦU TIÊN trong nhóm (nếu có), tránh phải bấm sâu thêm 1-2 cấp mới thấy gì
-                      // khi đang ở trang khác (Quản lý người dùng/Lịch sử truy cập...).
-                      if (catProjects.length > 0) selectProject(catProjects[0].id)
+                      // Chuyển sang cấp 1 thật — xem tổng quan cả nhóm, không nhảy thẳng
+                      // vào 1 dự án/quy định cụ thể, để Trợ lý AI biết được TOÀN BỘ
+                      // các mục bên trong nhóm, không chỉ mục đầu tiên.
+                      setSelCategory(g.key); setSelProj(null); setSelPkg(null); setTab('docs')
                     }}
                     style={{ width:'100%', textAlign:'left', display:'flex', alignItems:'center', gap:6, padding:'8px 8px 4px', background:'none', border:'none', cursor:'pointer' }}>
                     <span style={{ fontSize:9, color:'#aaa' }}>{catOpen ? '▼' : '▶'}</span>
@@ -548,7 +604,51 @@ ${memCtx}`
 
         {tab === 'admin' && isAdmin && <div style={{ flex:1, overflowY:'auto' }}><AdminUsers /></div>}
 
-        {!proj && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && (
+        {selCategory && !proj && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && (() => {
+          const catLabel = { project:'DỰ ÁN', regulation:'QUY ĐỊNH', form:'BIỂU MẪU' }[selCategory] || selCategory
+          const catProjects = projects.filter(p => getCategory(p) === selCategory)
+          const catDocs = allSystemDocs.filter(d => catProjects.some(p => p.id === d.projectId))
+          return (
+          <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+            <div style={{ padding:'12px 24px', borderBottom:'0.5px solid #e5e4e0', background:'#fff' }}>
+              <div style={{ fontSize:15, fontWeight:700, color:'#0a2342' }}>{catLabel} — Tổng quan</div>
+              <div style={{ fontSize:12, color:'#888', marginTop:2 }}>{catProjects.length} mục · {catDocs.length} văn bản</div>
+            </div>
+            <div style={{ padding:'12px 24px', overflowY:'auto' }}>
+              {catProjects.map(p => (
+                <button key={p.id} onClick={() => selectProject(p.id)}
+                  style={{ width:'100%', textAlign:'left', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 14px', marginBottom:6, background:'#fafaf8', border:'0.5px solid #e5e4e0', borderRadius:10, cursor:'pointer' }}>
+                  <span style={{ fontWeight:600, fontSize:13, color:'#1a1a1a' }}>📋 {p.name}</span>
+                  <span style={{ fontSize:11, color:'#888' }}>{allSystemDocs.filter(d => d.projectId === p.id).length} văn bản</span>
+                </button>
+              ))}
+              {catProjects.length === 0 && <div style={{ fontSize:12, color:'#888', padding:'20px 0' }}>Chưa có mục nào trong nhóm này.</div>}
+            </div>
+            <div style={{ padding:'12px 24px', borderTop:'0.5px solid #e5e4e0', background:'#fff' }}>
+              <div style={{ fontSize:12, color:'#888', marginBottom:8 }}>✨ Trợ lý AI — hỏi về toàn bộ {catLabel.toLowerCase()}</div>
+              <div style={{ maxHeight:240, overflowY:'auto', marginBottom:8 }}>
+                {chat.map((m,i) => (
+                  <div key={i} style={{ display:'flex', justifyContent: m.role==='user'?'flex-end':'flex-start', marginBottom:8 }}>
+                    <div style={{ maxWidth:'85%', padding:'8px 12px', borderRadius:10, fontSize:12, whiteSpace:'pre-wrap', background: m.role==='user' ? '#0a2342' : '#f5f5f3', color: m.role==='user' ? '#fff' : '#1a1a1a' }}>{m.content}</div>
+                  </div>
+                ))}
+                {aiLoading && <div style={{ display:'flex' }}><div style={{ padding:'8px 12px', borderRadius:10, fontSize:12, background:'#f5f5f3', color:'#888' }}>⏳ Đang trả lời...</div></div>}
+                <div ref={chatEndRef}/>
+              </div>
+              <div style={{ display:'flex', gap:8 }}>
+                <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
+                  onKeyDown={e => e.key==='Enter' && !e.shiftKey && handleAsk(chatInput)}
+                  placeholder={`Hỏi về ${catLabel.toLowerCase()}... (Enter để gửi)`}
+                  style={{ flex:1, padding:'8px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13 }}/>
+                <button onClick={() => handleAsk(chatInput)} disabled={aiLoading||!chatInput.trim()}
+                  style={{ padding:'8px 16px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer' }}>▶</button>
+              </div>
+            </div>
+          </div>
+          )
+        })()}
+
+        {!proj && !selCategory && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && (
           <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:48, background:'linear-gradient(135deg, #e8f4fd 0%, #bdd9f0 100%)', position:'relative' }}>
             <img src="/vatm-logo.png" alt="VATM" style={{ width:200, height:200, borderRadius:'50%', objectFit:'cover', marginBottom:24 }}/>
             <h2 style={{ fontSize:24, fontWeight:700, color:'#0a2342', marginBottom:12 }}>Chào mừng đến VATM-PMU</h2>
