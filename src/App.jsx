@@ -502,6 +502,24 @@ ${memCtx}`
                       style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:'#888', fontSize:12, marginTop:2, fontWeight:600 }}>
                       {g.addLabel}
                     </button>
+                    {g.key === 'form' && (
+                      <button onClick={async () => {
+                        // Biểu mẫu được phép thêm văn bản ngay ở lớp tổng — tự tạo (hoặc dùng lại)
+                        // 1 project ẩn mặc định để chứa, vì data model vẫn cần 1 projectId cụ thể.
+                        const DEFAULT_NAME = 'Biểu mẫu chung'
+                        let target = catProjects.find(p => p.name === DEFAULT_NAME)
+                        if (!target) {
+                          const ref = await addProject({ name: DEFAULT_NAME, code:'', budget:'', period:'', address:'', category:'form' })
+                          logAddProj(DEFAULT_NAME)
+                          target = { id: ref.id }
+                        }
+                        setSelProj(target.id); setSelPkg(null); setTab('docs')
+                        setEditDoc(null); setModal('add')
+                      }}
+                        style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:'transparent', color:'#888', fontSize:12, fontWeight:600 }}>
+                        + Thêm văn bản
+                      </button>
+                    )}
                   </>}
                 </div>
               )
@@ -579,6 +597,7 @@ ${memCtx}`
         )}
 
         {proj && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && <>
+          {(() => { const projCat = getCategory(proj); const needsPkg = projCat === 'project' && !selPkg; return (
           <div style={{ padding:'12px 24px 10px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
             <div>
               <div style={{ fontSize:15, fontWeight:700, color:'#0a2342' }}>
@@ -591,10 +610,11 @@ ${memCtx}`
                 </button>
               )}
             </div>
-            <button onClick={() => { setEditDoc(null); setModal('add') }} disabled={!selPkg}
-              title={!selPkg ? 'Chọn hoặc tạo gói thầu/thư mục con trước khi thêm văn bản' : ''}
-              style={{ padding:'8px 16px', background: selPkg ? '#fff' : '#f5f5f3', border:'0.5px solid #ddd', borderRadius:8, cursor: selPkg ? 'pointer' : 'not-allowed', fontSize:13, color: selPkg ? '#1a1a1a' : '#aaa' }}>+ Thêm văn bản</button>
+            <button onClick={() => { setEditDoc(null); setModal('add') }} disabled={needsPkg}
+              title={needsPkg ? 'Chọn hoặc tạo gói thầu/thư mục con trước khi thêm văn bản' : ''}
+              style={{ padding:'8px 16px', background: needsPkg ? '#f5f5f3' : '#fff', border:'0.5px solid #ddd', borderRadius:8, cursor: needsPkg ? 'not-allowed' : 'pointer', fontSize:13, color: needsPkg ? '#aaa' : '#1a1a1a' }}>+ Thêm văn bản</button>
           </div>
+          )})()}
           <div style={{ padding:'12px 24px', background:'#fff', borderBottom:'0.5px solid #e5e4e0', display:'flex', gap:12 }}>
             {[['Tổng văn bản',stats.total,'#1a1a1a'],['Hoàn thành',stats.done,'#15803d'],['Đang thực hiện',stats.pending,'#b45309'],['Chưa thực hiện',stats.prep,'#888']].map(([l,v,c]) => (
               <div key={l} style={{ flex:1, padding:'10px 14px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
@@ -646,7 +666,7 @@ ${memCtx}`
                   <tbody>
                     {filtered.length === 0 && (
                       <tr><td colSpan={7} style={{ padding:'40px', textAlign:'center', color:'#888', fontSize:13 }}>
-                        {selPkg ? 'Chưa có văn bản nào' : (
+                        {(selPkg || getCategory(proj) !== 'project') ? 'Chưa có văn bản nào' : (
                           <>
                             Chưa có gói thầu/thư mục con nào được chọn.<br/>
                             <span style={{ fontSize:12 }}>Mở rộng dự án ở menu bên trái và chọn (hoặc tạo) 1 gói thầu để thêm văn bản — tránh văn bản bị thêm lẫn ở cấp dự án.</span>
