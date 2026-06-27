@@ -11,17 +11,6 @@ const loadPdfJs = () => new Promise((res,rej) => {
   s.onload=()=>{window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';res(window.pdfjsLib)}
   s.onerror=rej; document.head.appendChild(s)
 })
-const extractPdfText = async (buf) => {
-  const lib=await loadPdfJs(); const pdf=await lib.getDocument({data:buf}).promise
-  const maxPages = buf.byteLength > 10*1024*1024 ? 3 : Math.min(pdf.numPages, 15)
-  let text=''
-  for(let i=1;i<=maxPages;i++){
-    const page=await pdf.getPage(i); const c=await page.getTextContent()
-    text+=c.items.map(it=>it.str).join(' ')+'\n'
-  }
-  return text.trim().replace(/\s+/g,' ').slice(0,8000)
-}
-
 // ── Đọc text thô từ PDF bằng pdfjs ──────────────────────────────
 const extractPdfTextFull = async (buf) => {
   const lib = await loadPdfJs()
@@ -43,11 +32,11 @@ const extractPdfFull = async (buf, fileName = '', docId = null, onStatus = null)
   return await extractPdfTextFull(buf.slice(0))
 }
 
-// Chỉ render phần header (30% trên trang 1) ở scale thấp → OCR nhanh hơn 4-5x
+// Render phần đầu trang 1 (38% trên — đủ lấy header + tiêu đề + trích yếu) ở scale thấp → OCR nhanh
 const renderPdfHeaderImage = async (buf) => {
   const lib=await loadPdfJs(); const pdf=await lib.getDocument({data:buf}).promise
   const page=await pdf.getPage(1); const vp=page.getViewport({scale:1.5})
-  const cropH=Math.floor(vp.height*0.30) // chỉ lấy 30% trên
+  const cropH=Math.floor(vp.height*0.38)
   const canvas=document.createElement('canvas'); canvas.width=vp.width; canvas.height=cropH
   const ctx=canvas.getContext('2d')
   await page.render({canvasContext:ctx,viewport:vp}).promise
@@ -157,29 +146,11 @@ export default function DocModal({ doc, onSave, onClose }) {
     onSave(final)
   }
 
-  // Phát hiện lớp text bị lỗi bảng mã (CMap hỏng) — chữ hiển thị đúng khi xem/in
-  // nhưng dữ liệu text ẩn bên dưới bị trỏ sai ký tự (VD: "QUYÊT ĐINH" → "QUYET D1NH",
-  // mất dấu "Đ"→"D" v.v). Tín hiệu: tỷ lệ ký tự CÓ DẤU bất thường thấp.
-  // Văn bản hành chính VN thật ~16-19%, văn bản lỗi CMap ~4.68% (đã verify dữ liệu thật).
-  const accentRatio = (text) => {
-    const matches = text.match(/[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỷỹ]/gi) || []
-    return matches.length / Math.max(text.length, 1)
-  }
-
-  const isRealContent = (text) => {
-    if (text.length < 150) return false
-    if (accentRatio(text) < 0.08) return false // text có vẻ dài/hợp lệ nhưng lỗi CMap → để rơi xuống nhánh OCR ảnh
-    return /căn cứ|điều \d|khoản|quyết định|nghị quyết|tờ trình|báo cáo|cộng hòa|chương \d/i.test(text)
-  }
-
   const processOnePdf = async (buf, fileName='') => {
-    // Đọc text nhanh bằng pdfjs (< 0.5s)
-    const text = await extractPdfText(buf.slice(0))
-    if (isRealContent(text)) {
-      return await analyzeText(text.slice(0, 1500), fileName)
-    }
-    // PDF scan → Groq Vision header (30% trên trang 1, timeout 5s)
-    setSt('⏳ Đang đọc header văn bản...')
+    // Luôn đọc header bằng Vision (ảnh thật trang 1) — KHÔNG dựa vào lớp text trích từ PDF
+    // để lấy Số/Ngày/Cơ quan, vì lớp text có thể lỗi CMap/watermark đúng ở vị trí chứa số
+    // mà không làm tụt tổng thể "trông có vẻ ổn" — Vision đọc đúng những gì mắt thấy.
+    setSt('⏳ Đang đọc header văn bản (Vision)...')
     const imgs = await renderPdfHeaderImage(buf.slice(0))
     return await analyzeImages(imgs, fileName)
   }
@@ -199,19 +170,14 @@ export default function DocModal({ doc, onSave, onClose }) {
         const buf = await file.arrayBuffer()
         if (ext === 'pdf') {
           setSt('⏳ Đang đọc PDF...')
-          // Chỉ đọc 2 trang đầu để lấy header (nhanh hơn extractPdfFull)
-          rawExtracted = await extractPdfText(buf.slice(0))
-          if (!isRealContent(rawExtracted)) {
-            // Thử lại với full extract (đề phòng extractPdfText bỏ sót)
-            rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, null)
-          }
-          if (isRealContent(rawExtracted)) {
-            result = await analyzeText(rawExtracted.slice(0, 1500), file.name)
-          } else {
-            setSt('⏳ Đang đọc header văn bản...')
-            const imgs = await renderPdfHeaderImage(buf.slice(0))
-            result = await analyzeImages(imgs, file.name)
-          }
+          // Vẫn trích text để lưu markdown phục vụ đọc sâu/trích dẫn sau này — KHÔNG dùng để quyết định
+          // cách trích trường, vì lớp text có thể lỗi CMap/watermark ngay ở chỗ chứa số mà không tụt
+          // tổng thể "trông có vẻ ổn".
+          rawExtracted = await extractPdfFull(buf.slice(0), file.name, null, null)
+          // Luôn đọc Số/Ngày/Cơ quan bằng Vision (ảnh thật trang 1) — miễn nhiễm với lỗi lớp text.
+          setSt('⏳ Đang đọc header văn bản (Vision)...')
+          const imgs = await renderPdfHeaderImage(buf.slice(0))
+          result = await analyzeImages(imgs, file.name)
         } else if (['doc','docx'].includes(ext)) {
           rawExtracted = await extractDocxText(buf)
           result = await analyzeText(rawExtracted.slice(0, 1500), file.name)
@@ -266,7 +232,7 @@ export default function DocModal({ doc, onSave, onClose }) {
         const bBuf = await file.arrayBuffer()
         if (ext==='pdf') {
           batchExtracted = await extractPdfFull(bBuf.slice(0), file.name, null, (msg) => { queue[i].status=msg; setFQ([...queue]) })
-          result = isRealContent(batchExtracted) ? await analyzeText(batchExtracted.slice(0,1500),file.name) : await processOnePdf(bBuf,file.name)
+          result = await processOnePdf(bBuf,file.name)
         } else if (['doc','docx'].includes(ext)) {
           batchExtracted = (await extractDocxText(bBuf)).slice(0,100000)
           result = await analyzeText(batchExtracted.slice(0,1500),file.name)

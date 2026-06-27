@@ -256,8 +256,22 @@ export function useAI() {
       const b64 = base64Images[0]
 
       // Groq Vision qua /api/groq-proxy — key không ra browser
-      const visionPrompt = `Đọc header văn bản hành chính Việt Nam này. Header có 2 cột: cột trái là [Cơ quan chủ quản]/[Cơ quan ban hành]/[Số:...], cột phải là [CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM]/[Độc lập - Tự do - Hạnh phúc]/[Địa danh, ngày...tháng...năm...]. Trường "org" CHỈ lấy [Cơ quan ban hành] (dòng ngay trên "Số:", KHÔNG lấy cơ quan chủ quản cấp trên, KHÔNG lấy "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", KHÔNG lấy "Độc lập - Tự do - Hạnh phúc"). Đọc ngày/tháng/năm chính xác từng chữ số, nếu không rõ thì để trống. Trả về JSON: {"code":"số/ký hiệu","date":"ngày ban hành dạng D/M/YYYY","org":"đơn vị trực tiếp ban hành","docType":"loại văn bản","subject":"về việc gì"}`
-      const txt = await callGroqVision(b64, visionPrompt, 400)
+      const visionPrompt = `Đọc kỹ ảnh này — đây là phần đầu trang 1 của văn bản hành chính Việt Nam (header + tiêu đề + trích yếu).
+
+Header thường có 2 cột: cột trái [Cơ quan chủ quản]/[Cơ quan ban hành]/[Số:...], cột phải [CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM]/[Độc lập - Tự do - Hạnh phúc]/[Địa danh, ngày...tháng...năm...]. Áp dụng nếu là Quyết định/Nghị quyết/Công văn/Tờ trình/Báo cáo/Thông báo. Nếu là Hợp đồng/Biên bản/loại khác không theo mẫu này, tự đọc và suy luận từ nội dung thấy trong ảnh.
+
+- "code": lấy đúng số/ký hiệu NGAY SAU "Số:" — đọc CHÍNH XÁC từng chữ số/chữ cái nhìn thấy trong ảnh, không suy đoán.
+- "date": tìm cụm "ngày...tháng...năm..." — đọc CHÍNH XÁC từng chữ số. Nếu chữ số nào không rõ/không chắc → để trống, TUYỆT ĐỐI không bịa.
+- "org": CHỈ lấy [Cơ quan ban hành] (dòng ngay trên "Số:"). KHÔNG lấy cơ quan chủ quản cấp trên, KHÔNG lấy "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM", KHÔNG lấy "Độc lập - Tự do - Hạnh phúc".
+- "docType": Quyết định|Nghị quyết|Công văn|Tờ trình|Báo cáo|Hợp đồng|Biên bản|Thông báo|Hồ sơ|Bản vẽ|Khác
+- "subject": câu mô tả NỘI DUNG VỀ VIỆC GÌ (thường ở dòng "V/v:" hoặc ngay dưới tiêu đề loại văn bản)
+- "detail": tóm tắt ngắn những gì thấy được trong ảnh (có thể chưa đầy đủ vì chỉ là phần đầu trang)
+- "note": để trống ""
+- "status": "done"
+
+Trả về CHỈ 1 JSON duy nhất, không giải thích thêm:
+{"code":"","date":"","org":"","docType":"","subject":"","detail":"","note":"","status":"done"}`
+      const txt = await callGroqVision(b64, visionPrompt, 700)
       if (txt) {
         const m = txt.match(/\{[\s\S]*\}/)
         if (m) {
