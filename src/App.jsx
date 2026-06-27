@@ -591,8 +591,9 @@ ${memCtx}`
                 </button>
               )}
             </div>
-            <button onClick={() => { setEditDoc(null); setModal('add') }}
-              style={{ padding:'8px 16px', background:'#fff', border:'0.5px solid #ddd', borderRadius:8, cursor:'pointer', fontSize:13 }}>+ Thêm văn bản</button>
+            <button onClick={() => { setEditDoc(null); setModal('add') }} disabled={!selPkg}
+              title={!selPkg ? 'Chọn hoặc tạo gói thầu/thư mục con trước khi thêm văn bản' : ''}
+              style={{ padding:'8px 16px', background: selPkg ? '#fff' : '#f5f5f3', border:'0.5px solid #ddd', borderRadius:8, cursor: selPkg ? 'pointer' : 'not-allowed', fontSize:13, color: selPkg ? '#1a1a1a' : '#aaa' }}>+ Thêm văn bản</button>
           </div>
           <div style={{ padding:'12px 24px', background:'#fff', borderBottom:'0.5px solid #e5e4e0', display:'flex', gap:12 }}>
             {[['Tổng văn bản',stats.total,'#1a1a1a'],['Hoàn thành',stats.done,'#15803d'],['Đang thực hiện',stats.pending,'#b45309'],['Chưa thực hiện',stats.prep,'#888']].map(([l,v,c]) => (
@@ -643,7 +644,16 @@ ${memCtx}`
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.length === 0 && <tr><td colSpan={7} style={{ padding:'40px', textAlign:'center', color:'#888', fontSize:13 }}>Chưa có văn bản nào</td></tr>}
+                    {filtered.length === 0 && (
+                      <tr><td colSpan={7} style={{ padding:'40px', textAlign:'center', color:'#888', fontSize:13 }}>
+                        {selPkg ? 'Chưa có văn bản nào' : (
+                          <>
+                            Chưa có gói thầu/thư mục con nào được chọn.<br/>
+                            <span style={{ fontSize:12 }}>Mở rộng dự án ở menu bên trái và chọn (hoặc tạo) 1 gói thầu để thêm văn bản — tránh văn bản bị thêm lẫn ở cấp dự án.</span>
+                          </>
+                        )}
+                      </td></tr>
+                    )}
                     {filtered.map(d => (
                       <tr key={d.id} onClick={() => { setDetailDoc(d); logViewDoc(d.code, d.subject, proj?.name, d.id) }}
                         style={{ borderBottom:'0.5px solid #f0f0ec', cursor:'pointer' }}
