@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import React from 'react'
 import { collection, query, where, getDocs, getDoc, updateDoc, doc as fsDoc } from 'firebase/firestore'
 import { db } from './firebase'
+import * as XLSX from 'xlsx'
 
 // Dự án cũ chưa có field category → suy luận theo tên để không mất dữ liệu
 const getCategory = (p) => {
@@ -390,9 +391,10 @@ function AppInner() {
   // mẫu báo cáo cần (tài chính, pháp lý, tiến độ...) — không cần AI tự mò lại
   // từ đầu trong rawText mỗi lần bấm nút. Gọn hơn rawText rất nhiều lần (rawText
   // tối đa 30K ký tự/văn bản, cộng dồn nhiều văn bản từng gây JSON output bị cắt
-  // cụt). Văn bản nào CHƯA có trong documentMemory (chưa phân tích sâu) → tạm
-  // dùng rawText (cắt ngắn hơn buildFullTextContext vì chỉ là dự phòng, không
-  // phải nguồn chính).
+  // cụt). Văn bản nào CHƯA có trong documentMemory (chưa phân tích sâu) → CHỈ
+  // dùng tóm tắt cơ bản đã có sẵn lúc upload (subject/detail/note/org/docType),
+  // KHÔNG tự động lấy rawText — giữ prompt luôn gọn và ổn định bất kể văn bản đó
+  // dài/ngắn.
   const buildReportContext = async (docsInScope, labelFn) => {
     const parts = await Promise.all(docsInScope.map(async d => {
       const label = labelFn(d)
@@ -411,15 +413,19 @@ function AppInner() {
         ].filter(Boolean).join('\n')
         return `=== ${label} ===\n${lines}`
       }
-      try {
-        const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', d.id))
-        if (mdSnap.exists()) {
-          const data = mdSnap.data()
-          const full = (data.rawText || data.markdown || '').slice(0, 8000)
-          if (full) return `=== ${label} (CHƯA PHÂN TÍCH SÂU — dùng tạm văn bản gốc) ===\n${full}`
-        }
-      } catch {}
-      return `=== ${label} ===\n${d.subject || ''} (${d.status})`
+      // Chưa phân tích sâu → CHỈ dùng tóm tắt cơ bản đã có sẵn từ lúc upload
+      // (d.subject/d.detail/d.note/d.org/d.docType — lấy thẳng từ object đã có,
+      // không gọi thêm Firestore). KHÔNG tự động lấy rawText ở đây nữa — rawText
+      // không giới hạn tốt theo từng văn bản trong nhóm nhiều văn bản, từng là
+      // nguyên nhân khiến prompt phình to gây lỗi JSON.
+      const basic = [
+        d.subject && `Về việc: ${d.subject}`,
+        d.detail && `Tóm tắt: ${d.detail}`,
+        d.note && `Ghi chú: ${d.note}`,
+        d.org && `Cơ quan ban hành: ${d.org}`,
+        d.docType && `Loại văn bản: ${d.docType}`,
+      ].filter(Boolean).join('\n')
+      return `=== ${label} (chưa phân tích sâu) ===\n${basic || `${d.subject || ''} (${d.status})`}`
     }))
     return parts.join('\n\n')
   }
@@ -523,6 +529,31 @@ ${fullCtx}`
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
     const pn = title.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').replace(/[^a-zA-Z0-9]/g,'_')
     a.download = `BaoCao_${pn}_${dd}-${mm}-${now.getFullYear()}_${hh}h${min}.doc`; a.click()
+  }
+
+  // Thống kê dạng excel — cùng dữ liệu với bản Word, xuất .xlsx bằng thư viện
+  // xlsx (đã có sẵn trong package.json, không cần thêm dependency).
+  const exportReportExcel = () => {
+    const now = new Date()
+    const s2 = (n) => String(n).padStart(2,'0')
+    const dd=s2(now.getDate()), mm=s2(now.getMonth()+1)
+    const title = selPkgObj ? `${proj?.name} > ${selPkgObj.name}` : (proj?.name||'')
+    const rows = safeDocs.map((d,i) => ({
+      'STT': i + 1,
+      'Số hiệu': d.code || '—',
+      'Ngày': normDate(d.date),
+      'Loại': d.docType || '—',
+      'Cơ quan ban hành': d.org || '—',
+      'Nội dung / Về việc': d.subject || '',
+      'Trạng thái': (SM[d.status] || SM.prep).label,
+    }))
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = [{ wch: 5 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 28 }, { wch: 60 }, { wch: 16 }]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Thống kê')
+    logExportReport(proj?.name)
+    const pn = title.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').replace(/[^a-zA-Z0-9]/g,'_')
+    XLSX.writeFile(wb, `ThongKe_${pn}_${dd}-${mm}-${now.getFullYear()}.xlsx`)
   }
 
   return (
@@ -753,7 +784,7 @@ ${fullCtx}`
                 { num:'6', title:'Xem, sửa và xóa văn bản', icon:'📄', content:'<b>Nhấn vào dòng</b> để xem chi tiết & tải file gốc. Nhấn <b>✏️</b> để chỉnh sửa thông tin. Nhấn <b>🗑️</b> để xóa — file gốc trên GitHub và toàn bộ dữ liệu AI liên quan sẽ bị xóa theo, không để sót.' },
                 { num:'7', title:'Trợ lý AI — hỏi cả 1 dự án/gói thầu', icon:'📊', content:'Đứng ở cấp dự án/quy định hoặc đúng 1 gói thầu cụ thể → phần <b>✨ Trợ lý AI</b> hiểu SÂU toàn bộ nội dung mọi văn bản trong đúng phạm vi đang xem (không chỉ tóm tắt ngắn) — hỏi được cả số tiền hợp đồng, tên nhân sự, điều khoản chi tiết. Dùng nút <b>Tóm tắt / Việc gấp / Báo cáo / Rủi ro</b> hoặc tự nhập câu hỏi.' },
                 { num:'8', title:'Trợ lý AI — hỏi cả 1 nhóm (DỰ ÁN/QUY ĐỊNH/BIỂU MẪU)', icon:'🌐', content:'Bấm vào <b>tên nhóm</b> ở thanh bên trái → vào trang <b>Tổng quan</b>, thấy hết các mục bên trong + Trợ lý AI riêng cho cả nhóm. Hỏi tổng quát ("có mấy dự án") → AI biết hết danh sách. Hỏi nhắc rõ tên 1 mục ("Hộp đen có bao nhiêu văn bản") → AI tự thu hẹp đúng mục đó, không lẫn với mục khác trong nhóm.' },
-                { num:'9', title:'Xuất báo cáo Word', icon:'📥', content:'Chọn dự án hoặc gói thầu → tab <b>Xuất báo cáo</b> → nhấn <b>📥 Tải báo cáo Word</b>. File Word tổng hợp toàn bộ văn bản trong phạm vi đang chọn sẽ được tải về máy.' },
+                { num:'9', title:'Thống kê văn bản (Word/Excel)', icon:'📥', content:'Chọn dự án hoặc gói thầu → tab <b>Thống kê văn bản</b> → nhấn <b>📥 Thống kê dạng word</b> hoặc <b>📊 Thống kê dạng excel</b>. File tổng hợp toàn bộ văn bản trong phạm vi đang chọn sẽ được tải về máy.' },
                 { num:'10', title:'Lịch sử & quản lý người dùng', icon:'👥', content:'Mục <b>Lịch sử truy cập</b> (sidebar) ghi lại mọi lượt đăng nhập, thêm/sửa/xóa văn bản của tất cả người dùng — có thể xuất báo cáo Word hoặc xóa toàn bộ lịch sử. Mục <b>Quản lý người dùng</b> (chỉ Admin) dùng để duyệt tài khoản mới và phân quyền.' },
               ].map(item => (
                 <div key={item.num} style={{ display:'flex', gap:10, padding:'8px 12px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
@@ -808,7 +839,7 @@ ${fullCtx}`
             </div>
           </div>
           <div style={{ padding:'0 24px', background:'#fff', borderBottom:'0.5px solid #e5e4e0', display:'flex' }}>
-            {[['docs','Văn bản'],['report','Xuất báo cáo']].map(([v,l]) => (
+            {[['docs','Văn bản'],['report','Thống kê văn bản']].map(([v,l]) => (
               <button key={v} onClick={() => setTab(v)}
                 style={{ padding:'12px 16px', border:'none', borderBottom:tab===v?'2px solid #1a1a1a':'2px solid transparent', background:'transparent', cursor:'pointer', fontSize:13, fontWeight:tab===v?600:400, color:tab===v?'#1a1a1a':'#888' }}>{l}</button>
             ))}
@@ -892,9 +923,12 @@ ${fullCtx}`
               <div style={{ maxWidth:600 }}>
                 <div style={{ padding:'20px', background:'#fff', border:'0.5px solid #e5e4e0', borderRadius:12 }}>
                   <p style={{ fontSize:13, color:'#555', marginBottom:16 }}>
-                    Xuất báo cáo: <strong>{selPkgObj ? `${proj?.name} › ${selPkgObj.name}` : proj?.name}</strong> ({stats.total} văn bản).
+                    Thống kê văn bản: <strong>{selPkgObj ? `${proj?.name} › ${selPkgObj.name}` : proj?.name}</strong> ({stats.total} văn bản).
                   </p>
-                  <button onClick={exportReport} style={{ padding:'10px 20px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13 }}>📥 Tải báo cáo Word (.doc)</button>
+                  <div style={{ display:'flex', gap:10 }}>
+                    <button onClick={exportReport} style={{ padding:'10px 20px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13 }}>📥 Thống kê dạng word</button>
+                    <button onClick={exportReportExcel} style={{ padding:'10px 20px', background:'#15803d', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13 }}>📊 Thống kê dạng excel</button>
+                  </div>
                 </div>
               </div>
             )}
