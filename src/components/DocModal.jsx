@@ -4,6 +4,7 @@ import { useCloudinaryStorage } from '../hooks/useCloudinaryStorage'
 
 const ST = [{ value:'done',label:'✅ Hoàn thành'},{ value:'pending',label:'🔄 Đang thực hiện'},{ value:'prep',label:'⬜ Chưa thực hiện'}]
 const DT = ['Quyết định','Nghị quyết','Công văn','Tờ trình','Báo cáo','Hợp đồng','Biên bản','Thông báo','Hồ sơ','Bản vẽ','Khác']
+const ORGS = ['Phòng dự án 2','Tổng công ty Quản lý bay Việt Nam','Ban Quản lý dự án chuyên ngành Quản lý bay']
 
 const loadPdfJs = () => new Promise((res,rej) => {
   if (window.pdfjsLib){res(window.pdfjsLib);return}
@@ -51,7 +52,32 @@ const loadScript = (src,check) => new Promise((res,rej)=>{
 })
 const extractDocxText = async (buf) => {
   await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js',()=>window.mammoth)
-  return (await window.mammoth.extractRawText({arrayBuffer:buf})).value.slice(0,8000)
+  try {
+    const text = (await window.mammoth.extractRawText({arrayBuffer:buf.slice(0)})).value
+    if (text && text.trim().length > 20) return text.slice(0,8000)
+    throw new Error('mammoth trả về rỗng')
+  } catch (e) {
+    // mammoth hay crash (lỗi "reading 'children'") với file .docx có cấu trúc
+    // phức tạp (bảng, hình vẽ/đường kẻ chèn trong header...) vì nó cố hiểu
+    // CẤU TRÚC để chuyển sang HTML. Fallback: bóc trực tiếp text thô trong
+    // các thẻ <w:t> của XML gốc — không cần hiểu cấu trúc, chỉ cần đủ chữ
+    // cho AI đọc là được.
+    console.warn('[extractDocxText] mammoth lỗi, dùng fallback đọc XML thô:', e.message)
+    try {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',()=>window.JSZip)
+      const zip = await window.JSZip.loadAsync(buf.slice(0))
+      const docFile = zip.file('word/document.xml')
+      if (!docFile) throw new Error('Không tìm thấy word/document.xml — có thể không phải file .docx hợp lệ')
+      const xml = await docFile.async('string')
+      const text = (xml.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [])
+        .map(m => m.replace(/<[^>]+>/g, ''))
+        .join(' ')
+      if (!text.trim()) throw new Error('Không trích được text nào từ XML')
+      return text.slice(0,8000)
+    } catch (e2) {
+      throw new Error('Không đọc được nội dung file Word — file có thể bị lỗi, hoặc dùng định dạng .doc cũ (chỉ .docx mới đọc được). Vui lòng lưu lại dưới dạng .docx hoặc điền thủ công.')
+    }
+  }
 }
 const extractXlsxText = async (buf) => {
   await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',()=>window.XLSX)
@@ -351,7 +377,7 @@ export default function DocModal({ doc, onSave, onClose }) {
               <div style={{marginBottom:12}}><label style={lSt}>Số ký hiệu</label><input value={form.code||''} onChange={e=>set('code',e.target.value)} placeholder="VD: 404/NQ-HĐTV" style={iSt}/></div>
               <div style={{marginBottom:12}}><label style={lSt}>Ngày ban hành</label><input value={form.date||''} onChange={e=>set('date',e.target.value)} placeholder="VD: 08/2025" style={iSt}/></div>
             </div>
-            <div style={{marginBottom:12}}><label style={lSt}>Cơ quan ban hành</label><input value={form.org||''} onChange={e=>set('org',e.target.value)} placeholder="VD: Tổng công ty VATM" style={iSt}/></div>
+            <div style={{marginBottom:12}}><label style={lSt}>Cơ quan ban hành</label><input value={form.org||''} onChange={e=>set('org',e.target.value)} placeholder="VD: Tổng công ty VATM" list="org-options" style={iSt}/><datalist id="org-options">{ORGS.map(o=><option key={o} value={o}/>)}</datalist></div>
             <div style={{marginBottom:12}}><label style={lSt}>Loại văn bản</label><select value={form.docType} onChange={e=>set('docType',e.target.value)} style={iSt}>{DT.map(t=><option key={t}>{t}</option>)}</select></div>
             <div style={{marginBottom:12}}><label style={lSt}>Nội dung / Về việc <span style={{color:'#e53e3e'}}>*</span></label><input value={form.subject||''} onChange={e=>set('subject',e.target.value)} placeholder="Tóm tắt nội dung chính" style={iSt}/></div>
             <div style={{marginBottom:12}}><label style={lSt}>Trích yếu chi tiết</label><textarea value={form.detail||''} onChange={e=>set('detail',e.target.value)} rows={3} style={{...iSt,resize:'vertical'}}/></div>
