@@ -632,26 +632,26 @@ ${fullCtx}`
           const catDocs = allSystemDocs.filter(d => catProjects.some(p => p.id === d.projectId))
           return (
           <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-            <div style={{ padding:'12px 24px', borderBottom:'0.5px solid #e5e4e0', background:'#fff' }}>
+            <div style={{ padding:'12px 24px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', flexShrink:0 }}>
               <div style={{ fontSize:15, fontWeight:700, color:'#0a2342' }}>{catLabel} — Tổng quan</div>
               <div style={{ fontSize:12, color:'#888', marginTop:2 }}>{catProjects.length} mục · {catDocs.length} văn bản</div>
             </div>
-            <div style={{ padding:'12px 24px', overflowY:'auto' }}>
+            <div style={{ padding:'10px 24px', overflowY:'auto', flexShrink:0, maxHeight:160 }}>
               {catProjects.map(p => (
                 <button key={p.id} onClick={() => selectProject(p.id)}
-                  style={{ width:'100%', textAlign:'left', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 14px', marginBottom:6, background:'#fafaf8', border:'0.5px solid #e5e4e0', borderRadius:10, cursor:'pointer' }}>
+                  style={{ width:'100%', textAlign:'left', display:'flex', justifyContent:'space-between', alignItems:'center', padding:'7px 14px', marginBottom:4, background:'#fafaf8', border:'0.5px solid #e5e4e0', borderRadius:10, cursor:'pointer' }}>
                   <span style={{ fontWeight:600, fontSize:13, color:'#1a1a1a' }}>📋 {p.name}</span>
                   <span style={{ fontSize:11, color:'#888' }}>{allSystemDocs.filter(d => d.projectId === p.id).length} văn bản</span>
                 </button>
               ))}
-              {catProjects.length === 0 && <div style={{ fontSize:12, color:'#888', padding:'20px 0' }}>Chưa có mục nào trong nhóm này.</div>}
+              {catProjects.length === 0 && <div style={{ fontSize:12, color:'#888', padding:'10px 0' }}>Chưa có mục nào trong nhóm này.</div>}
             </div>
-            <div style={{ padding:'12px 24px', borderTop:'0.5px solid #e5e4e0', background:'#fff' }}>
-              <div style={{ display:'flex', alignItems:'center', marginBottom:8 }}>
+            <div style={{ padding:'12px 24px', borderTop:'0.5px solid #e5e4e0', background:'#fff', flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minHeight:0 }}>
+              <div style={{ display:'flex', alignItems:'center', marginBottom:8, flexShrink:0 }}>
                 <div style={{ fontSize:12, color:'#888' }}>✨ Trợ lý AI — hỏi về toàn bộ {catLabel.toLowerCase()}</div>
                 {chat.length > 0 && <button onClick={() => setChat([])} style={{ fontSize:11, color:'#888', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', padding:'2px 8px', marginLeft:'auto' }}>🗑️ Xóa chat</button>}
               </div>
-              <div style={{ maxHeight:240, overflowY:'auto', marginBottom:8 }}>
+              <div style={{ flex:1, overflowY:'auto', marginBottom:8, minHeight:0 }}>
                 {chat.map((m,i) => (
                   <div key={i} style={{ display:'flex', justifyContent: m.role==='user'?'flex-end':'flex-start', marginBottom:8 }}>
                     <div style={{ maxWidth:'85%', padding:'8px 12px', borderRadius:10, fontSize:12, whiteSpace:'pre-wrap', background: m.role==='user' ? '#0a2342' : '#f5f5f3', color: m.role==='user' ? '#fff' : '#1a1a1a' }}>{m.content}</div>
@@ -660,7 +660,7 @@ ${fullCtx}`
                 {aiLoading && <div style={{ display:'flex' }}><div style={{ padding:'8px 12px', borderRadius:10, fontSize:12, background:'#f5f5f3', color:'#888' }}>⏳ Đang trả lời...</div></div>}
                 <div ref={chatEndRef}/>
               </div>
-              <div style={{ display:'flex', gap:8 }}>
+              <div style={{ display:'flex', gap:8, flexShrink:0 }}>
                 <input value={chatInput} onChange={e=>setChatInput(e.target.value)}
                   onKeyDown={e => e.key==='Enter' && !e.shiftKey && handleAsk(chatInput)}
                   placeholder={`Hỏi về ${catLabel.toLowerCase()}... (Enter để gửi)`}
