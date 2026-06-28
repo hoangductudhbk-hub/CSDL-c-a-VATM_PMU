@@ -434,8 +434,26 @@ Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
     } finally { setLoading(false) }
   }
 
+  // askRaw — gọi AI KHÔNG qua lớp "Bạn là trợ lý quản lý dự án..." mặc định của ask().
+  // Dùng khi cần JSON sạch (vd tạo báo cáo theo mẫu) — tránh AI thêm lời chào/giải
+  // thích quanh JSON do bị ảnh hưởng bởi system prompt chung.
+  const askRaw = async (prompt, maxTokens = 3000) => {
+    setLoading(true)
+    try {
+      const gem = await callGemini(prompt, maxTokens)
+      if (gem) return gem
+      const groq = await callGroq(prompt, maxTokens)
+      if (groq) return groq
+      const or = await callOpenRouter(prompt, maxTokens)
+      if (or) return or
+      const err = new Error('AI_RATE_LIMIT')
+      err.waitSeconds = 30
+      throw err
+    } finally { setLoading(false) }
+  }
+
   return {
-    ask, analyzeText, analyzeImages, analyzeDeepForMemory, askDeep,
+    ask, askRaw, analyzeText, analyzeImages, analyzeDeepForMemory, askDeep,
     loading,
   }
 }

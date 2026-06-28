@@ -20,6 +20,7 @@ import { useProjects }    from './hooks/useProjects'
 import { useDocuments }   from './hooks/useDocuments'
 import { usePackages }    from './hooks/usePackages'
 import { useAI }          from './hooks/useAI'
+import { useMonthlyReport } from './hooks/useMonthlyReport'
 import DocModal           from './components/DocModal'
 import DocDetail          from './components/DocDetail'
 import HistoryView        from './components/HistoryView'
@@ -232,7 +233,8 @@ function AppInner() {
 
   const { docs, allDocs, addDocument, updateDocument, deleteDocument } = useDocuments(proj?.id, user?.uid, selPkg)
   const { deleteFile }    = useCloudinaryStorage()
-  const { ask } = useAI()
+  const { ask, askRaw } = useAI()
+  const { generateReport, generating: generatingReport } = useMonthlyReport()
 
   // Load memories của tất cả văn bản trong dự án
   const [projMemories, setProjMemories] = useState({})
@@ -442,6 +444,18 @@ ${fullCtx}`
     } catch {
       setChat(c => [...c, { role:'ai', content:'❌ AI đang bận. Thử lại sau 1 phút!' }])
     } finally { setAiLoad(false) }
+  }
+
+  // Tạo báo cáo tháng theo mẫu chuẩn (Word) — chỉ áp dụng ở cấp dự án/gói thầu cụ
+  // thể (cần proj), không áp dụng ở cấp 1 (tổng quan nhóm) vì mẫu này là cho 1 dự án.
+  const handleGenerateMonthlyReport = async () => {
+    if (!proj || generatingReport) return
+    try {
+      const fullCtx = await buildFullTextContext(safeDocs, d => `[${d.code || d.subject || '—'}]`)
+      await generateReport({ projectName: proj.name, fullCtx, askRaw })
+    } catch (e) {
+      alert('Không tạo được báo cáo: ' + e.message)
+    }
   }
 
   const exportReport = () => {
@@ -858,6 +872,10 @@ ${fullCtx}`
                 {[['📋 Tóm tắt','Tóm tắt tình trạng pháp lý hiện tại của dự án'],['🔴 Việc gấp','Liệt kê các văn bản cần xử lý gấp'],['📊 Báo cáo','Tạo báo cáo tình trạng dự án'],['⚠️ Rủi ro','Phân tích rủi ro pháp lý']].map(([l,q]) => (
                   <button key={l} onClick={() => handleAsk(q)} style={{ fontSize:11, padding:'5px 10px', background:'#f5f5f3', border:'0.5px solid #e5e4e0', borderRadius:20, cursor:'pointer', color:'#555' }}>{l}</button>
                 ))}
+                <button onClick={handleGenerateMonthlyReport} disabled={generatingReport}
+                  style={{ fontSize:11, padding:'5px 10px', background: generatingReport ? '#e5e4e0' : '#0a2342', border:'none', borderRadius:20, cursor: generatingReport ? 'default' : 'pointer', color:'#fff' }}>
+                  {generatingReport ? '⏳ Đang tạo...' : '📄 Báo cáo tháng (Word)'}
+                </button>
               </div>
             </div>
             {chat.length > 0 && (
