@@ -398,9 +398,14 @@ function AppInner() {
           const projName = catProjects.find(p => p.id === d.projectId)?.name || '—'
           return `[${projName} › ${d.code || d.subject || '—'}]`
         })
+        const breakdown = catProjects.map(p => `- ${p.name}: ${catDocs.filter(d => d.projectId === p.id).length} văn bản`).join('\n')
         ctx = `Nhóm: ${catLabel}
-Danh sách các mục trong nhóm (${catProjects.length}): ${catProjects.map(p => p.name).join(', ') || '(chưa có mục nào)'}
-Tổng số văn bản trong toàn nhóm: ${catDocs.length}
+QUAN TRỌNG — 2 con số khác nhau, KHÔNG nhầm lẫn:
+- Số MỤC (dự án/quy định) trong nhóm này: ĐÚNG ${catProjects.length} mục, tên đầy đủ: ${catProjects.map(p => p.name).join(', ') || '(chưa có mục nào)'}
+- Số VĂN BẢN trong toàn nhóm (cộng tất cả các mục): ${catDocs.length} văn bản
+
+Chi tiết số văn bản theo từng mục:
+${breakdown || '(chưa có mục nào)'}
 
 NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
 ${fullCtx || '(chưa có văn bản nào)'}`
@@ -625,7 +630,10 @@ ${fullCtx}`
               {catProjects.length === 0 && <div style={{ fontSize:12, color:'#888', padding:'20px 0' }}>Chưa có mục nào trong nhóm này.</div>}
             </div>
             <div style={{ padding:'12px 24px', borderTop:'0.5px solid #e5e4e0', background:'#fff' }}>
-              <div style={{ fontSize:12, color:'#888', marginBottom:8 }}>✨ Trợ lý AI — hỏi về toàn bộ {catLabel.toLowerCase()}</div>
+              <div style={{ display:'flex', alignItems:'center', marginBottom:8 }}>
+                <div style={{ fontSize:12, color:'#888' }}>✨ Trợ lý AI — hỏi về toàn bộ {catLabel.toLowerCase()}</div>
+                {chat.length > 0 && <button onClick={() => setChat([])} style={{ fontSize:11, color:'#888', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', padding:'2px 8px', marginLeft:'auto' }}>🗑️ Xóa chat</button>}
+              </div>
               <div style={{ maxHeight:240, overflowY:'auto', marginBottom:8 }}>
                 {chat.map((m,i) => (
                   <div key={i} style={{ display:'flex', justifyContent: m.role==='user'?'flex-end':'flex-start', marginBottom:8 }}>

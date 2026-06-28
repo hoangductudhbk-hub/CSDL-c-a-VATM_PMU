@@ -401,9 +401,9 @@ Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
     resetIdxIfNewDay()
     const sys = `Bạn là trợ lý quản lý dự án VATM. Trả lời tiếng Việt, chi tiết và hữu ích.${context ? '\n\nDỮ LIỆU DỰ ÁN:\n' + context : ''}`
     try {
-      const gem = await callGemini(`${sys}\n\nCâu hỏi: ${question}`, 1200)
+      const gem = await callGemini(`${sys}\n\nCâu hỏi: ${question}`, 3000)
       if (gem) return gem
-      const groq = await callGroq(question, 1200, sys)
+      const groq = await callGroq(question, 3000, sys)
       if (groq) return groq
       const err = new Error('AI_RATE_LIMIT')
       err.waitSeconds = 30
