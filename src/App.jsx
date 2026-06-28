@@ -393,13 +393,29 @@ function AppInner() {
         // Cấp 1 — hiểu sâu TOÀN BỘ văn bản của TẤT CẢ dự án/quy định/biểu mẫu trong nhóm
         const catLabel = { project:'DỰ ÁN', regulation:'QUY ĐỊNH', form:'BIỂU MẪU' }[selCategory] || selCategory
         const catProjects = projects.filter(p => getCategory(p) === selCategory)
-        const catDocs = allSystemDocs.filter(d => catProjects.some(p => p.id === d.projectId))
-        const fullCtx = await buildFullTextContext(catDocs, d => {
-          const projName = catProjects.find(p => p.id === d.projectId)?.name || '—'
-          return `[${projName} › ${d.code || d.subject || '—'}]`
-        })
-        const breakdown = catProjects.map(p => `- ${p.name}: ${catDocs.filter(d => d.projectId === p.id).length} văn bản`).join('\n')
-        ctx = `Nhóm: ${catLabel}
+
+        // Nếu câu hỏi nhắc rõ tên 1 mục cụ thể trong nhóm (vd "dự án Hộp đen có...")
+        // → THU HẸP phạm vi về đúng mục đó, như đang hỏi ở cấp 2 — loại bỏ hoàn toàn
+        // rủi ro AI lẫn dữ liệu với các mục khác trong nhóm khi nhóm có nhiều mục.
+        const qLower = q.toLowerCase()
+        const mentionedProject = catProjects.find(p => qLower.includes(p.name.toLowerCase()))
+
+        if (mentionedProject) {
+          const scopedDocs = allSystemDocs.filter(d => d.projectId === mentionedProject.id)
+          const fullCtx = await buildFullTextContext(scopedDocs, d => `[${d.code || d.subject || '—'}]`)
+          ctx = `Dự án/mục: ${mentionedProject.name} (thuộc nhóm ${catLabel})
+Tổng: ${scopedDocs.length} văn bản — CHỈ trả lời về đúng mục "${mentionedProject.name}" này, không nhắc các mục khác trong nhóm trừ khi được hỏi.
+
+NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
+${fullCtx || '(chưa có văn bản nào)'}`
+        } else {
+          const catDocs = allSystemDocs.filter(d => catProjects.some(p => p.id === d.projectId))
+          const fullCtx = await buildFullTextContext(catDocs, d => {
+            const projName = catProjects.find(p => p.id === d.projectId)?.name || '—'
+            return `[${projName} › ${d.code || d.subject || '—'}]`
+          })
+          const breakdown = catProjects.map(p => `- ${p.name}: ${catDocs.filter(d => d.projectId === p.id).length} văn bản`).join('\n')
+          ctx = `Nhóm: ${catLabel}
 QUAN TRỌNG — 2 con số khác nhau, KHÔNG nhầm lẫn:
 - Số MỤC (dự án/quy định) trong nhóm này: ĐÚNG ${catProjects.length} mục, tên đầy đủ: ${catProjects.map(p => p.name).join(', ') || '(chưa có mục nào)'}
 - Số VĂN BẢN trong toàn nhóm (cộng tất cả các mục): ${catDocs.length} văn bản
@@ -409,6 +425,7 @@ ${breakdown || '(chưa có mục nào)'}
 
 NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
 ${fullCtx || '(chưa có văn bản nào)'}`
+        }
       } else {
         // Cấp 2 (dự án/quy định, xem hết các gói thầu) hoặc cấp 3 (1 gói thầu cụ thể)
         // — đều hiểu sâu TOÀN BỘ văn bản trong đúng phạm vi đang chọn (safeDocs đã tự
