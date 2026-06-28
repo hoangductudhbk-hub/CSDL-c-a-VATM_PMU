@@ -8,17 +8,23 @@ import {
   AlignmentType, BorderStyle, WidthType, LevelFormat,
 } from 'docx'
 
-export function useMonthlyReport() {
-  const [generating, setGenerating] = useState(false)
+// Trích đúng khối JSON {...} từ phản hồi AI.
+// Cách cũ chỉ strip dấu ```json — nếu AI lỡ thêm 1 câu dẫn/giải thích trước hoặc
+// sau JSON (hay gặp hơn khi rơi xuống Groq/OpenRouter fallback, tuân lệnh "chỉ
+// trả JSON" kém nghiêm hơn Gemini) thì JSON.parse() fail ngay dù JSON bên trong
+// vẫn hợp lệ. Lấy đúng từ dấu "{" đầu tới "}" cuối thì vẫn parse được.
+const extractJson = (raw) => {
+  if (!raw) return null
+  const noFence = raw.replace(/```json|```/g, '').trim()
+  const start = noFence.indexOf('{')
+  const end = noFence.lastIndexOf('}')
+  if (start === -1 || end === -1 || end <= start) return null
+  try { return JSON.parse(noFence.slice(start, end + 1)) } catch { return null }
+}
 
-  // askRaw: hàm gọi AI sạch (không qua system prompt mặc định) — truyền vào từ
-  // useAI() ở component cha, để dùng chung 1 nguồn key/quota với phần còn lại.
-  const generateReport = async ({ projectName, fullCtx, askRaw }) => {
-    setGenerating(true)
-    try {
-      const prompt = `Bạn là trợ lý lập báo cáo dự án. Dựa trên TOÀN VĂN các văn bản dưới đây, hãy điền vào đúng cấu trúc báo cáo tháng theo mẫu chuẩn của Tổng công ty Quản lý bay Việt Nam (theo Công văn 7023/QLB-KHĐT ngày 8/10/2025).
+const buildReportPrompt = (projectName, fullCtx) => `Bạn là trợ lý lập báo cáo dự án. Dựa trên TOÀN VĂN các văn bản dưới đây, hãy điền vào đúng cấu trúc báo cáo tháng theo mẫu chuẩn của Tổng công ty Quản lý bay Việt Nam (theo Công văn 7023/QLB-KHĐT ngày 8/10/2025).
 
-CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG giải thích gì thêm ngoài JSON. Đúng cấu trúc:
+CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG viết bất kỳ câu dẫn hay giải thích nào trước hoặc sau JSON. Các đoạn tường thuật ("tinhHinhChuanBiDauTu", "tinhHinhTrienKhai") viết theo mốc thời gian cụ thể (ngày/tháng/năm) lấy đúng từ văn bản, súc tích — ưu tiên các mốc quan trọng nhất, không cần kể lại từng chi tiết nhỏ, để JSON không bị cắt cụt giữa chuỗi. Đúng cấu trúc:
 
 {
   "tenDuAn": "tên đầy đủ dự án",
@@ -30,7 +36,7 @@ CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG giải thích
   "thoiGianThucHien": "...",
   "mucTieuDauTu": ["điểm 1", "điểm 2"] hoặc null nếu văn bản không nêu mục tiêu rõ ràng,
   "tinhHinhChuanBiDauTu": "đoạn văn tường thuật ngắn",
-  "tinhHinhTrienKhai": "đoạn văn tường thuật CHI TIẾT theo mốc thời gian cụ thể (ngày/tháng/năm) lấy đúng từ văn bản, không suy đoán thêm",
+  "tinhHinhTrienKhai": "đoạn văn tường thuật theo mốc thời gian cụ thể, súc tích",
   "khoKhanVuongMac": "nêu khó khăn/vướng mắc/kiến nghị nếu văn bản có nhắc tới, không có thì để chuỗi rỗng"
 }
 
@@ -39,11 +45,35 @@ Dự án: ${projectName}
 NỘI DUNG VĂN BẢN:
 ${fullCtx}`
 
-      const raw = await askRaw(prompt, 3000)
-      const cleaned = raw.replace(/```json|```/g, '').trim()
-      let data
-      try { data = JSON.parse(cleaned) }
-      catch { throw new Error('AI trả về không đúng định dạng JSON, thử lại sau.') }
+export function useMonthlyReport() {
+  const [generating, setGenerating] = useState(false)
+
+  // askRaw: hàm gọi AI sạch (không qua system prompt mặc định) — truyền vào từ
+  // useAI() ở component cha, để dùng chung 1 nguồn key/quota với phần còn lại.
+  const generateReport = async ({ projectName, fullCtx, askRaw }) => {
+    setGenerating(true)
+    try {
+      const prompt = buildReportPrompt(projectName, fullCtx)
+
+      // Trước đây maxTokens=3000 cho 1 JSON nhiều trường tường thuật dài → hay bị
+      // cắt cụt giữa chuỗi (hết token output trước khi AI viết xong dấu "}" cuối),
+      // gây lỗi "AI trả về không đúng định dạng JSON". Tăng lên 8000 + thử tối đa
+      // 2 lần (đề phòng 1 lượt rơi xuống provider fallback trả JSON lệch format).
+      let data = null
+      let lastRaw = ''
+      for (let attempt = 0; attempt < 2 && !data; attempt++) {
+        lastRaw = await askRaw(prompt, 8000)
+        data = extractJson(lastRaw)
+      }
+
+      if (!data) {
+        console.error(
+          '[useMonthlyReport] AI không trả JSON hợp lệ sau 2 lần thử. Độ dài phản hồi cuối:',
+          lastRaw?.length || 0,
+          '\n200 ký tự cuối phản hồi:', lastRaw?.slice(-200)
+        )
+        throw new Error('AI trả về không đúng định dạng JSON sau 2 lần thử. Thử lại sau, hoặc thu hẹp phạm vi (chọn 1 gói thầu cụ thể thay vì cả dự án) nếu dự án có nhiều văn bản dài.')
+      }
 
       await buildAndDownloadDocx(data, projectName)
     } finally {

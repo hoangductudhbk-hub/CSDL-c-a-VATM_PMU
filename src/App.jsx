@@ -384,6 +384,46 @@ function AppInner() {
     return parts.join('\n\n')
   }
 
+  // Nguồn riêng cho BÁO CÁO THÁNG — lấy bộ nhớ ĐÃ PHÂN TÍCH SÂU (collection
+  // documentMemory: summary/keyPoints/financial/legal/deadlines/members/...)
+  // làm nguồn CHÍNH, vì các nhóm thông tin đó đã khớp gần như 1:1 với các mục
+  // mẫu báo cáo cần (tài chính, pháp lý, tiến độ...) — không cần AI tự mò lại
+  // từ đầu trong rawText mỗi lần bấm nút. Gọn hơn rawText rất nhiều lần (rawText
+  // tối đa 30K ký tự/văn bản, cộng dồn nhiều văn bản từng gây JSON output bị cắt
+  // cụt). Văn bản nào CHƯA có trong documentMemory (chưa phân tích sâu) → tạm
+  // dùng rawText (cắt ngắn hơn buildFullTextContext vì chỉ là dự phòng, không
+  // phải nguồn chính).
+  const buildReportContext = async (docsInScope, labelFn) => {
+    const parts = await Promise.all(docsInScope.map(async d => {
+      const label = labelFn(d)
+      const mem = projMemories[d.id]
+      const hasMem = mem && (mem.summary || mem.financial?.length || mem.legal?.length || mem.deadlines?.length || mem.keyPoints?.length)
+      if (hasMem) {
+        const lines = [
+          mem.summary && `Tóm tắt: ${mem.summary}`,
+          mem.keyPoints?.length && `Điểm quan trọng: ${mem.keyPoints.join('; ')}`,
+          mem.financial?.length && `Tài chính: ${mem.financial.join('; ')}`,
+          mem.legal?.length && `Pháp lý: ${mem.legal.join('; ')}`,
+          mem.deadlines?.length && `Tiến độ/mốc thời gian: ${mem.deadlines.join('; ')}`,
+          mem.members?.length && `Thành viên/đơn vị liên quan: ${mem.members.join('; ')}`,
+          mem.requirements && `Yêu cầu: ${mem.requirements}`,
+          mem.risks && `Rủi ro/vướng mắc: ${mem.risks}`,
+        ].filter(Boolean).join('\n')
+        return `=== ${label} ===\n${lines}`
+      }
+      try {
+        const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', d.id))
+        if (mdSnap.exists()) {
+          const data = mdSnap.data()
+          const full = (data.rawText || data.markdown || '').slice(0, 8000)
+          if (full) return `=== ${label} (CHƯA PHÂN TÍCH SÂU — dùng tạm văn bản gốc) ===\n${full}`
+        }
+      } catch {}
+      return `=== ${label} ===\n${d.subject || ''} (${d.status})`
+    }))
+    return parts.join('\n\n')
+  }
+
   const handleAsk = async (q) => {
     if (!q.trim() || aiLoading) return
     setChat(c => [...c, { role:'user', content:q }])
@@ -451,7 +491,7 @@ ${fullCtx}`
   const handleGenerateMonthlyReport = async () => {
     if (!proj || generatingReport) return
     try {
-      const fullCtx = await buildFullTextContext(safeDocs, d => `[${d.code || d.subject || '—'}]`)
+      const fullCtx = await buildReportContext(safeDocs, d => `[${d.code || d.subject || '—'}]`)
       await generateReport({ projectName: proj.name, fullCtx, askRaw })
     } catch (e) {
       alert('Không tạo được báo cáo: ' + e.message)
