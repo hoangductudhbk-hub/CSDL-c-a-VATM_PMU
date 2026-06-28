@@ -98,6 +98,25 @@ const callGroq = async (prompt, maxTokens = 1000, system = null) => {
   } catch { return null }
 }
 
+// callOpenRouter — Llama 4 Maverick :free, hạ tầng RIÊNG độc lập với Gemini/Groq.
+// Dùng làm phương án 3 cho ask() — khi cả Gemini và Groq cùng bị rate-limit/lỗi
+// (như đã gặp thực tế), vẫn còn 1 nguồn nữa thay vì báo "AI đang bận" ngay.
+const callOpenRouter = async (prompt, maxTokens = 1000, system = null) => {
+  try {
+    const messages = system
+      ? [{ role: 'system', content: system }, { role: 'user', content: prompt }]
+      : [{ role: 'user', content: prompt }]
+    const res = await withTimeout(fetch('/api/openrouter-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages, maxTokens }),
+    }), 25000)
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.text || null
+  } catch { return null }
+}
+
 // callGroqVision → /api/groq-proxy với vision:true + base64 image
 const callGroqVision = async (b64, promptText, maxTokens = 400) => {
   try {
@@ -389,6 +408,8 @@ Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
       if (gem) return gem
       const groq = await callGroq(prompt, 2000)
       if (groq) return groq
+      const or = await callOpenRouter(prompt, 2000)
+      if (or) return or
       const err = new Error('AI_RATE_LIMIT')
       err.waitSeconds = 30
       throw err
@@ -405,6 +426,8 @@ Trả lời tiếng Việt, chính xác, trích dẫn từ văn bản:`
       if (gem) return gem
       const groq = await callGroq(question, 3000, sys)
       if (groq) return groq
+      const or = await callOpenRouter(question, 3000, sys)
+      if (or) return or
       const err = new Error('AI_RATE_LIMIT')
       err.waitSeconds = 30
       throw err
