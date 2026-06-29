@@ -762,6 +762,7 @@ ${fullCtx}`
     const ngay = now.toLocaleDateString('vi-VN')
     const s2 = (n) => String(n).padStart(2,'0')
     const dd=s2(now.getDate()), mm=s2(now.getMonth()+1), hh=s2(now.getHours()), min=s2(now.getMinutes())
+    const isProject = getCategory(proj) === 'project' // Quy định/Biểu mẫu không có khái niệm trạng thái/tiến độ
     const rows = safeDocs.map((d,i) => {
       const s = SM[d.status] || SM.prep
       return `<tr><td style="padding:6px 10px;border:1px solid #ddd;text-align:center">${i+1}</td>
@@ -770,13 +771,13 @@ ${fullCtx}`
         <td style="padding:6px 10px;border:1px solid #ddd">${d.docType||'—'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd">${d.org||'—'}</td>
         <td style="padding:6px 10px;border:1px solid #ddd">${d.subject||''}</td>
-        <td style="padding:6px 10px;border:1px solid #ddd;color:${s.color};font-weight:bold">${s.label}</td></tr>`
+        ${isProject ? `<td style="padding:6px 10px;border:1px solid #ddd;color:${s.color};font-weight:bold">${s.label}</td>` : ''}</tr>`
     }).join('')
     const title = selPkgObj ? `${proj?.name} > ${selPkgObj.name}` : (proj?.name||'')
     const html = `<html><head><meta charset='utf-8'><style>body{font-family:'Times New Roman',serif;font-size:14pt}h1{font-size:16pt;font-weight:bold;text-align:center}table{border-collapse:collapse;width:100%}th{background:#1a1a1a;color:#fff;padding:6pt 8pt;border:1px solid #333}td{padding:5pt 8pt;border:1px solid #ccc}</style></head><body>
     <h1>BÁO CÁO TỔNG HỢP VĂN BẢN</h1><h1>${title}</h1>
-    <p style="text-align:center">Ngày xuất: ${ngay} | Tổng: ${stats.total} | Tiến độ: ${progress}%</p>
-    <table><thead><tr><th>STT</th><th>Số hiệu</th><th>Ngày</th><th>Loại</th><th>Cơ quan ban hành</th><th>Nội dung</th><th>Trạng thái</th></tr></thead><tbody>${rows}</tbody></table></body></html>`
+    <p style="text-align:center">Ngày xuất: ${ngay} | Tổng: ${stats.total}${isProject ? ` | Tiến độ: ${progress}%` : ''}</p>
+    <table><thead><tr><th>STT</th><th>Số hiệu</th><th>Ngày</th><th>Loại</th><th>Cơ quan ban hành</th><th>Nội dung</th>${isProject ? '<th>Trạng thái</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></body></html>`
     logExportReport(proj?.name)
     const blob = new Blob(['\uFEFF' + html], { type:'application/msword;charset=utf-8' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
@@ -791,6 +792,7 @@ ${fullCtx}`
     const s2 = (n) => String(n).padStart(2,'0')
     const dd=s2(now.getDate()), mm=s2(now.getMonth()+1)
     const title = selPkgObj ? `${proj?.name} > ${selPkgObj.name}` : (proj?.name||'')
+    const isProject = getCategory(proj) === 'project' // Quy định/Biểu mẫu không có khái niệm trạng thái
     const rows = safeDocs.map((d,i) => ({
       'STT': i + 1,
       'Số hiệu': d.code || '—',
@@ -798,10 +800,12 @@ ${fullCtx}`
       'Loại': d.docType || '—',
       'Cơ quan ban hành': d.org || '—',
       'Nội dung / Về việc': d.subject || '',
-      'Trạng thái': (SM[d.status] || SM.prep).label,
+      ...(isProject ? { 'Trạng thái': (SM[d.status] || SM.prep).label } : {}),
     }))
     const ws = XLSX.utils.json_to_sheet(rows)
-    ws['!cols'] = [{ wch: 5 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 28 }, { wch: 60 }, { wch: 16 }]
+    ws['!cols'] = isProject
+      ? [{ wch: 5 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 28 }, { wch: 60 }, { wch: 16 }]
+      : [{ wch: 5 }, { wch: 22 }, { wch: 12 }, { wch: 16 }, { wch: 28 }, { wch: 60 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Thống kê')
     logExportReport(proj?.name)
@@ -1136,25 +1140,30 @@ ${fullCtx}`
                     <input value={search} onChange={e => handleSearchChange(e.target.value)} onKeyDown={handleSearchEnter} placeholder="Tìm văn bản..."
                       style={{ width:'100%', padding:'9px 12px 9px 36px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', boxSizing:'border-box' }}/>
                   </div>
-                  <select value={filter} onChange={e => setFilter(e.target.value)}
-                    style={{ padding:'9px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', background:'#fff' }}>
-                    <option value="all">Tất cả trạng thái</option>
-                    <option value="done">Hoàn thành</option>
-                    <option value="pending">Đang thực hiện</option>
-                    <option value="prep">Chưa thực hiện</option>
-                  </select>
+                  {getCategory(proj) === 'project' && (
+                    <select value={filter} onChange={e => setFilter(e.target.value)}
+                      style={{ padding:'9px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', background:'#fff' }}>
+                      <option value="all">Tất cả trạng thái</option>
+                      <option value="done">Hoàn thành</option>
+                      <option value="pending">Đang thực hiện</option>
+                      <option value="prep">Chưa thực hiện</option>
+                    </select>
+                  )}
                 </div>
                 <table style={{ width:'100%', borderCollapse:'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom:'0.5px solid #e5e4e0' }}>
-                      {['Số hiệu văn bản','Ngày','Loại','Cơ quan ban hành','Nội dung / Về việc','Trạng thái',''].map(h => (
+                      {(getCategory(proj) === 'project'
+                        ? ['Số hiệu văn bản','Ngày','Loại','Cơ quan ban hành','Nội dung / Về việc','Trạng thái','']
+                        : ['Số hiệu văn bản','Ngày','Loại','Cơ quan ban hành','Nội dung / Về việc','']
+                      ).map(h => (
                         <th key={h} style={{ textAlign:'left', padding:'8px 12px', fontSize:14, color:'#888', fontWeight:500 }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.length === 0 && (
-                      <tr><td colSpan={7} style={{ padding:'40px', textAlign:'center', color:'#888', fontSize:13 }}>
+                      <tr><td colSpan={getCategory(proj) === 'project' ? 7 : 6} style={{ padding:'40px', textAlign:'center', color:'#888', fontSize:13 }}>
                         {(selPkg || getCategory(proj) !== 'project') ? 'Chưa có văn bản nào' : (
                           <>
                             Chưa có gói thầu/thư mục con nào được chọn.<br/>
@@ -1180,9 +1189,11 @@ ${fullCtx}`
                             </span>
                           )}
                         </td>
-                        <td style={{ padding:'6px 12px' }} onClick={e => e.stopPropagation()}>
-                          <StatusCell doc={d} updateDocument={updateDocument} admin={true}/>
-                        </td>
+                        {getCategory(proj) === 'project' && (
+                          <td style={{ padding:'6px 12px' }} onClick={e => e.stopPropagation()}>
+                            <StatusCell doc={d} updateDocument={updateDocument} admin={true}/>
+                          </td>
+                        )}
                         <td style={{ padding:'10px 8px', whiteSpace:'nowrap' }} onClick={e => e.stopPropagation()}>
                           <button onClick={() => { setEditDoc(d); setModal('edit') }} style={{ background:'none', border:'none', cursor:'pointer', fontSize:15, padding:'2px 6px', color:'#888' }}>✏️</button>
                           <button onClick={async () => {
