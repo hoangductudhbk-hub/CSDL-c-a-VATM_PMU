@@ -24,7 +24,7 @@ const extractJson = (raw) => {
 
 const buildReportPrompt = (projectName, fullCtx) => `Bạn là trợ lý lập báo cáo dự án. Dựa trên TOÀN VĂN các văn bản dưới đây, hãy điền vào đúng cấu trúc báo cáo theo mẫu chuẩn của Tổng công ty Quản lý bay Việt Nam (theo Công văn 7023/QLB-KHĐT ngày 8/10/2025).
 
-CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG viết bất kỳ câu dẫn hay giải thích nào trước hoặc sau JSON. Các đoạn tường thuật ("tinhHinhChuanBiDauTu", "tinhHinhTrienKhai") viết theo mốc thời gian cụ thể (ngày/tháng/năm) lấy đúng từ văn bản, súc tích — ưu tiên các mốc quan trọng nhất, không cần kể lại từng chi tiết nhỏ, để JSON không bị cắt cụt giữa chuỗi. Đúng cấu trúc:
+CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG viết bất kỳ câu dẫn hay giải thích nào trước hoặc sau JSON. Đúng cấu trúc:
 
 {
   "tenDuAn": "tên đầy đủ dự án",
@@ -35,10 +35,16 @@ CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG viết bất 
   "nguonVon": "...",
   "thoiGianThucHien": "...",
   "mucTieuDauTu": ["điểm 1", "điểm 2"] hoặc null nếu văn bản không nêu mục tiêu rõ ràng,
-  "tinhHinhChuanBiDauTu": "đoạn văn tường thuật ngắn",
-  "tinhHinhTrienKhai": "đoạn văn tường thuật theo mốc thời gian cụ thể, súc tích",
+  "tinhHinhThucHien": ["mốc 1 (1 câu đầy đủ)", "mốc 2", "..."],
   "khoKhanVuongMac": "nêu khó khăn/vướng mắc/kiến nghị nếu văn bản có nhắc tới, không có thì để chuỗi rỗng"
 }
+
+QUY TẮC CHO "tinhHinhThucHien" (tình hình chuẩn bị/triển khai dự án):
+- MỖI mốc/sự kiện riêng biệt (1 quyết định, 1 hợp đồng, 1 cột mốc tiến độ...) là 1 PHẦN TỬ RIÊNG trong mảng — KHÔNG gộp nhiều mốc vào 1 câu dài, KHÔNG viết thành 1 đoạn văn liền mạch.
+- BẮT BUỘC sắp xếp các phần tử ĐÚNG THEO THỨ TỰ THỜI GIAN xảy ra trong thực tế (mốc nào diễn ra trước → đứng trước trong mảng), không theo thứ tự xuất hiện trong văn bản nguồn nếu khác thứ tự thời gian thật.
+- TUYỆT ĐỐI không lặp lại 1 sự kiện/thông tin đã nêu ở phần tử khác — mỗi phần tử phải là thông tin MỚI, không trùng nội dung với phần tử trước.
+- Khi nhắc tới việc ký HỢP ĐỒNG hoặc quyết định có yếu tố tài chính, PHẢI nêu kèm ĐẦY ĐỦ trong cùng 1 câu (nếu văn bản có ghi): giá trị hợp đồng/quyết định + thời gian thực hiện hợp đồng — không chỉ nêu số hiệu/ngày ký mà bỏ sót giá trị và thời hạn.
+- Mỗi phần tử là 1 câu hoàn chỉnh, đủ ngữ cảnh để hiểu khi đọc riêng từng dòng (không viết tắt kiểu "tiếp tục công việc trên" mà phải nêu rõ lại nội dung).
 
 QUY TẮC BẮT BUỘC — chống bịa/nhầm số liệu (đã từng xảy ra thực tế, là lỗi nghiêm trọng):
 - Số tiền, ngày/tháng/năm, số hiệu văn bản/hợp đồng: PHẢI chép ĐÚNG NGUYÊN VĂN từng chữ số/chữ cái nhìn thấy trong NỘI DUNG VĂN BẢN dưới đây. KHÔNG tự diễn giải lại, KHÔNG làm tròn, KHÔNG đoán nếu không thấy rõ — sai 1 chữ số ngày/tháng hoặc 1 số trong mã hợp đồng là lỗi nghiêm trọng.
@@ -234,14 +240,21 @@ async function buildAndDownloadDocx(data, projectName) {
   }
 
   // "II. Tình hình thực hiện" → "1. Tình hình chuẩn bị đầu tư:" (đậm+nghiêng)
-  // → nội dung chuẩn bị đầu tư, RỒI nối liền nội dung triển khai ngay dưới,
-  // KHÔNG tách thành mục "2." riêng — đúng cấu trúc mẫu chuẩn.
+  // → danh sách GẠCH ĐẦU DÒNG, mỗi mốc/sự kiện 1 dòng riêng, đúng thứ tự thời
+  // gian — KHÔNG viết liền thành 1 đoạn văn nữa (gây lặp nội dung giữa 2 đoạn
+  // "chuẩn bị"/"triển khai" cũ — đã gặp thực tế: 2 đoạn ra y nguyên như nhau).
   children.push(
     new Paragraph({ spacing: { before: 120, after: 120 }, children: [new TextRun({ text: 'II. Tình hình thực hiện', bold: true, size: FS })] }),
     bodyPara('1. Tình hình chuẩn bị đầu tư: ', { bold: true, italics: true }),
-    bodyPara(data.tinhHinhChuanBiDauTu || 'Chưa có thông tin'),
-    bodyPara(data.tinhHinhTrienKhai || 'Chưa có thông tin'),
   )
+  const milestones = Array.isArray(data.tinhHinhThucHien)
+    ? data.tinhHinhThucHien.filter(Boolean)
+    : (data.tinhHinhThucHien ? [data.tinhHinhThucHien] : [])
+  if (milestones.length) {
+    milestones.forEach(m => children.push(bodyPara(`- ${m}`)))
+  } else {
+    children.push(bodyPara('Chưa có thông tin'))
+  }
 
   if (data.khoKhanVuongMac) {
     children.push(
