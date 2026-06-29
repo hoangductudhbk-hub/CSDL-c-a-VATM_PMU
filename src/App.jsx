@@ -867,7 +867,7 @@ ${fullCtx}`
                 { num:'4', title:'Phân tích sâu tài liệu', icon:'🤖', content:'Mở văn bản → tự động phân tích sau khi upload, hoặc bấm <b>📊 Phân tích tài liệu</b>. Hệ thống thử qua nhiều nguồn AI/OCR độc lập, cuối cùng luôn ra được kết quả dù chất lượng có thể khác nhau. Văn bản dài (100+ trang) tự <b>lưu tiến độ theo từng phần</b> — nếu bị dừng giữa đường, bấm <b>Tiếp tục phân tích</b> để đọc nốt phần còn lại, không phải đọc lại từ đầu.' },
                 { num:'5', title:'Hỏi đáp 1 văn bản cụ thể', icon:'💬', content:'Mở văn bản đã phân tích xong → nhấn <b>💬 Hỏi đáp tài liệu</b> → hỏi bất kỳ điều gì trong đúng văn bản đó (số liệu, tên người, điều khoản...). AI trích dẫn theo đúng nội dung gốc, không bịa — nếu văn bản không có thông tin sẽ báo rõ "Văn bản không có thông tin này".' },
                 { num:'6', title:'Xem, sửa và xóa văn bản', icon:'📄', content:'<b>Nhấn vào dòng</b> để xem chi tiết & tải file gốc. Nhấn <b>✏️</b> để chỉnh sửa thông tin. Nhấn <b>🗑️</b> để xóa — file gốc trên GitHub và toàn bộ dữ liệu AI liên quan sẽ bị xóa theo, không để sót.' },
-                { num:'7', title:'Trợ lý AI — hỏi cả 1 dự án/gói thầu', icon:'📊', content:'Đứng ở cấp dự án/quy định hoặc đúng 1 gói thầu cụ thể → phần <b>✨ Trợ lý AI</b> hiểu SÂU toàn bộ nội dung mọi văn bản trong đúng phạm vi đang xem (không chỉ tóm tắt ngắn) — hỏi được cả số tiền hợp đồng, tên nhân sự, điều khoản chi tiết. Dùng nút <b>Tóm tắt / Việc gấp / Báo cáo / Rủi ro</b> hoặc tự nhập câu hỏi.' },
+                { num:'7', title:'Trợ lý AI — hỏi cả 1 dự án/gói thầu', icon:'📊', content:'Đứng ở cấp dự án/quy định hoặc đúng 1 gói thầu cụ thể → phần <b>✨ Trợ lý AI</b> hiểu SÂU toàn bộ nội dung mọi văn bản trong đúng phạm vi đang xem (không chỉ tóm tắt ngắn) — hỏi được cả số tiền hợp đồng, tên nhân sự, điều khoản chi tiết. Tự nhập câu hỏi và nhấn Enter để gửi.' },
                 { num:'8', title:'Trợ lý AI — hỏi cả 1 nhóm (DỰ ÁN/QUY ĐỊNH/BIỂU MẪU)', icon:'🌐', content:'Bấm vào <b>tên nhóm</b> ở thanh bên trái → vào trang <b>Tổng quan</b>, thấy hết các mục bên trong + Trợ lý AI riêng cho cả nhóm. Hỏi tổng quát ("có mấy dự án") → AI biết hết danh sách. Hỏi nhắc rõ tên 1 mục ("Hộp đen có bao nhiêu văn bản") → AI tự thu hẹp đúng mục đó, không lẫn với mục khác trong nhóm.' },
                 { num:'9', title:'Thống kê văn bản (Word/Excel)', icon:'📥', content:'Chọn dự án hoặc gói thầu → tab <b>Thống kê văn bản</b> → nhấn <b>📥 Thống kê dạng word</b> hoặc <b>📊 Thống kê dạng excel</b>. File tổng hợp toàn bộ văn bản trong phạm vi đang chọn sẽ được tải về máy.' },
                 { num:'10', title:'Lịch sử & quản lý người dùng', icon:'👥', content:'Mục <b>Lịch sử truy cập</b> (sidebar) ghi lại mọi lượt đăng nhập, thêm/sửa/xóa văn bản của tất cả người dùng — có thể xuất báo cáo Word hoặc xóa toàn bộ lịch sử. Mục <b>Quản lý người dùng</b> (chỉ Admin) dùng để duyệt tài khoản mới và phân quyền.' },
@@ -928,16 +928,18 @@ ${fullCtx}`
               <button key={v} onClick={() => setTab(v)}
                 style={{ padding:'12px 16px', border:'none', borderBottom:tab===v?'2px solid #1a1a1a':'2px solid transparent', background:'transparent', cursor:'pointer', fontSize:13, fontWeight:tab===v?600:400, color:tab===v?'#1a1a1a':'#888' }}>{l}</button>
             ))}
-            <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
-              <button onClick={() => setShowInvestInfo(true)}
-                style={{ fontSize:12, padding:'6px 14px', background:'#fff', border:'0.5px solid #ddd', borderRadius:20, cursor:'pointer', color:'#555' }}>
-                ℹ️ Thông tin dự án
-              </button>
-              <button onClick={handleGenerateMonthlyReport} disabled={generatingReport}
-                style={{ fontSize:12, padding:'6px 14px', background: generatingReport ? '#e5e4e0' : '#0a2342', border:'none', borderRadius:20, cursor: generatingReport ? 'default' : 'pointer', color:'#fff' }}>
-                {generatingReport ? '⏳ Đang tạo...' : '📄 Báo cáo đầu tư'}
-              </button>
-            </div>
+            {getCategory(proj) === 'project' && (
+              <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                <button onClick={() => setShowInvestInfo(true)}
+                  style={{ fontSize:12, padding:'6px 14px', background:'#fff', border:'0.5px solid #ddd', borderRadius:20, cursor:'pointer', color:'#555' }}>
+                  ℹ️ Thông tin dự án
+                </button>
+                <button onClick={handleGenerateMonthlyReport} disabled={generatingReport}
+                  style={{ fontSize:12, padding:'6px 14px', background: generatingReport ? '#e5e4e0' : '#0a2342', border:'none', borderRadius:20, cursor: generatingReport ? 'default' : 'pointer', color:'#fff' }}>
+                  {generatingReport ? '⏳ Đang tạo...' : '📄 Báo cáo đầu tư'}
+                </button>
+              </div>
+            )}
           </div>
 
           <div style={{ flex:1, overflowY:'auto', padding:'16px 24px' }}>
@@ -1036,11 +1038,6 @@ ${fullCtx}`
               <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
                 <span style={{ fontSize:12, color:'#888' }}>✨ Trợ lý AI</span>
                 {chat.length > 0 && <button onClick={() => setChat([])} style={{ fontSize:11, color:'#888', background:'none', border:'0.5px solid #ddd', borderRadius:6, cursor:'pointer', padding:'2px 8px', marginLeft:'auto' }}>🗑️ Xóa chat</button>}
-              </div>
-              <div style={{ display:'flex', gap:6, marginBottom:6, flexWrap:'wrap' }}>
-                {[['📋 Tóm tắt','Tóm tắt tình trạng pháp lý hiện tại của dự án'],['🔴 Việc gấp','Liệt kê các văn bản cần xử lý gấp'],['📊 Báo cáo','Tạo báo cáo tình trạng dự án'],['⚠️ Rủi ro','Phân tích rủi ro pháp lý']].map(([l,q]) => (
-                  <button key={l} onClick={() => handleAsk(q)} style={{ fontSize:11, padding:'5px 10px', background:'#f5f5f3', border:'0.5px solid #e5e4e0', borderRadius:20, cursor:'pointer', color:'#555' }}>{l}</button>
-                ))}
               </div>
             </div>
             {chat.length > 0 && (
