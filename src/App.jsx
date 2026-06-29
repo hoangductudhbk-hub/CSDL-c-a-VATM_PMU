@@ -814,19 +814,19 @@ ${fullCtx}`
       <div style={{ width:220, background:'#fff', borderRight:'0.5px solid #e5e4e0', display:'flex', flexDirection:'column', flexShrink:0, height:'100vh', overflow:'hidden' }}>
         <div style={{ padding:'0 8px', flex:'none', marginTop:12 }}>
           {[['home','🏠','Trang chủ','docs'],['home','📖','Hướng dẫn sử dụng','guide']].map(([p_,icon,label,t]) => (
-            <button key={label} onClick={() => { setSelProj(p_); setSelPkg(null); setTab(t) }}
+            <button key={label} onClick={() => { setSelProj(p_); setSelPkg(null); setSelCategory(null); setTab(t) }}
               style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:tab===t&&selProj==='home'?'#f0f0ec':'transparent', color:'#1a1a1a', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
               <span style={{ fontSize:14 }}>{icon}</span> {label}
             </button>
           ))}
           {isAdmin && (
-            <button onClick={() => { setSelProj('home'); setSelPkg(null); setTab('history') }}
+            <button onClick={() => { setSelProj('home'); setSelPkg(null); setSelCategory(null); setTab('history') }}
               style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:tab==='history'&&selProj==='home'?'#f0f0ec':'transparent', color:'#1a1a1a', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
               <span style={{ fontSize:14 }}>📋</span> Lịch sử truy cập
             </button>
           )}
           {isAdmin && (
-            <button onClick={() => { setSelProj('home'); setSelPkg(null); setTab('admin') }}
+            <button onClick={() => { setSelProj('home'); setSelPkg(null); setSelCategory(null); setTab('admin') }}
               style={{ width:'100%', textAlign:'left', padding:'8px 10px', borderRadius:8, border:'none', cursor:'pointer', background:tab==='admin'?'#fef3c7':'transparent', color:'#92400e', fontSize:13, fontWeight:600, display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
               <span style={{ fontSize:14 }}>👥</span> Quản lý người dùng
             </button>
