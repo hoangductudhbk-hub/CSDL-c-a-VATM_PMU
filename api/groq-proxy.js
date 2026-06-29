@@ -50,7 +50,19 @@ export default async function handler(req, res) {
         console.error(`[groq-proxy] HTTP ${r.status}: ${err.slice(0, 200)}`)
         continue
       }
-      const text = (await r.json()).choices?.[0]?.message?.content || ''
+      const data = await r.json()
+      const choice = data.choices?.[0]
+      const text = choice?.message?.content || ''
+      const finishReason = choice?.finish_reason
+      // 'stop' = hoàn thành bình thường. Các finish_reason khác ('length',
+      // 'content_filter'...) có thể trả text không rỗng nhưng bị cắt cụt giữa
+      // câu/giữa field JSON — không coi là thành công, thử key khác (cùng lỗi
+      // đã gặp và sửa ở gemini-proxy.js, vì cả 2 đều chỉ check "text rỗng hay
+      // không" mà bỏ qua finish reason).
+      if (text && finishReason && finishReason !== 'stop') {
+        console.warn(`[groq-proxy] Dừng bất thường (finish_reason=${finishReason}) — bỏ qua, thử key khác. Text nhận được (100 ký tự đầu): ${text.slice(0, 100)}`)
+        continue
+      }
       if (text) return res.status(200).json({ ok: true, text })
     } catch (e) {
       console.error(`[groq-proxy] lỗi:`, e.message)

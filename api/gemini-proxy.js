@@ -44,8 +44,8 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Server chưa cấu hình VITE_GEMINI_API_KEY' })
   }
 
-  for (const key of keys) {
-    for (const model of models) {
+  for (const model of models) {
+    for (const key of keys) {
       try {
         const r = await fetch(geminiUrl(model, key), {
           method: 'POST',
@@ -62,7 +62,19 @@ export default async function handler(req, res) {
           continue
         }
         const data = await r.json()
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || ''
+        const candidate = data.candidates?.[0]
+        const text = candidate?.content?.parts?.[0]?.text || ''
+        const finishReason = candidate?.finishReason
+        // STOP = model viết xong bình thường. Các finishReason khác (RECITATION
+        // — Google tự chặn khi output "chép" quá giống văn bản huấn luyện, rất
+        // dễ gặp với các cụm cố định trong văn bản hành chính; SAFETY; MAX_TOKENS...)
+        // vẫn có thể có "text" không rỗng nhưng bị CẮT CỤT giữa câu/giữa field
+        // JSON — đã gặp thực tế gây lỗi "Unterminated string" ở client. Không
+        // được coi đây là thành công dù text không rỗng — thử key/model khác.
+        if (text && finishReason && finishReason !== 'STOP') {
+          console.warn(`[gemini-proxy] ${model} dừng bất thường (finishReason=${finishReason}) — bỏ qua, thử key/model khác. Text nhận được (100 ký tự đầu): ${text.slice(0, 100)}`)
+          continue
+        }
         if (text) return res.status(200).json({ ok: true, text })
       } catch (e) {
         console.error(`[gemini-proxy] lỗi ${model}:`, e.message)
