@@ -1029,11 +1029,11 @@ ${fullCtx}`
             { num:'6', title:'Thông tin chung', icon:'👥', content:'Mọi hoạt động (thêm/sửa/xóa, báo cáo...) đều lưu ở <b>Lịch sử truy cập</b>. <b>Hạn chế xóa nhầm</b> — ảnh hưởng cả nhóm.' },
           ]
           const renderCard = (item) => (
-            <div key={item.num} style={{ flex:1, display:'flex', gap:18, padding:'20px 24px', background:'#fafaf8', borderRadius:14, border:'0.5px solid #e5e4e0' }}>
-              <div style={{ flexShrink:0, width:64, height:64, borderRadius:14, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:30 }}>{item.num}</div>
+            <div key={item.num} style={{ flex:1, display:'flex', gap:15, padding:'18px 24px', background:'#fafaf8', borderRadius:12, border:'0.5px solid #e5e4e0' }}>
+              <div style={{ flexShrink:0, width:48, height:48, borderRadius:11, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:22 }}>{item.num}</div>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontWeight:700, fontSize:29, color:'#0a2342', marginBottom:6 }}>{item.icon} {item.title}</div>
-                <div style={{ fontSize:26, color:'#555', lineHeight:1.45 }} dangerouslySetInnerHTML={{ __html: item.content }}/>
+                <div style={{ fontWeight:700, fontSize:22, color:'#0a2342', marginBottom:5 }}>{item.icon} {item.title}</div>
+                <div style={{ fontSize:19.5, color:'#555', lineHeight:1.45 }} dangerouslySetInnerHTML={{ __html: item.content }}/>
               </div>
             </div>
           )
