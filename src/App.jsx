@@ -1026,14 +1026,14 @@ ${fullCtx}`
             { num:'3', title:'Trợ lý AI', icon:'✨', content:'<b>1 văn bản:</b> nhấn <b>💬 Hỏi đáp tài liệu</b>. <b>1 dự án/gói thầu:</b> khung <b>✨ Trợ lý AI</b> phía dưới. <b>Cả nhóm:</b> bấm tên nhóm ở sidebar. AI trả lời đúng nội dung gốc, không bịa.' },
             { num:'4', title:'Thống kê văn bản', icon:'📥', content:'Vào tab <b>Thống kê văn bản</b> → nhấn <b>📥 Word</b> hoặc <b>📊 Excel</b> để tải danh sách văn bản trong phạm vi đang chọn.' },
             { num:'5', title:'Xuất báo cáo đầu tư', icon:'📄', content:'Mục DỰ ÁN: nhấn <b>ℹ️ Thông tin dự án</b> để nhập/nạp thông tin chung (1 lần) → nhấn <b>📄 Báo cáo đầu tư</b> để AI tự tổng hợp, xuất file Word.' },
-            { num:'6', title:'Thông tin chung', icon:'👥', content:'Mọi hoạt động (thêm/sửa/xóa, báo cáo...) đều lưu ở <b>Lịch sử truy cập</b>. <b>Hạn chế xóa nhầm</b> — ảnh hưởng cả nhóm. <b>Quản lý người dùng</b> chỉ dành cho Admin.' },
+            { num:'6', title:'Thông tin chung', icon:'👥', content:'Mọi hoạt động (thêm/sửa/xóa, báo cáo...) đều lưu ở <b>Lịch sử truy cập</b>. <b>Hạn chế xóa nhầm</b> — ảnh hưởng cả nhóm.' },
           ]
           const renderCard = (item) => (
-            <div key={item.num} style={{ flex:1, display:'flex', gap:12, padding:'12px 16px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
-              <div style={{ flexShrink:0, width:32, height:32, borderRadius:8, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>{item.num}</div>
+            <div key={item.num} style={{ flex:1, display:'flex', gap:18, padding:'20px 24px', background:'#fafaf8', borderRadius:14, border:'0.5px solid #e5e4e0' }}>
+              <div style={{ flexShrink:0, width:64, height:64, borderRadius:14, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:30 }}>{item.num}</div>
               <div style={{ flex:1, minWidth:0 }}>
-                <div style={{ fontWeight:700, fontSize:14.5, color:'#0a2342', marginBottom:3 }}>{item.icon} {item.title}</div>
-                <div style={{ fontSize:13, color:'#555', lineHeight:1.45 }} dangerouslySetInnerHTML={{ __html: item.content }}/>
+                <div style={{ fontWeight:700, fontSize:29, color:'#0a2342', marginBottom:6 }}>{item.icon} {item.title}</div>
+                <div style={{ fontSize:26, color:'#555', lineHeight:1.45 }} dangerouslySetInnerHTML={{ __html: item.content }}/>
               </div>
             </div>
           )
