@@ -619,20 +619,48 @@ function AppInner() {
   // ngắn (lý do trước đây hỏi sâu — tên người, số tiền hợp đồng... — không trả lời được).
   // Giới hạn mỗi văn bản tối đa 30K ký tự để tránh 1 văn bản quá dài chiếm hết context
   // khi phạm vi có nhiều văn bản (cấp 2/cấp 1).
+  // Giới hạn TỔNG độ dài context gửi cho AI — Groq free tier chỉ cho 12.000
+  // token/phút (TPM); văn bản hành chính tiếng Việt nhiều dấu thường tốn token
+  // hơn ước lượng thông thường. Lỗi 413 "Request too large" đã gặp thực tế dù
+  // dự án chỉ có 5 văn bản. Chia đều 1 hạn mức TỔNG cho số văn bản trong phạm
+  // vi, để dự án nhiều văn bản vẫn không vượt hạn mức.
+  //
+  // SỬA: ưu tiên dùng BẢN TÓM TẮT ĐÃ PHÂN TÍCH SÂU (documentMemory: summary/
+  // keyPoints/financial/legal/deadlines...) TRƯỚC toàn văn thô — bản tóm tắt
+  // cô đặc, nhiều thông tin/ký tự hơn hẳn toàn văn thô (vốn có nhiều chữ
+  // "rác" như quốc hiệu/tiêu ngữ/thể thức hành chính lặp lại) — tận dụng tốt
+  // hơn ngân sách ký tự có hạn, đồng thời đúng giá trị của bước "Phân tích
+  // sâu" cho Trợ lý AI. CHỈ rơi về toàn văn thô (có giới hạn) khi văn bản đó
+  // CHƯA được phân tích sâu.
   const buildFullTextContext = async (docsInScope, labelFn) => {
+    const TOTAL_CTX_BUDGET = 18000
+    const perDocBudget = Math.max(1200, Math.floor(TOTAL_CTX_BUDGET / Math.max(docsInScope.length, 1)))
     const parts = await Promise.all(docsInScope.map(async d => {
       const label = labelFn(d)
+      const mem = projMemories[d.id]
+      const hasMem = mem && (mem.summary || mem.keyPoints?.length || mem.financial?.length || mem.legal?.length || mem.deadlines?.length)
+      if (hasMem) {
+        const lines = [
+          mem.summary && `Tóm tắt: ${mem.summary}`,
+          mem.keyPoints?.length && `Điểm quan trọng: ${mem.keyPoints.join('; ')}`,
+          mem.financial?.length && `Tài chính: ${mem.financial.join('; ')}`,
+          mem.legal?.length && `Pháp lý: ${mem.legal.join('; ')}`,
+          mem.deadlines?.length && `Tiến độ/mốc thời gian: ${mem.deadlines.join('; ')}`,
+          mem.members?.length && `Thành viên/đơn vị liên quan: ${mem.members.join('; ')}`,
+          mem.requirements && `Yêu cầu: ${mem.requirements}`,
+          mem.risks && `Rủi ro/vướng mắc: ${mem.risks}`,
+        ].filter(Boolean).join('\n')
+        return `=== ${label} ===\n${lines.slice(0, perDocBudget)}`
+      }
+      // Chưa phân tích sâu → dùng tạm toàn văn thô (có giới hạn theo ngân sách)
       try {
         const mdSnap = await getDoc(fsDoc(db, 'documentMarkdown', d.id))
         if (mdSnap.exists()) {
           const data = mdSnap.data()
-          const full = (data.rawText || data.markdown || '').slice(0, 30000)
-          if (full) return `=== ${label} ===\n${full}`
+          const full = (data.rawText || data.markdown || '').slice(0, perDocBudget)
+          if (full) return `=== ${label} (chưa phân tích sâu) ===\n${full}`
         }
       } catch {}
-      // Chưa có bộ nhớ đầy đủ (văn bản chưa được phân tích sâu) → dùng tạm metadata cơ bản
-      const mem = projMemories[d.id]
-      if (mem?.summary) return `=== ${label} ===\n${mem.summary}`
       return `=== ${label} ===\n${d.subject || ''} (${d.status})`
     }))
     return parts.join('\n\n')
