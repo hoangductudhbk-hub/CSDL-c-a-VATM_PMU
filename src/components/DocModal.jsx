@@ -153,7 +153,10 @@ const parseJ = (s) => {
     const m = s.match(/\{[\s\S]*\}/)
     const obj = JSON.parse(m ? m[0] : s.replace(/```json|```/g, '').trim())
     return enrichParsed(obj)
-  } catch { return null }
+  } catch (e) {
+    console.warn('[parseJ] AI không trả JSON hợp lệ —', e.message, '\nPhản hồi AI (raw, để chẩn đoán):', JSON.stringify(s))
+    return null
+  }
 }
 
 // ── Lưu Markdown lên Firestore documentMarkdown ──────────────────
@@ -252,6 +255,7 @@ export default function DocModal({ doc, onSave, onClose }) {
           result = await analyzeImages(imgs, file.name)
         } else if (['doc','docx'].includes(ext)) {
           rawExtracted = await extractWordText(buf, ext)
+          console.log('[handleFile] Text trích từ Word (200 ký tự đầu):', rawExtracted.slice(0,200))
           result = await analyzeText(rawExtracted.slice(0, 1500), file.name)
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['xls','xlsx'].includes(ext)) {
