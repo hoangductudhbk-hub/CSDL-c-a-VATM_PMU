@@ -169,7 +169,7 @@ function KeyModal({ onClose }) {
 // đây, sửa được bất cứ lúc nào. useMonthlyReport.js sẽ lấy đúng các trường đã
 // điền ở đây ĐÈ LÊN kết quả AI tự dò từ văn bản (đáng tin hơn, không tốn quota,
 // không rủi ro AI đọc lẫn/bịa số liệu như đã gặp thực tế).
-function InvestmentInfoModal({ proj, onClose }) {
+function InvestmentInfoModal({ proj, onClose, askRaw, buildContext }) {
   const info = proj.investmentInfo || {}
   const [form, setForm] = useState({
     tongMucDauTu:        info.tongMucDauTu        || '',
@@ -181,7 +181,59 @@ function InvestmentInfoModal({ proj, onClose }) {
     mucTieuDauTu:         (info.mucTieuDauTu || []).join('\n'),
   })
   const [saving, setSaving] = useState(false)
+  const [aiFilling, setAiFilling] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  // "✨ AI tự điền" — đọc TOÀN BỘ văn bản đã upload trong dự án (qua buildContext,
+  // ưu tiên bộ nhớ đã phân tích sâu), trích đúng 7 trường Mục I, điền vào form để
+  // Tony XEM LẠI/SỬA rồi mới bấm Lưu — KHÔNG tự lưu thẳng, vì AI vẫn có thể đọc
+  // sai/thiếu (đã gặp thực tế). Chỉ là gợi ý ban đầu thay cho việc gõ tay từ đầu.
+  const aiAutofill = async () => {
+    setAiFilling(true)
+    try {
+      const fullCtx = await buildContext()
+      if (!fullCtx?.trim()) throw new Error('Dự án chưa có văn bản nào để đọc.')
+
+      const prompt = `Bạn là trợ lý đọc văn bản dự án đầu tư. Dựa trên TOÀN VĂN/bộ nhớ đã phân tích của các văn bản dự án dưới đây, hãy trích đúng 7 trường "Thông tin chung dự án". CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG giải thích gì thêm. Đúng cấu trúc:
+
+{
+  "tongMucDauTu": "số tiền + VNĐ — CHỈ lấy số được ghi rõ là TỔNG MỨC ĐẦU TƯ DỰ ÁN tại Quyết định phê duyệt dự án, KHÔNG lấy nhầm dự toán của 1 gói thầu con. Nếu không thấy rõ, để 'Chưa có thông tin'.",
+  "nguoiQuyetDinhDauTu": "...",
+  "chuDauTu": "...",
+  "hinhThucToChucQuanLy": "hình thức TỔ CHỨC QUẢN LÝ dự án (vd: Chủ đầu tư trực tiếp quản lý dự án) — KHÁC HẲN hình thức LỰA CHỌN NHÀ THẦU (đấu thầu/chỉ định thầu) của 1 gói thầu cụ thể, không lấy nhầm.",
+  "nguonVon": "...",
+  "thoiGianThucHien": "...",
+  "mucTieuDauTu": ["điểm 1", "điểm 2"] hoặc []
+}
+
+Số tiền/ngày/số hiệu văn bản PHẢI chép ĐÚNG NGUYÊN VĂN, KHÔNG đoán/suy diễn nếu không thấy rõ — để "Chưa có thông tin" thay vì bịa.
+
+NỘI DUNG VĂN BẢN:
+${fullCtx}`
+
+      const raw = await askRaw(prompt, 3000)
+      const noFence = (raw || '').replace(/```json|```/g, '').trim()
+      const start = noFence.indexOf('{')
+      const end = noFence.lastIndexOf('}')
+      if (start === -1 || end === -1) throw new Error('AI không trả JSON hợp lệ, thử lại sau.')
+      const data = JSON.parse(noFence.slice(start, end + 1))
+
+      const clean = (v) => (!v || /chưa có thông tin/i.test(v)) ? '' : v
+      setForm(f => ({
+        tongMucDauTu:         clean(data.tongMucDauTu)        || f.tongMucDauTu,
+        nguoiQuyetDinhDauTu:  clean(data.nguoiQuyetDinhDauTu)  || f.nguoiQuyetDinhDauTu,
+        chuDauTu:             clean(data.chuDauTu)             || f.chuDauTu,
+        hinhThucToChucQuanLy: clean(data.hinhThucToChucQuanLy) || f.hinhThucToChucQuanLy,
+        nguonVon:             clean(data.nguonVon)             || f.nguonVon,
+        thoiGianThucHien:     clean(data.thoiGianThucHien)     || f.thoiGianThucHien,
+        mucTieuDauTu:         data.mucTieuDauTu?.length ? data.mucTieuDauTu.join('\n') : f.mucTieuDauTu,
+      }))
+    } catch (e) {
+      alert('AI tự điền lỗi: ' + e.message)
+    } finally {
+      setAiFilling(false)
+    }
+  }
 
   const save = async () => {
     setSaving(true)
@@ -211,9 +263,15 @@ function InvestmentInfoModal({ proj, onClose }) {
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:20 }}>
       <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:520, maxWidth:'100%', maxHeight:'85vh', overflowY:'auto', boxShadow:'0 8px 32px rgba(0,0,0,.15)' }}>
-        <h3 style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>ℹ️ Thông tin chung dự án</h3>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12 }}>
+          <h3 style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>ℹ️ Thông tin chung dự án</h3>
+          <button onClick={aiAutofill} disabled={aiFilling}
+            style={{ flexShrink:0, fontSize:12, padding:'6px 12px', background: aiFilling ? '#e5e4e0' : '#eef2ff', border:'0.5px solid #c7d2fe', borderRadius:20, cursor: aiFilling ? 'default' : 'pointer', color:'#3730a3', whiteSpace:'nowrap' }}>
+            {aiFilling ? '⏳ Đang đọc văn bản...' : '✨ AI tự điền từ văn bản'}
+          </button>
+        </div>
         <p style={{ fontSize:12, color:'#888', marginBottom:16, lineHeight:1.5 }}>
-          8 trường này hầu như không đổi suốt đời dự án. Nhập 1 lần ở đây — báo cáo đầu tư sẽ luôn lấy đúng từ đây, không để AI tự dò lại từ văn bản mỗi lần bấm tạo báo cáo.
+          8 trường này hầu như không đổi suốt đời dự án. Nhấn <b>"✨ AI tự điền"</b> để AI đọc các văn bản đã upload trong dự án và gợi ý điền sẵn — nhớ <b>xem lại/sửa cho đúng</b> rồi mới Lưu (AI có thể đọc thiếu/nhầm số liệu). Sau khi Lưu, báo cáo đầu tư sẽ luôn lấy đúng từ đây, không để AI tự dò lại mỗi lần bấm tạo báo cáo.
         </p>
 
         <label style={labelStyle}>Tổng mức đầu tư</label>
@@ -1162,7 +1220,14 @@ ${fullCtx}`
       )}
 
       {showKeyModal && <KeyModal onClose={() => setShowKeyModal(false)}/>}
-      {showInvestInfo && proj && <InvestmentInfoModal proj={proj} onClose={() => setShowInvestInfo(false)} />}
+      {showInvestInfo && proj && (
+        <InvestmentInfoModal
+          proj={proj}
+          onClose={() => setShowInvestInfo(false)}
+          askRaw={askRaw}
+          buildContext={() => buildReportContext(allDocs || [], d => `[${d.code || d.subject || '—'}]`)}
+        />
+      )}
       <FloatingUpload onOpen={openFromDraft}/>
     </div>
   )
