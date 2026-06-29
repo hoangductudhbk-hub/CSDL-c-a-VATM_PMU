@@ -1148,7 +1148,7 @@ ${fullCtx}`
               <button key={v} onClick={() => setTab(v)}
                 style={{ padding:'12px 16px', border:'none', borderBottom:tab===v?'2px solid #1a1a1a':'2px solid transparent', background:'transparent', cursor:'pointer', fontSize:13, fontWeight:tab===v?600:400, color:tab===v?'#1a1a1a':'#888' }}>{l}</button>
             ))}
-            {getCategory(proj) === 'project' && (
+            {getCategory(proj) === 'project' && !selPkg && (
               <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
                 <button onClick={() => setShowInvestInfo(true)}
                   style={{ fontSize:12, padding:'6px 14px', background:'#fff', border:'0.5px solid #ddd', borderRadius:20, cursor:'pointer', color:'#555' }}>
