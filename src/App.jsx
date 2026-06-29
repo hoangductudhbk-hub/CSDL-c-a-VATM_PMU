@@ -1081,20 +1081,32 @@ ${fullCtx}`
           </div>
           )})()}
           <div style={{ padding:'12px 24px', background:'#fff', borderBottom:'0.5px solid #e5e4e0', display:'flex', gap:12 }}>
-            {[['Tổng văn bản',stats.total,'#1a1a1a'],['Hoàn thành',stats.done,'#15803d'],['Đang thực hiện',stats.pending,'#b45309'],['Chưa thực hiện',stats.prep,'#888']].map(([l,v,c]) => (
-              <div key={l} style={{ flex:1, padding:'10px 14px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
-                <div style={{ fontSize:11, color:'#888', marginBottom:2 }}>{l}</div>
-                <div style={{ fontSize:18, fontWeight:700, color:c }}>{v}</div>
+            {getCategory(proj) === 'project' ? (
+              <>
+                {[['Tổng văn bản',stats.total,'#1a1a1a'],['Hoàn thành',stats.done,'#15803d'],['Đang thực hiện',stats.pending,'#b45309'],['Chưa thực hiện',stats.prep,'#888']].map(([l,v,c]) => (
+                  <div key={l} style={{ flex:1, padding:'10px 14px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
+                    <div style={{ fontSize:11, color:'#888', marginBottom:2 }}>{l}</div>
+                    <div style={{ fontSize:18, fontWeight:700, color:c }}>{v}</div>
+                  </div>
+                ))}
+                <div style={{ flex:2, padding:'10px 14px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'#888', marginBottom:6 }}>
+                    <span>Tỷ lệ hoàn thành</span><span style={{ fontWeight:600 }}>{progress}%</span>
+                  </div>
+                  <div style={{ height:8, background:'#e5e4e0', borderRadius:4, overflow:'hidden' }}>
+                    <div style={{ height:'100%', width:progress+'%', background:'#22c55e', borderRadius:4 }}/>
+                  </div>
+                </div>
+              </>
+            ) : (
+              // Quy định/Biểu mẫu không có khái niệm "tiến độ thực hiện" như Dự án
+              // — chỉ hiện Tổng văn bản, bỏ Hoàn thành/Đang thực hiện/Chưa thực
+              // hiện/Tỷ lệ hoàn thành (vốn chỉ có ý nghĩa với khối Dự án).
+              <div style={{ padding:'10px 14px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0', minWidth:160 }}>
+                <div style={{ fontSize:11, color:'#888', marginBottom:2 }}>Tổng văn bản</div>
+                <div style={{ fontSize:18, fontWeight:700, color:'#1a1a1a' }}>{stats.total}</div>
               </div>
-            ))}
-            <div style={{ flex:2, padding:'10px 14px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
-              <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'#888', marginBottom:6 }}>
-                <span>Tỷ lệ hoàn thành</span><span style={{ fontWeight:600 }}>{progress}%</span>
-              </div>
-              <div style={{ height:8, background:'#e5e4e0', borderRadius:4, overflow:'hidden' }}>
-                <div style={{ height:'100%', width:progress+'%', background:'#22c55e', borderRadius:4 }}/>
-              </div>
-            </div>
+            )}
           </div>
           <div style={{ padding:'0 24px', background:'#fff', borderBottom:'0.5px solid #e5e4e0', display:'flex', alignItems:'center' }}>
             {[['docs','Văn bản'],['report','Thống kê văn bản']].map(([v,l]) => (
