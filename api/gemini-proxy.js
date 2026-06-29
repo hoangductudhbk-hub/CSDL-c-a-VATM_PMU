@@ -14,6 +14,14 @@ const getGeminiKeys = () => [
   process.env.VITE_GEMINI_API_KEY_3,
 ].filter(Boolean)
 
+// Hobby mặc định CHỈ cho 1 function chạy tối đa 10 giây nếu không khai báo
+// riêng — mà hàm này thử lần lượt 2 model × tối đa 3 key (tới 6 lượt gọi nối
+// tiếp nếu lượt đầu không ra) → dễ bị Vercel "giết" giữa lúc đang thử, ra lỗi
+// 502 dù bản thân Gemini/key không hề lỗi. Khai báo rõ tối đa 60s (giới hạn
+// cao nhất Hobby cho phép) để có đủ thời gian thử hết các phương án trước khi
+// kết luận thất bại.
+export const config = { maxDuration: 60 }
+
 const geminiUrl = (model, key) =>
   key.startsWith('AIzaSy')
     ? `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`

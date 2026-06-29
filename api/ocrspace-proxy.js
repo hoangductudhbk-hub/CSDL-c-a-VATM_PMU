@@ -11,6 +11,10 @@
 
 const OCR_SPACE_URL = 'https://api.ocr.space/parse/image'
 
+// Đồng bộ với 3 proxy khác — tránh bị Vercel giết function trước khi kịp trả
+// lời nếu OCR.space phản hồi chậm.
+export const config = { maxDuration: 60 }
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')

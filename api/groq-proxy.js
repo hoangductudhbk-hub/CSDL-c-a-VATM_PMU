@@ -18,6 +18,11 @@ const getGroqKeys = () => [
   process.env.VITE_GROQ_API_KEY_3,
 ].filter(Boolean)
 
+// Mỗi key có timeout riêng 25s, thử tối đa 3 key nối tiếp → tệ nhất 75 giây,
+// vượt xa mức 10s mặc định của Hobby nếu không khai báo riêng → dễ bị Vercel
+// "giết" giữa lúc đang thử, ra lỗi 502 dù bản thân Groq/key không hề lỗi.
+export const config = { maxDuration: 60 }
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')

@@ -9,6 +9,11 @@
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const MODEL = 'meta-llama/llama-4-maverick:free'
 
+// Timeout nội bộ 25s — vượt mức 10s mặc định của Hobby nếu không khai báo
+// riêng, dễ bị Vercel "giết" giữa lúc đang gọi, ra lỗi 502 dù OpenRouter/key
+// không hề lỗi.
+export const config = { maxDuration: 60 }
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
