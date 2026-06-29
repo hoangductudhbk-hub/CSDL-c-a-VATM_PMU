@@ -22,7 +22,9 @@ const extractJson = (raw) => {
   try { return JSON.parse(noFence.slice(start, end + 1)) } catch { return null }
 }
 
-const buildReportPrompt = (projectName, fullCtx) => `Bạn là trợ lý lập báo cáo dự án. Dựa trên TOÀN VĂN các văn bản dưới đây, hãy điền vào đúng cấu trúc báo cáo theo mẫu chuẩn của Tổng công ty Quản lý bay Việt Nam (theo Công văn 7023/QLB-KHĐT ngày 8/10/2025).
+const buildReportPrompt = (projectName, fullCtx, packageNames = [], todayStr) => `Bạn là trợ lý lập báo cáo dự án. Dựa trên TOÀN VĂN các văn bản dưới đây, hãy điền vào đúng cấu trúc báo cáo theo mẫu chuẩn của Tổng công ty Quản lý bay Việt Nam (theo Công văn 7023/QLB-KHĐT ngày 8/10/2025).
+
+Hôm nay là ngày ${todayStr}. Dùng ngày này để đánh giá tiến độ (đúng hạn / sắp quá hạn / đã quá hạn / đã hoàn thành) khi văn bản có nêu ngày ký hợp đồng + thời gian thực hiện hợp đồng.
 
 CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG viết bất kỳ câu dẫn hay giải thích nào trước hoặc sau JSON. Đúng cấu trúc:
 
@@ -35,16 +37,23 @@ CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG viết bất 
   "nguonVon": "...",
   "thoiGianThucHien": "...",
   "mucTieuDauTu": ["điểm 1", "điểm 2"] hoặc null nếu văn bản không nêu mục tiêu rõ ràng,
-  "tinhHinhThucHien": ["mốc 1 (1 câu đầy đủ)", "mốc 2", "..."],
+  "goiThau": [
+    { "ten": "tên gói thầu — PHẢI chép ĐÚNG NGUYÊN VĂN 1 tên trong DANH SÁCH GÓI THẦU dưới đây", "moc": ["mốc 1 (1 câu đầy đủ)", "mốc 2"], "danhGia": "1 câu đánh giá tiến độ CỦA RIÊNG gói thầu này" }
+  ],
+  "ketLuanTongThe": "1-2 câu đánh giá tiến độ TỔNG THỂ của CẢ dự án, tổng hợp từ tình hình tất cả gói thầu ở trên (vd: mấy gói đã/đang/chưa triển khai, có gói nào trễ hạn không)",
   "khoKhanVuongMac": "nêu khó khăn/vướng mắc/kiến nghị nếu văn bản có nhắc tới, không có thì để chuỗi rỗng"
 }
 
-QUY TẮC CHO "tinhHinhThucHien" (tình hình chuẩn bị/triển khai dự án):
-- MỖI mốc/sự kiện riêng biệt (1 quyết định, 1 hợp đồng, 1 cột mốc tiến độ...) là 1 PHẦN TỬ RIÊNG trong mảng — KHÔNG gộp nhiều mốc vào 1 câu dài, KHÔNG viết thành 1 đoạn văn liền mạch.
-- BẮT BUỘC sắp xếp các phần tử ĐÚNG THEO THỨ TỰ THỜI GIAN xảy ra trong thực tế (mốc nào diễn ra trước → đứng trước trong mảng), không theo thứ tự xuất hiện trong văn bản nguồn nếu khác thứ tự thời gian thật.
-- TUYỆT ĐỐI không lặp lại 1 sự kiện/thông tin đã nêu ở phần tử khác — mỗi phần tử phải là thông tin MỚI, không trùng nội dung với phần tử trước.
+DANH SÁCH GÓI THẦU CỦA DỰ ÁN (lấy đúng theo cây gói thầu thật bên thanh công cụ, KỂ CẢ gói thầu chưa có văn bản nào — BẮT BUỘC mảng "goiThau" có ĐÚNG ${packageNames.length} phần tử, mỗi phần tử ứng với ĐÚNG 1 gói thầu dưới đây, KHÔNG THIẾU KHÔNG THỪA, không tự thêm gói thầu nào ngoài danh sách này):
+${packageNames.length ? packageNames.map((n, i) => `${i + 1}. ${n}`).join('\n') : '(dự án này chưa có gói thầu nào — để mảng "goiThau" rỗng [])'}
+
+QUY TẮC CHO "goiThau":
+- Nếu trong NỘI DUNG VĂN BẢN ghi rõ 1 gói thầu "CHƯA CÓ VĂN BẢN NÀO" → "moc": [], "danhGia": "Gói thầu chưa triển khai, chưa có văn bản/hoạt động nào được ghi nhận trong hệ thống."
+- MỖI mốc/sự kiện riêng biệt (1 quyết định, 1 hợp đồng, 1 cột mốc tiến độ...) là 1 PHẦN TỬ RIÊNG trong "moc" — KHÔNG gộp nhiều mốc vào 1 câu dài, KHÔNG viết thành 1 đoạn văn liền mạch.
+- BẮT BUỘC sắp xếp "moc" ĐÚNG THEO THỨ TỰ THỜI GIAN xảy ra trong thực tế (mốc nào diễn ra trước → đứng trước), không theo thứ tự xuất hiện trong văn bản nguồn nếu khác thứ tự thời gian thật.
+- TUYỆT ĐỐI không lặp lại 1 sự kiện/thông tin đã nêu ở phần tử khác trong cùng "moc".
 - Khi nhắc tới việc ký HỢP ĐỒNG hoặc quyết định có yếu tố tài chính, PHẢI nêu kèm ĐẦY ĐỦ trong cùng 1 câu (nếu văn bản có ghi): giá trị hợp đồng/quyết định + thời gian thực hiện hợp đồng — không chỉ nêu số hiệu/ngày ký mà bỏ sót giá trị và thời hạn.
-- Mỗi phần tử là 1 câu hoàn chỉnh, đủ ngữ cảnh để hiểu khi đọc riêng từng dòng (không viết tắt kiểu "tiếp tục công việc trên" mà phải nêu rõ lại nội dung).
+- "danhGia": dựa vào ngày ký hợp đồng + thời gian thực hiện hợp đồng nêu trong văn bản, SO VỚI hôm nay (${todayStr}) để nhận định gói thầu đang đúng hạn/sắp quá hạn/đã quá hạn/đã hoàn thành — PHẢI tính toán cẩn thận (ngày ký + số ngày thực hiện = hạn hoàn thành), KHÔNG đoán bừa nếu văn bản không có đủ thông tin ngày.
 
 QUY TẮC BẮT BUỘC — chống bịa/nhầm số liệu (đã từng xảy ra thực tế, là lỗi nghiêm trọng):
 - Số tiền, ngày/tháng/năm, số hiệu văn bản/hợp đồng: PHẢI chép ĐÚNG NGUYÊN VĂN từng chữ số/chữ cái nhìn thấy trong NỘI DUNG VĂN BẢN dưới đây. KHÔNG tự diễn giải lại, KHÔNG làm tròn, KHÔNG đoán nếu không thấy rõ — sai 1 chữ số ngày/tháng hoặc 1 số trong mã hợp đồng là lỗi nghiêm trọng.
@@ -54,7 +63,7 @@ QUY TẮC BẮT BUỘC — chống bịa/nhầm số liệu (đã từng xảy r
 
 Dự án: ${projectName}
 
-NỘI DUNG VĂN BẢN:
+NỘI DUNG VĂN BẢN (đã chia theo từng gói thầu):
 ${fullCtx}`
 
 export function useMonthlyReport() {
@@ -62,6 +71,12 @@ export function useMonthlyReport() {
 
   // askRaw: hàm gọi AI sạch (không qua system prompt mặc định) — truyền vào từ
   // useAI() ở component cha, để dùng chung 1 nguồn key/quota với phần còn lại.
+  //
+  // packageNames: tên ĐẦY ĐỦ tất cả gói thầu thật của dự án (lấy từ cây gói
+  // thầu bên sidebar — App.jsx truyền vào), KỂ CẢ gói thầu chưa có văn bản nào.
+  // Dùng để bắt AI tạo đủ từng gói thầu trong Mục II, không bỏ sót gói thầu
+  // chưa triển khai (lỗi thực tế đã gặp: AI chỉ biết những gì đã được phân
+  // tích, "quên" hẳn các gói thầu chưa có văn bản).
   //
   // investmentInfo: object "Thông tin chung dự án" (Mục I) Tony tự nhập/sửa tay
   // qua modal "ℹ️ Thông tin dự án" trong App.jsx, lưu ở Firestore (projects/{id}.
@@ -71,10 +86,11 @@ export function useMonthlyReport() {
   // tư/nguồn vốn vì văn bản gốc chưa từng được upload, hoặc AI đọc lẫn số tiền
   // của 1 gói thầu con với tổng mức đầu tư cả dự án). Nếu investmentInfo chưa có
   // (project chưa nhập) → giữ nguyên hành vi cũ, để AI tự điền như trước.
-  const generateReport = async ({ projectName, fullCtx, askRaw, investmentInfo = null }) => {
+  const generateReport = async ({ projectName, fullCtx, askRaw, investmentInfo = null, packageNames = [] }) => {
     setGenerating(true)
     try {
-      const prompt = buildReportPrompt(projectName, fullCtx)
+      const todayStr = new Date().toLocaleDateString('vi-VN')
+      const prompt = buildReportPrompt(projectName, fullCtx, packageNames, todayStr)
 
       // maxTokens=8000 (trước đây 3000 hay bị cắt cụt giữa chuỗi JSON với báo
       // cáo nhiều trường tường thuật dài) + thử tối đa 2 lần (đề phòng 1 lượt
@@ -239,21 +255,49 @@ async function buildAndDownloadDocx(data, projectName) {
     data.mucTieuDauTu.forEach(m => children.push(bodyPara(`- ${m}`)))
   }
 
-  // "II. Tình hình thực hiện" → "1. Tình hình chuẩn bị đầu tư:" (đậm+nghiêng)
-  // → danh sách GẠCH ĐẦU DÒNG, mỗi mốc/sự kiện 1 dòng riêng, đúng thứ tự thời
-  // gian — KHÔNG viết liền thành 1 đoạn văn nữa (gây lặp nội dung giữa 2 đoạn
-  // "chuẩn bị"/"triển khai" cũ — đã gặp thực tế: 2 đoạn ra y nguyên như nhau).
-  children.push(
-    new Paragraph({ spacing: { before: 120, after: 120 }, children: [new TextRun({ text: 'II. Tình hình thực hiện', bold: true, size: FS })] }),
-    bodyPara('1. Tình hình chuẩn bị đầu tư: ', { bold: true, italics: true }),
-  )
-  const milestones = Array.isArray(data.tinhHinhThucHien)
-    ? data.tinhHinhThucHien.filter(Boolean)
-    : (data.tinhHinhThucHien ? [data.tinhHinhThucHien] : [])
-  if (milestones.length) {
-    milestones.forEach(m => children.push(bodyPara(`- ${m}`)))
+  // "II. Tình hình thực hiện" → tách riêng theo TỪNG GÓI THẦU THẬT của dự án
+  // (đúng cây gói thầu bên sidebar — kể cả gói thầu CHƯA có văn bản nào, để
+  // không "quên" các gói thầu chưa triển khai như đã gặp thực tế). Mỗi gói
+  // thầu: mốc thời gian (gạch đầu dòng, đúng thứ tự, không lặp) + 1 câu đánh
+  // giá tiến độ RIÊNG của gói đó. Cuối mục: 1 Kết luận tiến độ TỔNG THỂ cả dự án.
+  children.push(new Paragraph({ spacing: { before: 120, after: 120 }, children: [new TextRun({ text: 'II. Tình hình thực hiện', bold: true, size: FS })] }))
+
+  const goiThauList = Array.isArray(data.goiThau) ? data.goiThau : []
+  if (goiThauList.length) {
+    goiThauList.forEach((g, idx) => {
+      children.push(bodyPara(`${idx + 1}. Gói thầu ${g.ten || '—'}`, { bold: true, italics: true }))
+      const mocs = Array.isArray(g.moc) ? g.moc.filter(Boolean) : []
+      if (mocs.length) {
+        mocs.forEach(m => children.push(bodyPara(`- ${m}`)))
+      } else {
+        children.push(bodyPara('Chưa có thông tin.'))
+      }
+      if (g.danhGia) {
+        children.push(new Paragraph({
+          alignment: AlignmentType.JUSTIFIED,
+          indent: { firstLine: 567 },
+          spacing: { before: 60, after: 160 },
+          children: [
+            new TextRun({ text: 'Đánh giá tiến độ: ', bold: true, size: FS }),
+            new TextRun({ text: g.danhGia, size: FS }),
+          ],
+        }))
+      }
+    })
   } else {
-    children.push(bodyPara('Chưa có thông tin'))
+    children.push(bodyPara('Dự án chưa có gói thầu nào.'))
+  }
+
+  if (data.ketLuanTongThe) {
+    children.push(new Paragraph({
+      alignment: AlignmentType.JUSTIFIED,
+      indent: { firstLine: 567 },
+      spacing: { before: 120, after: 120 },
+      children: [
+        new TextRun({ text: 'Kết luận: ', bold: true, size: FS }),
+        new TextRun({ text: data.ketLuanTongThe, size: FS }),
+      ],
+    }))
   }
 
   if (data.khoKhanVuongMac) {

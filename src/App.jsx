@@ -683,6 +683,30 @@ function AppInner() {
     return parts.join('\n\n')
   }
 
+  // Báo cáo đầu tư (Mục II) cần tách riêng theo TỪNG GÓI THẦU THẬT của dự án
+  // (đúng cây gói thầu bên sidebar — packages), KỂ CẢ gói thầu CHƯA có văn bản
+  // nào — tránh báo cáo "quên" các gói thầu chưa triển khai (chỉ biết những gì
+  // đã được phân tích, như Tony đã chỉ ra thực tế gặp phải). Luôn dùng allDocs
+  // (toàn bộ văn bản dự án) — KHÔNG dùng safeDocs (có thể bị lọc theo gói thầu
+  // đang chọn trên UI), vì báo cáo đầu tư luôn là CẢ dự án, không phải 1 gói.
+  const buildPackageReportContext = async (pkgsInProj, allProjectDocs) => {
+    const sections = await Promise.all(pkgsInProj.map(async pkg => {
+      const docsInPkg = allProjectDocs.filter(d => d.packageId === pkg.id)
+      if (!docsInPkg.length) {
+        return `### GÓI THẦU: ${pkg.name}\n(CHƯA CÓ VĂN BẢN NÀO — gói thầu này CHƯA triển khai, chưa có hoạt động nào được ghi nhận trong hệ thống)`
+      }
+      const body = await buildReportContext(docsInPkg, d => `[${d.code || d.subject || '—'}]`)
+      return `### GÓI THẦU: ${pkg.name}\n${body}`
+    }))
+    const docsNoPkg = allProjectDocs.filter(d => !d.packageId)
+    let extra = ''
+    if (docsNoPkg.length) {
+      const body = await buildReportContext(docsNoPkg, d => `[${d.code || d.subject || '—'}]`)
+      extra = `\n\n### VĂN BẢN CHUNG CỦA DỰ ÁN (không thuộc gói thầu cụ thể)\n${body}`
+    }
+    return sections.join('\n\n') + extra
+  }
+
   const handleAsk = async (q) => {
     if (!q.trim() || aiLoading) return
     setChat(c => [...c, { role:'user', content:q }])
@@ -750,8 +774,15 @@ ${fullCtx}`
   const handleGenerateMonthlyReport = async () => {
     if (!proj || generatingReport) return
     try {
-      const fullCtx = await buildReportContext(safeDocs, d => `[${d.code || d.subject || '—'}]`)
-      await generateReport({ projectName: proj.name, fullCtx, askRaw, investmentInfo: proj.investmentInfo || null })
+      const projPkgs = packages.filter(pkg => pkg.projectId === proj.id)
+      const fullCtx = await buildPackageReportContext(projPkgs, allDocs || [])
+      await generateReport({
+        projectName: proj.name,
+        fullCtx,
+        askRaw,
+        investmentInfo: proj.investmentInfo || null,
+        packageNames: projPkgs.map(p => p.name),
+      })
     } catch (e) {
       alert('Không tạo được báo cáo: ' + e.message)
     }
