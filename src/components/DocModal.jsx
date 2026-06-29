@@ -329,6 +329,12 @@ export default function DocModal({ doc, onSave, onClose }) {
         } else if (['xls','xlsx'].includes(ext)) {
           batchExtracted = (await extractXlsxText(bBuf)).slice(0,100000)
           result = await callAiRetry(() => analyzeText(batchExtracted.slice(0,1500),file.name))
+        } else if (['txt','md','csv'].includes(ext)) {
+          // Trước đây THIẾU nhánh này — chọn nhiều file .txt/.md/.csv cùng lúc
+          // (Ctrl+Click) bị rơi thẳng xuống else "Không hỗ trợ" dù chọn TỪNG file
+          // 1 vẫn đọc được bình thường (nhánh files.length===1 ở trên đã có sẵn).
+          batchExtracted = new TextDecoder('utf-8').decode(bBuf).slice(0,100000)
+          result = await callAiRetry(() => analyzeText(batchExtracted.slice(0,1500),file.name))
         } else { queue[i].status='⚠️ Không hỗ trợ'; setFQ([...queue]); continue }
         const p=parseJ(result)
         if (p) {
