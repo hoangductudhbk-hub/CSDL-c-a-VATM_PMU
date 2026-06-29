@@ -1263,7 +1263,7 @@ ${fullCtx}`
 
       {/* Modals */}
       {(modal==='add'||modal==='edit') && (
-        <DocModal project={proj} doc={editDoc} onSave={handleSave} onClose={() => { setModal(null); setEditDoc(null) }}/>
+        <DocModal project={proj} doc={editDoc} onSave={handleSave} onClose={() => { setModal(null); setEditDoc(null) }} isProjectCategory={getCategory(proj) === 'project'}/>
       )}
       {detailDoc && (
         <DocDetail doc={detailDoc} onEdit={() => { setEditDoc(detailDoc); setDetailDoc(null); setModal('edit') }} onClose={() => setDetailDoc(null)}/>

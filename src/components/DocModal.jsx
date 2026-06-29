@@ -190,7 +190,7 @@ const saveMarkdownToFirestore = async (markdown, fileName) => {
   }
 }
 
-export default function DocModal({ doc, onSave, onClose }) {
+export default function DocModal({ doc, onSave, onClose, isProjectCategory = true }) {
   const isEdit = Boolean(doc?.id)
   const { ask, analyzeText, analyzeImages } = useAI()
   const { uploadFile, uploading, getCloudName, saveCloudName } = useCloudinaryStorage()
@@ -465,12 +465,14 @@ export default function DocModal({ doc, onSave, onClose }) {
             <div style={{marginBottom:12}}><label style={lSt}>Nội dung / Về việc <span style={{color:'#e53e3e'}}>*</span></label><input value={form.subject||''} onChange={e=>set('subject',e.target.value)} placeholder="Tóm tắt nội dung chính" style={iSt}/></div>
             <div style={{marginBottom:12}}><label style={lSt}>Trích yếu chi tiết</label><textarea value={form.detail||''} onChange={e=>set('detail',e.target.value)} rows={3} style={{...iSt,resize:'vertical'}}/></div>
             <div style={{marginBottom:12}}><label style={lSt}>Ghi chú</label><textarea value={form.note||''} onChange={e=>set('note',e.target.value)} rows={2} style={{...iSt,resize:'vertical'}}/></div>
-            <div style={{marginBottom:16}}>
-              <label style={lSt}>Trạng thái</label>
-              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                {ST.map(s=><button key={s.value} onClick={()=>set('status',s.value)} style={{padding:'6px 14px',borderRadius:20,fontSize:12,border:form.status===s.value?'2px solid #1a1a1a':'0.5px solid #ddd',background:form.status===s.value?'#1a1a1a':'#fff',color:form.status===s.value?'#fff':'#555',cursor:'pointer'}}>{s.label}</button>)}
+            {isProjectCategory && (
+              <div style={{marginBottom:16}}>
+                <label style={lSt}>Trạng thái</label>
+                <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                  {ST.map(s=><button key={s.value} onClick={()=>set('status',s.value)} style={{padding:'6px 14px',borderRadius:20,fontSize:12,border:form.status===s.value?'2px solid #1a1a1a':'0.5px solid #ddd',background:form.status===s.value?'#1a1a1a':'#fff',color:form.status===s.value?'#fff':'#555',cursor:'pointer'}}>{s.label}</button>)}
+                </div>
               </div>
-            </div>
+            )}
             <div style={{marginBottom:16}}>
               <label style={lSt}>📎 Đính kèm file (PDF, Word, Excel...)</label>
               {pendingFile ? (
