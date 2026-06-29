@@ -164,6 +164,90 @@ function KeyModal({ onClose }) {
   )
 }
 
+// Mục I "Thông tin chung dự án" trong Báo cáo đầu tư hầu như không đổi suốt đời
+// dự án (tổng mức đầu tư, nguồn vốn, người quyết định đầu tư...) — nhập 1 lần ở
+// đây, sửa được bất cứ lúc nào. useMonthlyReport.js sẽ lấy đúng các trường đã
+// điền ở đây ĐÈ LÊN kết quả AI tự dò từ văn bản (đáng tin hơn, không tốn quota,
+// không rủi ro AI đọc lẫn/bịa số liệu như đã gặp thực tế).
+function InvestmentInfoModal({ proj, onClose }) {
+  const info = proj.investmentInfo || {}
+  const [form, setForm] = useState({
+    tongMucDauTu:        info.tongMucDauTu        || '',
+    nguoiQuyetDinhDauTu:  info.nguoiQuyetDinhDauTu  || '',
+    chuDauTu:             info.chuDauTu             || 'Tổng công ty Quản lý bay Việt Nam',
+    hinhThucToChucQuanLy: info.hinhThucToChucQuanLy || '',
+    nguonVon:             info.nguonVon             || '',
+    thoiGianThucHien:     info.thoiGianThucHien     || '',
+    mucTieuDauTu:         (info.mucTieuDauTu || []).join('\n'),
+  })
+  const [saving, setSaving] = useState(false)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      const { doc, updateDoc } = await import('firebase/firestore')
+      const { db } = await import('./firebase')
+      await updateDoc(doc(db, 'projects', proj.id), {
+        investmentInfo: {
+          tongMucDauTu:         form.tongMucDauTu.trim(),
+          nguoiQuyetDinhDauTu:  form.nguoiQuyetDinhDauTu.trim(),
+          chuDauTu:             form.chuDauTu.trim(),
+          hinhThucToChucQuanLy: form.hinhThucToChucQuanLy.trim(),
+          nguonVon:             form.nguonVon.trim(),
+          thoiGianThucHien:     form.thoiGianThucHien.trim(),
+          mucTieuDauTu:         form.mucTieuDauTu.split('\n').map(s => s.trim()).filter(Boolean),
+        },
+      })
+      onClose()
+    } catch (e) {
+      alert('Lỗi lưu thông tin dự án: ' + e.message)
+    } finally { setSaving(false) }
+  }
+
+  const inputStyle = { width:'100%', padding:'8px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', boxSizing:'border-box', marginBottom:12, fontFamily:'inherit' }
+  const labelStyle = { fontSize:12, fontWeight:600, color:'#555', marginBottom:4, display:'block' }
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200, padding:20 }}>
+      <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:520, maxWidth:'100%', maxHeight:'85vh', overflowY:'auto', boxShadow:'0 8px 32px rgba(0,0,0,.15)' }}>
+        <h3 style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>ℹ️ Thông tin chung dự án</h3>
+        <p style={{ fontSize:12, color:'#888', marginBottom:16, lineHeight:1.5 }}>
+          8 trường này hầu như không đổi suốt đời dự án. Nhập 1 lần ở đây — báo cáo đầu tư sẽ luôn lấy đúng từ đây, không để AI tự dò lại từ văn bản mỗi lần bấm tạo báo cáo.
+        </p>
+
+        <label style={labelStyle}>Tổng mức đầu tư</label>
+        <input style={inputStyle} value={form.tongMucDauTu} onChange={e => set('tongMucDauTu', e.target.value)} placeholder="VD: 19.046.769.000 VNĐ" />
+
+        <label style={labelStyle}>Người quyết định đầu tư</label>
+        <input style={inputStyle} value={form.nguoiQuyetDinhDauTu} onChange={e => set('nguoiQuyetDinhDauTu', e.target.value)} placeholder="VD: Hội đồng thành viên Tổng công ty Quản lý bay Việt Nam" />
+
+        <label style={labelStyle}>Chủ đầu tư</label>
+        <input style={inputStyle} value={form.chuDauTu} onChange={e => set('chuDauTu', e.target.value)} />
+
+        <label style={labelStyle}>Hình thức tổ chức quản lý dự án</label>
+        <input style={inputStyle} value={form.hinhThucToChucQuanLy} onChange={e => set('hinhThucToChucQuanLy', e.target.value)} placeholder="VD: Chủ đầu tư trực tiếp thực hiện dự án" />
+
+        <label style={labelStyle}>Nguồn vốn</label>
+        <input style={inputStyle} value={form.nguonVon} onChange={e => set('nguonVon', e.target.value)} placeholder="VD: Vốn của Tổng công ty Quản lý bay Việt Nam" />
+
+        <label style={labelStyle}>Thời gian thực hiện dự án</label>
+        <input style={inputStyle} value={form.thoiGianThucHien} onChange={e => set('thoiGianThucHien', e.target.value)} placeholder="VD: QII/2026–QII/2027" />
+
+        <label style={labelStyle}>Mục tiêu đầu tư (mỗi dòng 1 điểm)</label>
+        <textarea style={{ ...inputStyle, minHeight:110, resize:'vertical' }} value={form.mucTieuDauTu} onChange={e => set('mucTieuDauTu', e.target.value)} placeholder={'Trang bị hệ thống...\nNâng cao năng lực...'} />
+
+        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:8 }}>
+          <button onClick={onClose} disabled={saving} style={{ padding:'8px 16px', border:'0.5px solid #ddd', borderRadius:8, cursor:'pointer', background:'#fff', fontSize:13 }}>Hủy</button>
+          <button onClick={save} disabled={saving} style={{ padding:'8px 20px', background:'#0a2342', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13, fontWeight:600 }}>
+            {saving ? 'Đang lưu...' : '✓ Lưu'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function StatusCell({ doc, updateDocument, admin }) {
   const SM2 = {
     done:    { label:'✅ Hoàn thành',     bg:'#f0fdf4', color:'#15803d' },
@@ -291,6 +375,7 @@ function AppInner() {
   const [showAddProj, setShowAddProj] = useState(false)
   const [showAddPkg,  setShowAddPkg]  = useState(null) // null hoặc projectId
   const [showKeyModal,  setShowKeyModal]  = useState(false)
+  const [showInvestInfo, setShowInvestInfo] = useState(false) // modal "Thông tin chung dự án" (Mục I báo cáo đầu tư)
   const [renameTarget,  setRenameTarget]  = useState(null) // { type:'project'|'package', id, currentName }
   const [renameInput,   setRenameInput]   = useState('')
   const [showChangePw,  setShowChangePw]  = useState(false)
@@ -498,7 +583,7 @@ ${fullCtx}`
     if (!proj || generatingReport) return
     try {
       const fullCtx = await buildReportContext(safeDocs, d => `[${d.code || d.subject || '—'}]`)
-      await generateReport({ projectName: proj.name, fullCtx, askRaw })
+      await generateReport({ projectName: proj.name, fullCtx, askRaw, investmentInfo: proj.investmentInfo || null })
     } catch (e) {
       alert('Không tạo được báo cáo: ' + e.message)
     }
@@ -843,10 +928,16 @@ ${fullCtx}`
               <button key={v} onClick={() => setTab(v)}
                 style={{ padding:'12px 16px', border:'none', borderBottom:tab===v?'2px solid #1a1a1a':'2px solid transparent', background:'transparent', cursor:'pointer', fontSize:13, fontWeight:tab===v?600:400, color:tab===v?'#1a1a1a':'#888' }}>{l}</button>
             ))}
-            <button onClick={handleGenerateMonthlyReport} disabled={generatingReport}
-              style={{ marginLeft:'auto', fontSize:12, padding:'6px 14px', background: generatingReport ? '#e5e4e0' : '#0a2342', border:'none', borderRadius:20, cursor: generatingReport ? 'default' : 'pointer', color:'#fff' }}>
-              {generatingReport ? '⏳ Đang tạo...' : '📄 Báo cáo đầu tư'}
-            </button>
+            <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+              <button onClick={() => setShowInvestInfo(true)}
+                style={{ fontSize:12, padding:'6px 14px', background:'#fff', border:'0.5px solid #ddd', borderRadius:20, cursor:'pointer', color:'#555' }}>
+                ℹ️ Thông tin dự án
+              </button>
+              <button onClick={handleGenerateMonthlyReport} disabled={generatingReport}
+                style={{ fontSize:12, padding:'6px 14px', background: generatingReport ? '#e5e4e0' : '#0a2342', border:'none', borderRadius:20, cursor: generatingReport ? 'default' : 'pointer', color:'#fff' }}>
+                {generatingReport ? '⏳ Đang tạo...' : '📄 Báo cáo đầu tư'}
+              </button>
+            </div>
           </div>
 
           <div style={{ flex:1, overflowY:'auto', padding:'16px 24px' }}>
@@ -1074,6 +1165,7 @@ ${fullCtx}`
       )}
 
       {showKeyModal && <KeyModal onClose={() => setShowKeyModal(false)}/>}
+      {showInvestInfo && proj && <InvestmentInfoModal proj={proj} onClose={() => setShowInvestInfo(false)} />}
       <FloatingUpload onOpen={openFromDraft}/>
     </div>
   )

@@ -40,6 +40,12 @@ CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG viết bất 
   "khoKhanVuongMac": "nêu khó khăn/vướng mắc/kiến nghị nếu văn bản có nhắc tới, không có thì để chuỗi rỗng"
 }
 
+QUY TẮC BẮT BUỘC — chống bịa/nhầm số liệu (đã từng xảy ra thực tế, là lỗi nghiêm trọng):
+- Số tiền, ngày/tháng/năm, số hiệu văn bản/hợp đồng: PHẢI chép ĐÚNG NGUYÊN VĂN từng chữ số/chữ cái nhìn thấy trong NỘI DUNG VĂN BẢN dưới đây. KHÔNG tự diễn giải lại, KHÔNG làm tròn, KHÔNG đoán nếu không thấy rõ — sai 1 chữ số ngày/tháng hoặc 1 số trong mã hợp đồng là lỗi nghiêm trọng.
+- Nếu 1 trường KHÔNG xuất hiện rõ ràng trong NỘI DUNG VĂN BẢN → để "Chưa có thông tin" (trường dạng chữ) hoặc null (mucTieuDauTu). TUYỆT ĐỐI không suy đoán hoặc lấy từ kiến thức chung/tên dự án để bịa ra.
+- Nếu văn bản có NHIỀU số tiền khác nhau (vd: dự toán 1 gói thầu tư vấn riêng lẻ VS tổng mức đầu tư cả dự án) → "tongMucDauTu" CHỈ lấy đúng số được ghi rõ là "tổng mức đầu tư dự án" hoặc tại Quyết định PHÊ DUYỆT DỰ ÁN, không lấy nhầm dự toán của 1 gói thầu con.
+- "hinhThucToChucQuanLy" (hình thức TỔ CHỨC QUẢN LÝ dự án, vd "Chủ đầu tư trực tiếp quản lý dự án", "Thuê tư vấn quản lý dự án") KHÁC HẲN với hình thức LỰA CHỌN NHÀ THẦU (đấu thầu rộng rãi/chỉ định thầu của 1 gói thầu cụ thể) — KHÔNG lấy nhầm 2 khái niệm này.
+
 Dự án: ${projectName}
 
 NỘI DUNG VĂN BẢN:
@@ -50,7 +56,16 @@ export function useMonthlyReport() {
 
   // askRaw: hàm gọi AI sạch (không qua system prompt mặc định) — truyền vào từ
   // useAI() ở component cha, để dùng chung 1 nguồn key/quota với phần còn lại.
-  const generateReport = async ({ projectName, fullCtx, askRaw }) => {
+  //
+  // investmentInfo: object "Thông tin chung dự án" (Mục I) Tony tự nhập/sửa tay
+  // qua modal "ℹ️ Thông tin dự án" trong App.jsx, lưu ở Firestore (projects/{id}.
+  // investmentInfo). 8 trường này hầu như KHÔNG đổi suốt đời dự án — nếu đã có,
+  // ĐÈ LÊN kết quả AI cho từng trường tương ứng (đáng tin hơn AI tự dò lại từ
+  // documentMemory mỗi lần, tránh lặp lại lỗi thực tế đã gặp: thiếu tổng mức đầu
+  // tư/nguồn vốn vì văn bản gốc chưa từng được upload, hoặc AI đọc lẫn số tiền
+  // của 1 gói thầu con với tổng mức đầu tư cả dự án). Nếu investmentInfo chưa có
+  // (project chưa nhập) → giữ nguyên hành vi cũ, để AI tự điền như trước.
+  const generateReport = async ({ projectName, fullCtx, askRaw, investmentInfo = null }) => {
     setGenerating(true)
     try {
       const prompt = buildReportPrompt(projectName, fullCtx)
@@ -74,6 +89,16 @@ export function useMonthlyReport() {
         throw new Error('AI trả về không đúng định dạng JSON sau 2 lần thử. Thử lại sau, hoặc thu hẹp phạm vi (chọn 1 gói thầu cụ thể thay vì cả dự án) nếu dự án có nhiều văn bản dài.')
       }
 
+      // Đè dữ liệu nhập tay lên kết quả AI — chỉ đè trường nào Tony đã điền,
+      // trường nào để trống vẫn để AI tự điền (không làm mất tính năng cũ).
+      if (investmentInfo) {
+        const OVERRIDE_FIELDS = ['tongMucDauTu', 'nguoiQuyetDinhDauTu', 'chuDauTu', 'hinhThucToChucQuanLy', 'nguonVon', 'thoiGianThucHien']
+        OVERRIDE_FIELDS.forEach(f => {
+          if (investmentInfo[f] && investmentInfo[f].trim()) data[f] = investmentInfo[f].trim()
+        })
+        if (investmentInfo.mucTieuDauTu?.length) data.mucTieuDauTu = investmentInfo.mucTieuDauTu.filter(Boolean)
+      }
+
       await buildAndDownloadDocx(data, projectName)
     } finally {
       setGenerating(false)
@@ -93,6 +118,8 @@ export function useMonthlyReport() {
 //     như bản trước)
 //   - "1. Tình hình chuẩn bị đầu tư:" in đậm + nghiêng, nội dung "triển khai"
 //     nối liền ngay dưới, KHÔNG tách riêng mục "2."
+//   - "III. Khó khăn, vướng mắc, kiến nghị:" in đậm, KHÔNG nghiêng (đối chiếu
+//     lại bản mẫu thật — bản trước lỡ để nghiêng luôn)
 //   - Có số trang (giữa, từ trang 2) — trang 1 không hiện số trang
 // Đã build thử bằng chính thư viện docx + LibreOffice render ảnh so khớp từng
 // dòng với mẫu trước khi giao.
@@ -218,7 +245,7 @@ async function buildAndDownloadDocx(data, projectName) {
 
   if (data.khoKhanVuongMac) {
     children.push(
-      new Paragraph({ spacing: { before: 120, after: 60 }, children: [new TextRun({ text: 'III. Khó khăn, vướng mắc, kiến nghị:', bold: true, italics: true, size: FS })] }),
+      new Paragraph({ spacing: { before: 120, after: 60 }, children: [new TextRun({ text: 'III. Khó khăn, vướng mắc, kiến nghị:', bold: true, size: FS })] }),
       bodyPara(`- ${data.khoKhanVuongMac}`),
     )
   }
@@ -274,7 +301,12 @@ async function buildAndDownloadDocx(data, projectName) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `Bao_cao_thang_${thang}_${nam}_${(projectName || 'duan').replace(/[^a-zA-Z0-9À-ỹ]/g, '_')}.docx`
+  // Đổi đúng tên "Báo cáo đầu tư" — bản trước lỡ quên dòng này khi đổi nội dung
+  // sang mẫu mới, nên file tải về vẫn mang tên cũ "Bao_cao_thang_..." dù nội
+  // dung bên trong đã đúng mẫu "BÁO CÁO" + "V/v" từ lâu.
+  const dd = String(now.getDate()).padStart(2, '0')
+  const mm = String(thang).padStart(2, '0')
+  a.download = `Bao_cao_dau_tu_${(projectName || data.tenDuAn || 'duan').replace(/[^a-zA-Z0-9À-ỹ]/g, '_')}_${dd}-${mm}-${nam}.docx`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
