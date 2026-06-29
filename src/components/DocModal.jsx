@@ -4,7 +4,7 @@ import { useCloudinaryStorage } from '../hooks/useCloudinaryStorage'
 
 const ST = [{ value:'done',label:'✅ Hoàn thành'},{ value:'pending',label:'🔄 Đang thực hiện'},{ value:'prep',label:'⬜ Chưa thực hiện'}]
 const DT = ['Quyết định','Nghị quyết','Công văn','Tờ trình','Báo cáo','Hợp đồng','Biên bản','Thông báo','Hồ sơ','Bản vẽ','Khác']
-const ORGS = ['Phòng dự án 2','Tổng công ty Quản lý bay Việt Nam','Ban Quản lý dự án chuyên ngành Quản lý bay']
+const ORGS = ['Dự án 2','Ban QLDA chuyên ngành Quản lý bay','Dự án 1','Kế hoạch','Tài chính','Văn phòng','Khác']
 
 const loadPdfJs = () => new Promise((res,rej) => {
   if (window.pdfjsLib){res(window.pdfjsLib);return}
@@ -205,6 +205,7 @@ export default function DocModal({ doc, onSave, onClose }) {
   const [processing, setProc] = useState(false)
   const [pendingFile, setPF]  = useState(null)
   const [extractedText, setExtractedText] = useState('')
+  const [orgCustom, setOrgCustom] = useState(false)
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}))
 
@@ -437,7 +438,23 @@ export default function DocModal({ doc, onSave, onClose }) {
               <div style={{marginBottom:12}}><label style={lSt}>Số ký hiệu</label><input value={form.code||''} onChange={e=>set('code',e.target.value)} placeholder="VD: 404/NQ-HĐTV" style={iSt}/></div>
               <div style={{marginBottom:12}}><label style={lSt}>Ngày ban hành</label><input value={form.date||''} onChange={e=>set('date',e.target.value)} placeholder="VD: 08/2025" style={iSt}/></div>
             </div>
-            <div style={{marginBottom:12}}><label style={lSt}>Cơ quan ban hành</label><input value={form.org||''} onChange={e=>set('org',e.target.value)} placeholder="VD: Tổng công ty VATM" list="org-options" style={iSt}/><datalist id="org-options">{ORGS.map(o=><option key={o} value={o}/>)}</datalist></div>
+            <div style={{marginBottom:12}}>
+              <label style={lSt}>Cơ quan ban hành</label>
+              <select
+                value={orgCustom || (form.org && !ORGS.slice(0,-1).includes(form.org)) ? 'Khác' : (form.org||'')}
+                onChange={e=>{
+                  if (e.target.value==='Khác') { setOrgCustom(true) }
+                  else { setOrgCustom(false); set('org', e.target.value) }
+                }}
+                style={iSt}
+              >
+                <option value="" disabled>-- Chọn cơ quan --</option>
+                {ORGS.map(o=><option key={o} value={o}>{o}</option>)}
+              </select>
+              {(orgCustom || (form.org && !ORGS.slice(0,-1).includes(form.org))) && (
+                <input value={form.org||''} onChange={e=>set('org',e.target.value)} placeholder="Nhập tên cơ quan ban hành..." style={{...iSt,marginTop:6}} autoFocus/>
+              )}
+            </div>
             <div style={{marginBottom:12}}><label style={lSt}>Loại văn bản</label><select value={form.docType} onChange={e=>set('docType',e.target.value)} style={iSt}>{DT.map(t=><option key={t}>{t}</option>)}</select></div>
             <div style={{marginBottom:12}}><label style={lSt}>Nội dung / Về việc <span style={{color:'#e53e3e'}}>*</span></label><input value={form.subject||''} onChange={e=>set('subject',e.target.value)} placeholder="Tóm tắt nội dung chính" style={iSt}/></div>
             <div style={{marginBottom:12}}><label style={lSt}>Trích yếu chi tiết</label><textarea value={form.detail||''} onChange={e=>set('detail',e.target.value)} rows={3} style={{...iSt,resize:'vertical'}}/></div>
