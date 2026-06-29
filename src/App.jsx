@@ -22,7 +22,6 @@ import { useDocuments }   from './hooks/useDocuments'
 import { usePackages }    from './hooks/usePackages'
 import { useAI }          from './hooks/useAI'
 import { useMonthlyReport } from './hooks/useMonthlyReport'
-import { useResearch }    from './hooks/useResearch'
 import DocModal           from './components/DocModal'
 import DocDetail          from './components/DocDetail'
 import HistoryView        from './components/HistoryView'
@@ -489,7 +488,6 @@ function AppInner() {
   const { deleteFile }    = useCloudinaryStorage()
   const { ask, askRaw } = useAI()
   const { generateReport, generating: generatingReport } = useMonthlyReport()
-  const { researchAsk, researching } = useResearch()
 
   // Load memories của tất cả văn bản trong dự án
   const [projMemories, setProjMemories] = useState({})
@@ -758,36 +756,13 @@ ${fullCtx || '(chưa có văn bản nào)'}`
         // — đều hiểu sâu TOÀN BỘ văn bản trong đúng phạm vi đang chọn (safeDocs đã tự
         // lọc theo selPkg nếu có, hoặc cả dự án nếu chưa chọn gói thầu).
         const fullCtx = await buildFullTextContext(safeDocs, d => `[${d.code || d.subject || '—'}]`)
-
-        // Nếu đang ở mục DỰ ÁN: tự tìm thêm các Quy định CÓ KHẢ NĂNG liên quan
-        // (so khớp từ khóa theo TÊN DỰ ÁN, vd dự án "Hàng rào" → tìm "hàng",
-        // "rào" trong tiêu đề/nội dung các Quy định) — để Trợ lý AI có sẵn
-        // trong tay để đối chiếu khi câu hỏi cần (vd "có đáp ứng tiêu chuẩn
-        // không"). Không cần biết trước câu hỏi cụ thể là gì — nếu phần Quy
-        // định này không liên quan tới câu đang hỏi, AI tự bỏ qua, không bắt
-        // buộc phải dùng tới.
-        let regCtx = ''
-        if (getCategory(proj) === 'project' && proj?.name) {
-          const regProjects = projects.filter(p => getCategory(p) === 'regulation')
-          const regDocs = allSystemDocs.filter(d => regProjects.some(p => p.id === d.projectId))
-          const nameWords = proj.name.toLowerCase().split(/\s+/).filter(w => w.length >= 3)
-          const relevantRegDocs = nameWords.length ? regDocs.filter(d => {
-            const text = `${d.subject || ''} ${d.detail || ''} ${d.note || ''}`.toLowerCase()
-            return nameWords.some(w => text.includes(w))
-          }).slice(0, 6) : [] // giới hạn số lượng, tránh phình to context quá mức
-          if (relevantRegDocs.length) {
-            const regBody = await buildFullTextContext(relevantRegDocs, d => `[Quy định: ${d.code || d.subject || '—'}]`)
-            regCtx = `\n\nQUY ĐỊNH CÓ THỂ LIÊN QUAN (tìm theo tên dự án "${proj.name}" — chỉ để đối chiếu/kiểm tra tiêu chuẩn NẾU câu hỏi cần, đây KHÔNG phải văn bản của chính dự án này):\n${regBody}`
-          }
-        }
-
         ctx = `Dự án: ${proj?.name}${selPkgObj ? ' › ' + selPkgObj.name : ''}
 Tổng: ${stats.total} văn bản | Hoàn thành: ${stats.done} | Đang thực hiện: ${stats.pending}
 
 NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
-${fullCtx}${regCtx}`
+${fullCtx}`
       }
-      const res = await researchAsk(q, ctx, askRaw)
+      const res = await ask(q, ctx)
       setChat(c => [...c, { role:'ai', content:res }])
     } catch {
       setChat(c => [...c, { role:'ai', content:'❌ AI đang bận. Thử lại sau 1 phút!' }])
