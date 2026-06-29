@@ -320,13 +320,79 @@ const ocrWithTesseract = async (buf, onStatus, docId, resumeState = null) => {
   return allText.trim()
 }
 
-// ─── Extract text từ DOCX ──────────────────────────────────────────────────
+// ─── Extract text từ DOCX (mammoth, có fallback đọc XML thô khi mammoth lỗi) ─
+// mammoth hay crash (lỗi "reading 'children'") với file .docx có cấu trúc
+// phức tạp (bảng, hình vẽ/đường kẻ chèn trong header...) vì nó cố hiểu CẤU
+// TRÚC để chuyển sang HTML. Fallback: bóc trực tiếp text thô trong các thẻ
+// <w:t> của XML gốc — không cần hiểu cấu trúc, chỉ cần đủ chữ cho AI đọc.
 const extractDocxText = async (buf) => {
   await loadScript(
     'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js',
     () => window.mammoth
   )
-  return (await window.mammoth.extractRawText({ arrayBuffer: buf })).value
+  try {
+    const text = (await window.mammoth.extractRawText({ arrayBuffer: buf.slice(0) })).value
+    if (text && text.trim().length > 20) return text
+    throw new Error('mammoth trả về rỗng')
+  } catch (e) {
+    console.warn('[extractDocxText] mammoth lỗi, dùng fallback đọc XML thô:', e.message)
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js', () => window.JSZip)
+    const zip = await window.JSZip.loadAsync(buf.slice(0))
+    const docFile = zip.file('word/document.xml')
+    if (!docFile) throw new Error('Không tìm thấy word/document.xml — có thể không phải file .docx hợp lệ')
+    const xml = await docFile.async('string')
+    const text = (xml.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [])
+      .map(m => m.replace(/<[^>]+>/g, ''))
+      .join(' ')
+    if (!text.trim()) throw new Error('Không trích được text nào từ XML')
+    return text
+  }
+}
+
+// Tập ký tự tiếng Việt CHUẨN (không dùng range Unicode tràn lan kiểu À-ỹ vì nó
+// vô tình bao trùm cả các khối Hangul/CJK/ký hiệu khác — gây nhận nhầm rác nhị
+// phân thành "chữ thật").
+const VN_LETTERS = 'A-Za-zĂăÂâĐđÊêÔôƠơƯưÀàẢảÃãÁáẠạẰằẲẳẴẵẶặẨẩẪẫẦầẤấẬậÈèẺẻẼẽÉéẸẹỀềỂểỄễẾếỆệÌìỈỉĨĩÍíỊịÒòỎỏÕõÓóỌọỒồỔổỖỗỐốỘộỜờỞởỠỡỚớỢợÙùỦủŨũÚúỤụỪừỬửỮữỨứỰựỲỳỶỷỸỹÝýỴỵ'
+// File .doc CŨ chứa nhiều cấu trúc nhị phân (FIB) trước phần text thật — tìm
+// cụm 3 "từ" liên tiếp (chữ + khoảng trắng) đầu tiên để cắt bỏ phần rác đầu.
+const findRealTextStart = (s) => {
+  const re = new RegExp(`[${VN_LETTERS}]{2,}[ \\t]+[${VN_LETTERS}]{2,}[ \\t]+[${VN_LETTERS}]{2,}`)
+  const m = s.match(re)
+  return m ? m.index : 0
+}
+// ─── Extract text từ .doc CŨ (nhị phân OLE/Compound File — mammoth/JSZip
+// không đọc được vì không phải zip). Tận dụng XLSX.CFB — module đọc container
+// OLE có sẵn TRONG thư viện xlsx.full.min.js (vốn đã tải để đọc Excel, không
+// cần thêm thư viện nào) — lấy stream "WordDocument" rồi giải mã UTF-16LE,
+// đúng encoding Word dùng để lưu phần lớn text thô. Đã test thực tế với file
+// .doc thật, ra đúng toàn văn tiếng Việt có dấu. ──────────────────────────────
+const extractLegacyDocText = async (buf) => {
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', () => window.XLSX)
+  const cfb = window.XLSX.CFB.read(new Uint8Array(buf.slice(0)), { type: 'array' })
+  const idx = cfb.FullPaths.findIndex(p => /WordDocument$/.test(p))
+  if (idx === -1) throw new Error('Không tìm thấy nội dung WordDocument trong file .doc')
+  const raw = cfb.FileIndex[idx].content
+  const bytes = raw instanceof Uint8Array ? raw : new Uint8Array(raw)
+  const decoded = new TextDecoder('utf-16le').decode(bytes)
+  const cleaned = decoded.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
+  const text = cleaned.slice(findRealTextStart(cleaned)).replace(/\r/g, '\n').trim()
+  if (!text) throw new Error('Không trích được text từ file .doc')
+  return text
+}
+// Dispatcher: chọn đúng cách đọc theo phần mở rộng, nhưng vẫn thử cách còn lại
+// nếu lỗi — phòng trường hợp file bị đặt nhầm đuôi.
+const extractWordText = async (buf, ext) => {
+  const primary = ext === 'doc' ? extractLegacyDocText : extractDocxText
+  const fallback = ext === 'doc' ? extractDocxText : extractLegacyDocText
+  try { return await primary(buf) }
+  catch (e1) {
+    console.warn(`[extractWordText] Đọc theo đuôi .${ext} lỗi, thử cách còn lại:`, e1.message)
+    try { return await fallback(buf) }
+    catch (e2) {
+      console.warn('[extractWordText] Cách dự phòng cũng lỗi:', e2.message)
+      throw new Error('Không đọc được nội dung file Word này — file có thể bị lỗi hoặc hỏng.')
+    }
+  }
 }
 
 // ─── Extract text từ XLSX ──────────────────────────────────────────────────
@@ -590,8 +656,8 @@ export function useProcessPipeline() {
         }
 
       } else if (['doc', 'docx'].includes(ext)) {
-        report('📄 Đọc DOCX...', 20)
-        rawText = await extractDocxText(buf)
+        report('📄 Đọc Word...', 20)
+        rawText = await extractWordText(buf, ext)
         ocrSource = 'docx'
       } else if (['xls', 'xlsx'].includes(ext)) {
         report('📊 Đọc XLSX...', 20)
