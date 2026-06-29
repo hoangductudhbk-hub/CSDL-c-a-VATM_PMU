@@ -838,11 +838,15 @@ ${fullCtx}`
               </div>
             </div>
           </div>
-          <div style={{ padding:'0 24px', background:'#fff', borderBottom:'0.5px solid #e5e4e0', display:'flex' }}>
+          <div style={{ padding:'0 24px', background:'#fff', borderBottom:'0.5px solid #e5e4e0', display:'flex', alignItems:'center' }}>
             {[['docs','Văn bản'],['report','Thống kê văn bản']].map(([v,l]) => (
               <button key={v} onClick={() => setTab(v)}
                 style={{ padding:'12px 16px', border:'none', borderBottom:tab===v?'2px solid #1a1a1a':'2px solid transparent', background:'transparent', cursor:'pointer', fontSize:13, fontWeight:tab===v?600:400, color:tab===v?'#1a1a1a':'#888' }}>{l}</button>
             ))}
+            <button onClick={handleGenerateMonthlyReport} disabled={generatingReport}
+              style={{ marginLeft:'auto', fontSize:12, padding:'6px 14px', background: generatingReport ? '#e5e4e0' : '#0a2342', border:'none', borderRadius:20, cursor: generatingReport ? 'default' : 'pointer', color:'#fff' }}>
+              {generatingReport ? '⏳ Đang tạo...' : '📄 Báo cáo đầu tư'}
+            </button>
           </div>
 
           <div style={{ flex:1, overflowY:'auto', padding:'16px 24px' }}>
@@ -946,10 +950,6 @@ ${fullCtx}`
                 {[['📋 Tóm tắt','Tóm tắt tình trạng pháp lý hiện tại của dự án'],['🔴 Việc gấp','Liệt kê các văn bản cần xử lý gấp'],['📊 Báo cáo','Tạo báo cáo tình trạng dự án'],['⚠️ Rủi ro','Phân tích rủi ro pháp lý']].map(([l,q]) => (
                   <button key={l} onClick={() => handleAsk(q)} style={{ fontSize:11, padding:'5px 10px', background:'#f5f5f3', border:'0.5px solid #e5e4e0', borderRadius:20, cursor:'pointer', color:'#555' }}>{l}</button>
                 ))}
-                <button onClick={handleGenerateMonthlyReport} disabled={generatingReport}
-                  style={{ fontSize:11, padding:'5px 10px', background: generatingReport ? '#e5e4e0' : '#0a2342', border:'none', borderRadius:20, cursor: generatingReport ? 'default' : 'pointer', color:'#fff' }}>
-                  {generatingReport ? '⏳ Đang tạo...' : '📄 Báo cáo tháng (Word)'}
-                </button>
               </div>
             </div>
             {chat.length > 0 && (
