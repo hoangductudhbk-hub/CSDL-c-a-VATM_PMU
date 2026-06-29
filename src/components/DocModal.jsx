@@ -159,6 +159,19 @@ const parseJ = (s) => {
   }
 }
 
+// Gọi 1 hàm AI (analyzeText/analyzeImages) và tự gọi lại 1 lần nếu lần đầu
+// không ra JSON hợp lệ. Thực tế gặp: Gemini đôi khi dừng đột ngột GIỮA LÚC
+// ĐANG VIẾT 1 field (cắt ngay giữa 1 chuỗi, chưa chạm giới hạn token) — nhiều
+// khả năng do timeout/nghẽn tạm thời phía server, không phải lỗi dữ liệu đầu
+// vào. Lỗi kiểu này không ổn định nên gọi lại thường tự khỏi. Trả về CHUỖI
+// thô (không phải object) để chỗ gọi cũ vẫn dùng parseJ(result) như trước.
+const callAiRetry = async (fn) => {
+  const raw1 = await fn()
+  if (parseJ(raw1)) return raw1
+  console.warn('[callAiRetry] Lần 1 AI trả JSON không hợp lệ, tự thử lại lần 2...')
+  return await fn()
+}
+
 // ── Lưu Markdown lên Firestore documentMarkdown ──────────────────
 const saveMarkdownToFirestore = async (markdown, fileName) => {
   try {
@@ -227,7 +240,7 @@ export default function DocModal({ doc, onSave, onClose }) {
     // mà không làm tụt tổng thể "trông có vẻ ổn" — Vision đọc đúng những gì mắt thấy.
     setSt('⏳ Đang đọc văn bản...')
     const imgs = await renderPdfHeaderImage(buf.slice(0))
-    return await analyzeImages(imgs, fileName)
+    return await callAiRetry(() => analyzeImages(imgs, fileName))
   }
 
   const handleFile = async (e) => {
@@ -252,15 +265,15 @@ export default function DocModal({ doc, onSave, onClose }) {
           // Luôn đọc Số/Ngày/Cơ quan bằng Vision (ảnh thật trang 1) — miễn nhiễm với lỗi lớp text.
           setSt('⏳ Đang đọc văn bản...')
           const imgs = await renderPdfHeaderImage(buf.slice(0))
-          result = await analyzeImages(imgs, file.name)
+          result = await callAiRetry(() => analyzeImages(imgs, file.name))
         } else if (['doc','docx'].includes(ext)) {
           rawExtracted = await extractWordText(buf, ext)
           console.log('[handleFile] Text trích từ Word (200 ký tự đầu):', rawExtracted.slice(0,200))
-          result = await analyzeText(rawExtracted.slice(0, 1500), file.name)
+          result = await callAiRetry(() => analyzeText(rawExtracted.slice(0, 1500), file.name))
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['xls','xlsx'].includes(ext)) {
           rawExtracted = await extractXlsxText(buf)
-          result = await analyzeText(rawExtracted.slice(0, 1500), file.name)
+          result = await callAiRetry(() => analyzeText(rawExtracted.slice(0, 1500), file.name))
           rawExtracted = rawExtracted.slice(0, 100000)
         } else if (['txt', 'md', 'csv'].includes(ext)) {
           const t = await new Promise((r)=>{const rd=new FileReader();rd.onload=ev=>r(ev.target.result.slice(0,100000));rd.readAsText(file,'utf-8')})
@@ -271,7 +284,7 @@ export default function DocModal({ doc, onSave, onClose }) {
             setSt('✅ Đã lưu vào bộ nhớ! Điền thêm thông tin văn bản nếu cần.')
             setExtractedText(rawExtracted); setLoad(false); return
           }
-          result = await analyzeText(t.slice(0, 1500), file.name)
+          result = await callAiRetry(() => analyzeText(t.slice(0, 1500), file.name))
         } else { setSt('⚠️ Định dạng chưa hỗ trợ'); setLoad(false); return }
         setExtractedText(rawExtracted)
         // Lưu markdown lên Firestore ngay (không cần docId)
@@ -311,10 +324,10 @@ export default function DocModal({ doc, onSave, onClose }) {
           result = await processOnePdf(bBuf,file.name)
         } else if (['doc','docx'].includes(ext)) {
           batchExtracted = (await extractWordText(bBuf, ext)).slice(0,100000)
-          result = await analyzeText(batchExtracted.slice(0,1500),file.name)
+          result = await callAiRetry(() => analyzeText(batchExtracted.slice(0,1500),file.name))
         } else if (['xls','xlsx'].includes(ext)) {
           batchExtracted = (await extractXlsxText(bBuf)).slice(0,100000)
-          result = await analyzeText(batchExtracted.slice(0,1500),file.name)
+          result = await callAiRetry(() => analyzeText(batchExtracted.slice(0,1500),file.name))
         } else { queue[i].status='⚠️ Không hỗ trợ'; setFQ([...queue]); continue }
         const p=parseJ(result)
         if (p) {
@@ -345,7 +358,7 @@ export default function DocModal({ doc, onSave, onClose }) {
     if (!rawText.trim()) return
     setLoad(true); setSt('🤖 AI đang phân tích...')
     try {
-      const r=await analyzeText(rawText); const p=parseJ(r)
+      const r=await callAiRetry(() => analyzeText(rawText)); const p=parseJ(r)
       if (p) {
         setForm(f=>({...f,...p})); setMode('manual')
         setSt(p.needsReview ? '⚠️ Xong nhưng thiếu Số/Ngày — vui lòng kiểm tra lại' : '✅ Xong!')
