@@ -207,6 +207,44 @@ const extractPdfTextForInfo = async (buf) => {
   return text.trim()
 }
 
+const bufToBase64 = (buf) => {
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+  return btoa(binary)
+}
+
+// .doc (OLE binary cũ) — mammoth chỉ đọc được .docx, nên .doc phải xử lý qua
+// server bằng word-extractor (api/extract-doc.js, pure JS, không cần LibreOffice).
+const extractDocViaServer = async (buf) => {
+  const res = await fetch('/api/extract-doc', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base64: bufToBase64(buf) }),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `Lỗi server (${res.status})`)
+  return data.text || ''
+}
+
+// PDF scan (không có lớp chữ) — pdf.js không đọc được gì, fallback gửi nguyên
+// file cho Gemini qua /api/gemini-proxy (cùng cách DocDetail.jsx đang dùng để
+// OCR PDF scan) — Gemini đọc trực tiếp ảnh các trang PDF, không cần convert.
+const ocrPdfViaGemini = async (buf, fileName) => {
+  const parts = [
+    { inline_data: { mime_type: 'application/pdf', data: bufToBase64(buf) } },
+    { text: `Trích xuất TOÀN BỘ nội dung văn bản nhìn thấy trong file PDF này (tên file: ${fileName}). Giữ nguyên 100% số liệu, ngày, tên, số hiệu văn bản — không tóm tắt, chỉ trả về nội dung văn bản thuần túy.` },
+  ]
+  const res = await fetch('/api/gemini-proxy', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parts, maxTokens: 8192 }),
+  })
+  if (!res.ok) throw new Error(`Gemini proxy lỗi: ${res.status}`)
+  const data = await res.json()
+  return data.text || ''
+}
+
 function InvestmentInfoModal({ proj, onClose, askRaw }) {
   const info = proj.investmentInfo || {}
   const [form, setForm] = useState({
@@ -220,6 +258,7 @@ function InvestmentInfoModal({ proj, onClose, askRaw }) {
   })
   const [saving, setSaving] = useState(false)
   const [loadingFile, setLoadingFile] = useState(false)
+  const [loadingStep, setLoadingStep] = useState('')
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   // "📎 Nạp thông tin" — Tony đính kèm 1 file Word/PDF/TXT có sẵn các trường
@@ -270,25 +309,36 @@ ${text}`
     setLoadingFile(true)
     try {
       const ext = file.name.split('.').pop().toLowerCase()
+      if (file.size > 8 * 1024 * 1024) throw new Error('File quá lớn (>8MB) — thử file nhỏ hơn hoặc cắt riêng phần có thông tin cần.')
       const buf = await file.arrayBuffer()
       let text = ''
-      if (['docx', 'doc'].includes(ext)) {
+      if (ext === 'docx') {
         text = await extractDocxTextForInfo(buf)
+      } else if (ext === 'doc') {
+        setLoadingStep('⏳ Đang đọc file .doc (qua server)...')
+        text = await extractDocViaServer(buf)
       } else if (ext === 'pdf') {
         text = await extractPdfTextForInfo(buf)
+        if (!text || text.trim().length < 100) {
+          // Không có lớp chữ → khả năng là PDF scan → để Gemini đọc trực tiếp
+          setLoadingStep('🔍 PDF có vẻ là file scan — đang nhận dạng bằng AI...')
+          text = await ocrPdfViaGemini(buf, file.name)
+        }
       } else if (['txt', 'md'].includes(ext)) {
         text = new TextDecoder('utf-8').decode(buf)
       } else {
-        throw new Error('Chỉ hỗ trợ file Word (.docx), PDF hoặc TXT.')
+        throw new Error('Chỉ hỗ trợ file Word (.doc/.docx), PDF (kể cả PDF scan) hoặc TXT/MD.')
       }
       if (!text.trim() || text.trim().length < 30) {
-        throw new Error('Không đọc được nội dung chữ trong file này (có thể là file scan/ảnh, không có lớp chữ). Hãy dùng file Word/PDF có chữ chọn được, hoặc nhập tay.')
+        throw new Error('Không đọc được nội dung chữ trong file này. Hãy dùng file Word/PDF có chữ, hoặc nhập tay.')
       }
+      setLoadingStep('✨ Đang trích thông tin...')
       await fillFromExtractedText(text.slice(0, 50000))
     } catch (err) {
       alert('Nạp thông tin lỗi: ' + err.message)
     } finally {
       setLoadingFile(false)
+      setLoadingStep('')
     }
   }
 
@@ -324,11 +374,11 @@ ${text}`
           <h3 style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>ℹ️ Thông tin chung dự án</h3>
           <label style={{ flexShrink:0, fontSize:12, padding:'6px 12px', background: loadingFile ? '#e5e4e0' : '#eef2ff', border:'0.5px solid #c7d2fe', borderRadius:20, cursor: loadingFile ? 'default' : 'pointer', color:'#3730a3', whiteSpace:'nowrap' }}>
             <input type="file" accept=".docx,.doc,.pdf,.txt,.md" onChange={handleAttachFile} disabled={loadingFile} style={{ display:'none' }} />
-            {loadingFile ? '⏳ Đang đọc file...' : '📎 Nạp thông tin'}
+            {loadingFile ? (loadingStep || '⏳ Đang đọc file...') : '📎 Nạp thông tin'}
           </label>
         </div>
         <p style={{ fontSize:12, color:'#888', marginBottom:16, lineHeight:1.5 }}>
-          8 trường này hầu như không đổi suốt đời dự án. Nhấn <b>"📎 Nạp thông tin"</b> → đính kèm 1 file Word/PDF có sẵn các thông tin này (vd: file báo cáo/quyết định phê duyệt) → AI đọc đúng file đó và điền sẵn — nhớ <b>xem lại/sửa cho đúng</b> rồi mới Lưu. Sau khi Lưu, báo cáo đầu tư sẽ luôn lấy đúng từ đây, không để AI tự dò lại mỗi lần bấm tạo báo cáo.
+          8 trường này hầu như không đổi suốt đời dự án. Nhấn <b>"📎 Nạp thông tin"</b> → đính kèm 1 file Word (.doc/.docx) hoặc PDF (kể cả PDF scan) có sẵn các thông tin này (vd: file báo cáo/quyết định phê duyệt) → AI đọc đúng file đó và điền sẵn — nhớ <b>xem lại/sửa cho đúng</b> rồi mới Lưu. Sau khi Lưu, báo cáo đầu tư sẽ luôn lấy đúng từ đây, không để AI tự dò lại mỗi lần bấm tạo báo cáo.
         </p>
 
 
