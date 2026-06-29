@@ -1055,7 +1055,7 @@ ${fullCtx}`
               <div style={{ display:'flex', gap:8 }}>
                 <input value={chatInput} onChange={e => setChatInput(e.target.value)}
                   onKeyDown={e => e.key==='Enter' && !e.shiftKey && handleAsk(chatInput)}
-                  placeholder="Hỏi về dự án... (Enter để gửi)"
+                  placeholder={`Hỏi về ${({ project:'dự án', regulation:'quy định', form:'biểu mẫu' }[getCategory(proj)] || 'dự án')}... (Enter để gửi)`}
                   style={{ flex:1, padding:'9px 14px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none' }}/>
                 <button onClick={() => handleAsk(chatInput)} disabled={aiLoading||!chatInput.trim()}
                   style={{ padding:'9px 16px', background:'#1a1a1a', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontSize:13 }}>▶</button>
