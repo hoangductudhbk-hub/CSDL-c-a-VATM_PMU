@@ -169,7 +169,45 @@ function KeyModal({ onClose }) {
 // đây, sửa được bất cứ lúc nào. useMonthlyReport.js sẽ lấy đúng các trường đã
 // điền ở đây ĐÈ LÊN kết quả AI tự dò từ văn bản (đáng tin hơn, không tốn quota,
 // không rủi ro AI đọc lẫn/bịa số liệu như đã gặp thực tế).
-function InvestmentInfoModal({ proj, onClose, askRaw, buildContext }) {
+// Đọc trực tiếp 1 file Word/PDF/TXT được đính kèm (KHÔNG qua bộ nhớ AI đã phân
+// tích của dự án) — dùng cho "📎 Nạp thông tin" trong InvestmentInfoModal, vì
+// Tony muốn đính kèm ĐÚNG 1 văn bản có sẵn các trường Mục I (vd: file mẫu báo
+// cáo gửi ban KHĐT) để lấy chính xác, không phụ thuộc văn bản đó đã được "Phân
+// tích sâu" trong dự án hay chưa — tránh thiếu sót đã gặp với "✨ AI tự điền".
+const loadScript = (src, check) => new Promise((res, rej) => {
+  if (check()) { res(); return }
+  const s = document.createElement('script')
+  s.src = src; s.onload = res; s.onerror = rej
+  document.head.appendChild(s)
+})
+
+const extractDocxTextForInfo = async (buf) => {
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js', () => window.mammoth)
+  return (await window.mammoth.extractRawText({ arrayBuffer: buf })).value
+}
+
+const loadPdfJsForInfo = () => new Promise((res, rej) => {
+  if (window.pdfjsLib) { res(window.pdfjsLib); return }
+  const s = document.createElement('script')
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+  s.onload = () => { window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; res(window.pdfjsLib) }
+  s.onerror = rej
+  document.head.appendChild(s)
+})
+
+const extractPdfTextForInfo = async (buf) => {
+  const lib = await loadPdfJsForInfo()
+  const pdf = await lib.getDocument({ data: buf }).promise
+  let text = ''
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i)
+    const c = await page.getTextContent()
+    text += c.items.map(it => it.str).join(' ') + '\n'
+  }
+  return text.trim()
+}
+
+function InvestmentInfoModal({ proj, onClose, askRaw }) {
   const info = proj.investmentInfo || {}
   const [form, setForm] = useState({
     tongMucDauTu:        info.tongMucDauTu        || '',
@@ -181,26 +219,21 @@ function InvestmentInfoModal({ proj, onClose, askRaw, buildContext }) {
     mucTieuDauTu:         (info.mucTieuDauTu || []).join('\n'),
   })
   const [saving, setSaving] = useState(false)
-  const [aiFilling, setAiFilling] = useState(false)
+  const [loadingFile, setLoadingFile] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  // "✨ AI tự điền" — đọc TOÀN BỘ văn bản đã upload trong dự án (qua buildContext,
-  // ưu tiên bộ nhớ đã phân tích sâu), trích đúng 7 trường Mục I, điền vào form để
-  // Tony XEM LẠI/SỬA rồi mới bấm Lưu — KHÔNG tự lưu thẳng, vì AI vẫn có thể đọc
-  // sai/thiếu (đã gặp thực tế). Chỉ là gợi ý ban đầu thay cho việc gõ tay từ đầu.
-  const aiAutofill = async () => {
-    setAiFilling(true)
-    try {
-      const fullCtx = await buildContext()
-      if (!fullCtx?.trim()) throw new Error('Dự án chưa có văn bản nào để đọc.')
-
-      const prompt = `Bạn là trợ lý đọc văn bản dự án đầu tư. Dựa trên TOÀN VĂN/bộ nhớ đã phân tích của các văn bản dự án dưới đây, hãy trích đúng 7 trường "Thông tin chung dự án". CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG giải thích gì thêm. Đúng cấu trúc:
+  // "📎 Nạp thông tin" — Tony đính kèm 1 file Word/PDF/TXT có sẵn các trường
+  // Mục I (vd: file mẫu báo cáo gửi ban KHĐT) → đọc trực tiếp nội dung CHỮ
+  // trong CHÍNH file đó (không qua bộ nhớ dự án) → AI trích 7 trường, điền vào
+  // form để Tony XEM LẠI/SỬA rồi mới bấm Lưu — KHÔNG tự lưu thẳng.
+  const fillFromExtractedText = async (text) => {
+    const prompt = `Bạn là trợ lý đọc văn bản dự án đầu tư. Dựa trên TOÀN VĂN văn bản dưới đây, hãy trích đúng 7 trường "Thông tin chung dự án". CHỈ trả về JSON hợp lệ, KHÔNG kèm dấu \`\`\`, KHÔNG giải thích gì thêm. Đúng cấu trúc:
 
 {
-  "tongMucDauTu": "số tiền + VNĐ — CHỈ lấy số được ghi rõ là TỔNG MỨC ĐẦU TƯ DỰ ÁN tại Quyết định phê duyệt dự án, KHÔNG lấy nhầm dự toán của 1 gói thầu con. Nếu không thấy rõ, để 'Chưa có thông tin'.",
+  "tongMucDauTu": "số tiền + VNĐ — CHỈ lấy số được ghi rõ là TỔNG MỨC ĐẦU TƯ DỰ ÁN, KHÔNG lấy nhầm dự toán của 1 gói thầu con. Nếu không thấy rõ, để 'Chưa có thông tin'.",
   "nguoiQuyetDinhDauTu": "...",
   "chuDauTu": "...",
-  "hinhThucToChucQuanLy": "hình thức TỔ CHỨC QUẢN LÝ dự án (vd: Chủ đầu tư trực tiếp quản lý dự án) — KHÁC HẲN hình thức LỰA CHỌN NHÀ THẦU (đấu thầu/chỉ định thầu) của 1 gói thầu cụ thể, không lấy nhầm.",
+  "hinhThucToChucQuanLy": "hình thức TỔ CHỨC QUẢN LÝ dự án (vd: Chủ đầu tư trực tiếp quản lý dự án) — KHÁC HẲN hình thức LỰA CHỌN NHÀ THẦU (đấu thầu/chỉ định thầu), không lấy nhầm.",
   "nguonVon": "...",
   "thoiGianThucHien": "...",
   "mucTieuDauTu": ["điểm 1", "điểm 2"] hoặc []
@@ -209,29 +242,53 @@ function InvestmentInfoModal({ proj, onClose, askRaw, buildContext }) {
 Số tiền/ngày/số hiệu văn bản PHẢI chép ĐÚNG NGUYÊN VĂN, KHÔNG đoán/suy diễn nếu không thấy rõ — để "Chưa có thông tin" thay vì bịa.
 
 NỘI DUNG VĂN BẢN:
-${fullCtx}`
+${text}`
 
-      const raw = await askRaw(prompt, 3000)
-      const noFence = (raw || '').replace(/```json|```/g, '').trim()
-      const start = noFence.indexOf('{')
-      const end = noFence.lastIndexOf('}')
-      if (start === -1 || end === -1) throw new Error('AI không trả JSON hợp lệ, thử lại sau.')
-      const data = JSON.parse(noFence.slice(start, end + 1))
+    const raw = await askRaw(prompt, 3000)
+    const noFence = (raw || '').replace(/```json|```/g, '').trim()
+    const start = noFence.indexOf('{')
+    const end = noFence.lastIndexOf('}')
+    if (start === -1 || end === -1) throw new Error('AI không trả JSON hợp lệ, thử lại sau.')
+    const data = JSON.parse(noFence.slice(start, end + 1))
 
-      const clean = (v) => (!v || /chưa có thông tin/i.test(v)) ? '' : v
-      setForm(f => ({
-        tongMucDauTu:         clean(data.tongMucDauTu)        || f.tongMucDauTu,
-        nguoiQuyetDinhDauTu:  clean(data.nguoiQuyetDinhDauTu)  || f.nguoiQuyetDinhDauTu,
-        chuDauTu:             clean(data.chuDauTu)             || f.chuDauTu,
-        hinhThucToChucQuanLy: clean(data.hinhThucToChucQuanLy) || f.hinhThucToChucQuanLy,
-        nguonVon:             clean(data.nguonVon)             || f.nguonVon,
-        thoiGianThucHien:     clean(data.thoiGianThucHien)     || f.thoiGianThucHien,
-        mucTieuDauTu:         data.mucTieuDauTu?.length ? data.mucTieuDauTu.join('\n') : f.mucTieuDauTu,
-      }))
-    } catch (e) {
-      alert('AI tự điền lỗi: ' + e.message)
+    const clean = (v) => (!v || /chưa có thông tin/i.test(v)) ? '' : v
+    setForm(f => ({
+      tongMucDauTu:         clean(data.tongMucDauTu)        || f.tongMucDauTu,
+      nguoiQuyetDinhDauTu:  clean(data.nguoiQuyetDinhDauTu)  || f.nguoiQuyetDinhDauTu,
+      chuDauTu:             clean(data.chuDauTu)             || f.chuDauTu,
+      hinhThucToChucQuanLy: clean(data.hinhThucToChucQuanLy) || f.hinhThucToChucQuanLy,
+      nguonVon:             clean(data.nguonVon)             || f.nguonVon,
+      thoiGianThucHien:     clean(data.thoiGianThucHien)     || f.thoiGianThucHien,
+      mucTieuDauTu:         data.mucTieuDauTu?.length ? data.mucTieuDauTu.join('\n') : f.mucTieuDauTu,
+    }))
+  }
+
+  const handleAttachFile = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = '' // cho phép chọn lại đúng file đó lần sau nếu cần
+    if (!file) return
+    setLoadingFile(true)
+    try {
+      const ext = file.name.split('.').pop().toLowerCase()
+      const buf = await file.arrayBuffer()
+      let text = ''
+      if (['docx', 'doc'].includes(ext)) {
+        text = await extractDocxTextForInfo(buf)
+      } else if (ext === 'pdf') {
+        text = await extractPdfTextForInfo(buf)
+      } else if (['txt', 'md'].includes(ext)) {
+        text = new TextDecoder('utf-8').decode(buf)
+      } else {
+        throw new Error('Chỉ hỗ trợ file Word (.docx), PDF hoặc TXT.')
+      }
+      if (!text.trim() || text.trim().length < 30) {
+        throw new Error('Không đọc được nội dung chữ trong file này (có thể là file scan/ảnh, không có lớp chữ). Hãy dùng file Word/PDF có chữ chọn được, hoặc nhập tay.')
+      }
+      await fillFromExtractedText(text.slice(0, 50000))
+    } catch (err) {
+      alert('Nạp thông tin lỗi: ' + err.message)
     } finally {
-      setAiFilling(false)
+      setLoadingFile(false)
     }
   }
 
@@ -265,14 +322,15 @@ ${fullCtx}`
       <div style={{ background:'#fff', borderRadius:14, padding:'24px 28px', width:520, maxWidth:'100%', maxHeight:'85vh', overflowY:'auto', boxShadow:'0 8px 32px rgba(0,0,0,.15)' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12 }}>
           <h3 style={{ fontSize:15, fontWeight:600, marginBottom:4 }}>ℹ️ Thông tin chung dự án</h3>
-          <button onClick={aiAutofill} disabled={aiFilling}
-            style={{ flexShrink:0, fontSize:12, padding:'6px 12px', background: aiFilling ? '#e5e4e0' : '#eef2ff', border:'0.5px solid #c7d2fe', borderRadius:20, cursor: aiFilling ? 'default' : 'pointer', color:'#3730a3', whiteSpace:'nowrap' }}>
-            {aiFilling ? '⏳ Đang đọc văn bản...' : '✨ AI tự điền từ văn bản'}
-          </button>
+          <label style={{ flexShrink:0, fontSize:12, padding:'6px 12px', background: loadingFile ? '#e5e4e0' : '#eef2ff', border:'0.5px solid #c7d2fe', borderRadius:20, cursor: loadingFile ? 'default' : 'pointer', color:'#3730a3', whiteSpace:'nowrap' }}>
+            <input type="file" accept=".docx,.doc,.pdf,.txt,.md" onChange={handleAttachFile} disabled={loadingFile} style={{ display:'none' }} />
+            {loadingFile ? '⏳ Đang đọc file...' : '📎 Nạp thông tin'}
+          </label>
         </div>
         <p style={{ fontSize:12, color:'#888', marginBottom:16, lineHeight:1.5 }}>
-          8 trường này hầu như không đổi suốt đời dự án. Nhấn <b>"✨ AI tự điền"</b> để AI đọc các văn bản đã upload trong dự án và gợi ý điền sẵn — nhớ <b>xem lại/sửa cho đúng</b> rồi mới Lưu (AI có thể đọc thiếu/nhầm số liệu). Sau khi Lưu, báo cáo đầu tư sẽ luôn lấy đúng từ đây, không để AI tự dò lại mỗi lần bấm tạo báo cáo.
+          8 trường này hầu như không đổi suốt đời dự án. Nhấn <b>"📎 Nạp thông tin"</b> → đính kèm 1 file Word/PDF có sẵn các thông tin này (vd: file báo cáo/quyết định phê duyệt) → AI đọc đúng file đó và điền sẵn — nhớ <b>xem lại/sửa cho đúng</b> rồi mới Lưu. Sau khi Lưu, báo cáo đầu tư sẽ luôn lấy đúng từ đây, không để AI tự dò lại mỗi lần bấm tạo báo cáo.
         </p>
+
 
         <label style={labelStyle}>Tổng mức đầu tư</label>
         <input style={inputStyle} value={form.tongMucDauTu} onChange={e => set('tongMucDauTu', e.target.value)} placeholder="VD: 19.046.769.000 VNĐ" />
@@ -1225,7 +1283,6 @@ ${fullCtx}`
           proj={proj}
           onClose={() => setShowInvestInfo(false)}
           askRaw={askRaw}
-          buildContext={() => buildReportContext(allDocs || [], d => `[${d.code || d.subject || '—'}]`)}
         />
       )}
       <FloatingUpload onOpen={openFromDraft}/>
