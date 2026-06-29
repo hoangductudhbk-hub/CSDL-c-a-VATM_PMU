@@ -775,14 +775,14 @@ ${fullCtx}`
     }).join('')
     const title = selPkgObj ? `${proj?.name} > ${selPkgObj.name}` : (proj?.name||'')
     const html = `<html><head><meta charset='utf-8'><style>body{font-family:'Times New Roman',serif;font-size:14pt}h1{font-size:16pt;font-weight:bold;text-align:center}table{border-collapse:collapse;width:100%}th{background:#1a1a1a;color:#fff;padding:6pt 8pt;border:1px solid #333}td{padding:5pt 8pt;border:1px solid #ccc}</style></head><body>
-    <h1>BÁO CÁO TỔNG HỢP VĂN BẢN</h1><h1>${title}</h1>
+    <h1>TỔNG HỢP VĂN BẢN</h1><h1>${title}</h1>
     <p style="text-align:center">Ngày xuất: ${ngay} | Tổng: ${stats.total}${isProject ? ` | Tiến độ: ${progress}%` : ''}</p>
     <table><thead><tr><th>STT</th><th>Số hiệu</th><th>Ngày</th><th>Loại</th><th>Cơ quan ban hành</th><th>Nội dung</th>${isProject ? '<th>Trạng thái</th>' : ''}</tr></thead><tbody>${rows}</tbody></table></body></html>`
     logExportReport(proj?.name)
     const blob = new Blob(['\uFEFF' + html], { type:'application/msword;charset=utf-8' })
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob)
     const pn = title.normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/gi,'d').replace(/[^a-zA-Z0-9]/g,'_')
-    a.download = `BaoCao_${pn}_${dd}-${mm}-${now.getFullYear()}_${hh}h${min}.doc`; a.click()
+    a.download = `${pn}_${dd}-${mm}-${now.getFullYear()}_${hh}h${min}.doc`; a.click()
   }
 
   // Thống kê dạng excel — cùng dữ liệu với bản Word, xuất .xlsx bằng thư viện
