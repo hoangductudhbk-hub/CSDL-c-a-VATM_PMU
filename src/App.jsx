@@ -1019,36 +1019,45 @@ ${fullCtx}`
 
         {tab === 'history' && <div style={{ flex:1, overflow:'hidden', display:'flex', flexDirection:'column' }}><HistoryView user={user}/></div>}
 
-        {tab === 'guide' && (
+        {tab === 'guide' && (() => {
+          const guideItems = [
+            { num:'1', title:'Thêm, sửa, xóa văn bản', icon:'📁', content:'Nhấn <b>+ Thêm văn bản</b> → <b>✨ AI tự điền</b> (tự trích Số, Ngày, Cơ quan...) hoặc <b>✏️ Nhập thủ công</b>. <b>Luôn kiểm tra lại</b> trước khi lưu vì AI có thể sai/thiếu. Nhấn vào văn bản để <b>✏️ sửa</b> hoặc <b>🗑️ xóa</b>.' },
+            { num:'2', title:'Phân tích văn bản', icon:'🤖', content:'Mở văn bản → tự phân tích, hoặc bấm <b>📊 Phân tích tài liệu</b>. Nên <b>phân tích sâu</b> văn bản quan trọng — đây là nền cho Hỏi đáp và Trợ lý AI/Báo cáo sau này.' },
+            { num:'3', title:'Trợ lý AI', icon:'✨', content:'<b>1 văn bản:</b> nhấn <b>💬 Hỏi đáp tài liệu</b>. <b>1 dự án/gói thầu:</b> khung <b>✨ Trợ lý AI</b> phía dưới. <b>Cả nhóm:</b> bấm tên nhóm ở sidebar. AI trả lời đúng nội dung gốc, không bịa.' },
+            { num:'4', title:'Thống kê văn bản', icon:'📥', content:'Vào tab <b>Thống kê văn bản</b> → nhấn <b>📥 Word</b> hoặc <b>📊 Excel</b> để tải danh sách văn bản trong phạm vi đang chọn.' },
+            { num:'5', title:'Xuất báo cáo đầu tư', icon:'📄', content:'Mục DỰ ÁN: nhấn <b>ℹ️ Thông tin dự án</b> để nhập/nạp thông tin chung (1 lần) → nhấn <b>📄 Báo cáo đầu tư</b> để AI tự tổng hợp, xuất file Word.' },
+            { num:'6', title:'Thông tin chung', icon:'👥', content:'Mọi hoạt động (thêm/sửa/xóa, báo cáo...) đều lưu ở <b>Lịch sử truy cập</b>. <b>Hạn chế xóa nhầm</b> — ảnh hưởng cả nhóm. <b>Quản lý người dùng</b> chỉ dành cho Admin.' },
+          ]
+          const renderCard = (item) => (
+            <div key={item.num} style={{ flex:1, display:'flex', gap:12, padding:'12px 16px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
+              <div style={{ flexShrink:0, width:32, height:32, borderRadius:8, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:15 }}>{item.num}</div>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontWeight:700, fontSize:14.5, color:'#0a2342', marginBottom:3 }}>{item.icon} {item.title}</div>
+                <div style={{ fontSize:13, color:'#555', lineHeight:1.45 }} dangerouslySetInnerHTML={{ __html: item.content }}/>
+              </div>
+            </div>
+          )
+          return (
           <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
             <div style={{ padding:'8px 20px 6px', borderBottom:'0.5px solid #e5e4e0', background:'#fff', flexShrink:0 }}>
               <h2 style={{ fontSize:16, fontWeight:700, margin:0 }}>📖 Hướng dẫn sử dụng</h2>
             </div>
-            <div style={{ flex:1, padding:'10px 20px', overflowY:'auto', display:'flex', flexDirection:'column' }}>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-              {[
-                { num:'1', title:'Thêm, sửa, xóa văn bản', icon:'📁', content:'<b>Thêm:</b> Nhấn <b>+ Thêm văn bản</b> (mục DỰ ÁN phải vào đến <b>gói thầu</b> mới thêm được; QUY ĐỊNH/BIỂU MẪU thêm ngay khi vào đúng mục cụ thể) → chọn <b>✨ AI tự điền</b> (tải file PDF/Word/Excel, hệ thống <b>tự động trích xuất</b> Số ký hiệu, Ngày, Cơ quan ban hành, Loại văn bản, Nội dung...) hoặc <b>✏️ Nhập thủ công</b> nếu muốn gõ tay từ đầu. <b>Quan trọng:</b> AI trích xuất có thể sai hoặc thiếu với file mờ/scan xấu — luôn <b>kiểm tra lại các trường vừa được điền</b> và sửa cho đúng trước khi lưu. <b>Sửa/Xóa:</b> nhấn vào dòng văn bản để xem chi tiết, nhấn <b>✏️</b> để sửa thông tin, nhấn <b>🗑️</b> để xóa (xóa luôn file gốc và toàn bộ dữ liệu AI liên quan, không để sót).' },
-                { num:'2', title:'Phân tích văn bản', icon:'🤖', content:'Mở văn bản → hệ thống tự động phân tích ngay sau khi upload, hoặc bấm <b>📊 Phân tích tài liệu</b> nếu chưa có. Nên <b>phân tích sâu</b> các văn bản quan trọng — đây là nền dữ liệu cho cả <b>Hỏi đáp tài liệu</b> và <b>Trợ lý AI/Báo cáo đầu tư</b> sau này: văn bản chưa phân tích sâu thì AI chỉ thấy được tóm tắt cơ bản lúc upload, dễ trả lời thiếu hoặc sai khi hỏi đáp/lập báo cáo. Văn bản dài (100+ trang) tự lưu tiến độ theo từng phần — dừng giữa đường thì bấm <b>Tiếp tục phân tích</b> để đọc nốt, không phải đọc lại từ đầu.' },
-                { num:'3', title:'Trợ lý AI', icon:'✨', content:'<b>1 văn bản cụ thể:</b> mở văn bản đã phân tích sâu xong → nhấn <b>💬 Hỏi đáp tài liệu</b>. <b>1 dự án/quy định/biểu mẫu hoặc 1 gói thầu:</b> đứng đúng cấp đó → khung <b>✨ Trợ lý AI</b> phía dưới hiểu sâu toàn bộ văn bản trong phạm vi đang xem, tự nhập câu hỏi và Enter để gửi. <b>Cả 1 nhóm (DỰ ÁN/QUY ĐỊNH/BIỂU MẪU):</b> bấm vào tên nhóm ở sidebar → trang Tổng quan có Trợ lý AI riêng cho cả nhóm. AI luôn trả lời theo đúng nội dung gốc, không bịa — văn bản/phạm vi không có thông tin sẽ báo rõ.' },
-                { num:'4', title:'Thống kê văn bản', icon:'📥', content:'Chọn dự án/quy định/biểu mẫu hoặc gói thầu → tab <b>Thống kê văn bản</b> → nhấn <b>📥 Thống kê dạng word</b> hoặc <b>📊 Thống kê dạng excel</b>. File tổng hợp danh sách toàn bộ văn bản (số hiệu, ngày, trạng thái...) trong đúng phạm vi đang chọn sẽ được tải về máy.' },
-                { num:'5', title:'Xuất báo cáo đầu tư', icon:'📄', content:'Ở mục DỰ ÁN: nhấn <b>ℹ️ Thông tin dự án</b> để nhập (hoặc <b>📎 Nạp thông tin</b> từ file Word/PDF có sẵn) các thông tin chung ít thay đổi của dự án — tổng mức đầu tư, chủ đầu tư, nguồn vốn... chỉ cần làm 1 lần, xem lại/sửa rồi Lưu. Sau đó nhấn <b>📄 Báo cáo đầu tư</b> để AI tự tổng hợp tình hình thực hiện từ các văn bản đã phân tích sâu, xuất file Word đúng mẫu báo cáo, tải về máy.' },
-                { num:'6', title:'Thông tin chung — mọi hoạt động đều được ghi lại', icon:'👥', content:'Mục <b>Lịch sử truy cập</b> (sidebar) ghi lại MỌI hoạt động của tất cả tài khoản: đăng nhập, thêm/sửa/xóa văn bản, tạo báo cáo... Vì đây là hệ thống dùng chung, <b>hạn chế xóa nhầm</b> văn bản/dự án — ảnh hưởng tới dữ liệu và công việc của cả nhóm, không chỉ riêng tài khoản của bạn. Mục <b>Quản lý người dùng</b> (chỉ Admin) dùng để duyệt tài khoản mới và phân quyền.' },
-              ].map(item => (
-                <div key={item.num} style={{ display:'flex', gap:10, padding:'8px 12px', background:'#fafaf8', borderRadius:10, border:'0.5px solid #e5e4e0' }}>
-                  <div style={{ flexShrink:0, width:26, height:26, borderRadius:7, background:'#0a2342', color:'#fff', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:12 }}>{item.num}</div>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontWeight:700, fontSize:12, color:'#0a2342', marginBottom:2 }}>{item.icon} {item.title}</div>
-                    <div style={{ fontSize:11, color:'#555', lineHeight:1.5 }} dangerouslySetInnerHTML={{ __html: item.content }}/>
-                  </div>
+            <div style={{ flex:1, padding:'12px 20px', overflowY:'auto', display:'flex', flexDirection:'column' }}>
+              <div style={{ flex:1, display:'flex', gap:10 }}>
+                <div style={{ flex:1, display:'flex', flexDirection:'column', gap:10 }}>
+                  {guideItems.slice(0,3).map(renderCard)}
                 </div>
-              ))}
+                <div style={{ flex:1, display:'flex', flexDirection:'column', gap:10 }}>
+                  {guideItems.slice(3,6).map(renderCard)}
+                </div>
               </div>
-              <div style={{ textAlign:'center', marginTop:8, padding:'7px 16px', background:'#fef9c3', borderRadius:10, border:'0.5px solid #fde047', fontSize:11, color:'#854d0e', flexShrink:0 }}>
+              <div style={{ textAlign:'center', marginTop:10, padding:'9px 16px', background:'#fef9c3', borderRadius:10, border:'0.5px solid #fde047', fontSize:12.5, color:'#854d0e', flexShrink:0 }}>
                 ⚠️ <b>Lưu ý:</b> Trợ lý AI miễn phí nên hạn chế về tính năng và số lượt sử dụng, mong quý vị thông cảm.
               </div>
             </div>
           </div>
-        )}
+          )
+        })()}
 
         {proj && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && <>
           {(() => { const projCat = getCategory(proj); const needsPkg = projCat === 'project' && !selPkg; return (
