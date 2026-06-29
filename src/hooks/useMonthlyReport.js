@@ -116,27 +116,32 @@ async function buildAndDownloadDocx(data, projectName) {
   })
 
   const twoColHeader = () => new Table({
-    width: { size: 9072, type: WidthType.DXA },
-    columnWidths: [4536, 4536],
+    // Bảng header rộng HƠN vùng nội dung bình thường (10800 > 9071 trong margin)
+    // + indent ÂM -1152 — ĐÚNG như mẫu gốc (tràn nhẹ ra 2 bên lề). Đây là lý do
+    // 2 dòng dài ("TỔNG CÔNG TY..."/"CỘNG HOÀ...") nằm đúng 1 dòng trong mẫu —
+    // bản trước dùng bề rộng = đúng margin (9072) nên bị xuống dòng.
+    width: { size: 10800, type: WidthType.DXA },
+    columnWidths: [5400, 5400],
+    indent: { size: -1152, type: WidthType.DXA },
     borders: noBorders,
     rows: [new TableRow({ children: [
       new TableCell({
-        width: { size: 4536, type: WidthType.DXA },
+        width: { size: 5400, type: WidthType.DXA },
         margins: { top: 0, bottom: 0, left: 0, right: 60 },
         children: [
           new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'TỔNG CÔNG TY QUẢN LÝ BAY VIỆT NAM', size: HFS })] }),
           new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'BQL DỰ ÁN CHUYÊN NGÀNH QUẢN LÝ BAY', bold: true, size: HFS })] }),
-          shortUnderline(4536),
+          shortUnderline(5400),
           new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 60 }, children: [new TextRun({ text: 'Số:        /BC-QLDA', size: HFS })] }),
         ],
       }),
       new TableCell({
-        width: { size: 4536, type: WidthType.DXA },
+        width: { size: 5400, type: WidthType.DXA },
         margins: { top: 0, bottom: 0, left: 60, right: 0 },
         children: [
           new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'CỘNG HOÀ XÃ HỘI CHỦ NGHĨA VIỆT NAM', bold: true, size: HFS })] }),
           new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: 'Độc lập - Tự do - Hạnh phúc', bold: true, size: HFS })] }),
-          shortUnderline(4536),
+          shortUnderline(5400),
           new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 60 }, children: [new TextRun({ text: `Hà Nội, ngày ${now.getDate()} tháng ${thang} năm ${nam}`, italics: true, size: HFS })] }),
         ],
       }),
