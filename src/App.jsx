@@ -1022,8 +1022,8 @@ ${fullCtx}`
         {tab === 'guide' && (() => {
           const guideItems = [
             { num:'1', title:'Thêm, sửa, xóa văn bản', icon:'📁', content:'Nhấn <b>+ Thêm văn bản</b> → <b>✨ AI tự điền</b> (tự trích Số, Ngày, Cơ quan...) hoặc <b>✏️ Nhập thủ công</b>. <b>Luôn kiểm tra lại</b> trước khi lưu vì AI có thể sai/thiếu. Nhấn vào văn bản để <b>✏️ sửa</b> hoặc <b>🗑️ xóa</b>.' },
-            { num:'2', title:'Phân tích văn bản', icon:'🤖', content:'Mở văn bản → tự phân tích, hoặc bấm <b>📊 Phân tích tài liệu</b>. Nên <b>phân tích sâu</b> văn bản quan trọng — đây là nền cho Hỏi đáp và Trợ lý AI/Báo cáo sau này.' },
-            { num:'3', title:'Trợ lý AI', icon:'✨', content:'<b>1 văn bản:</b> nhấn <b>💬 Hỏi đáp tài liệu</b>. <b>1 dự án/gói thầu:</b> khung <b>✨ Trợ lý AI</b> phía dưới. <b>Cả nhóm:</b> bấm tên nhóm ở sidebar. AI trả lời đúng nội dung gốc, không bịa.' },
+            { num:'2', title:'Phân tích văn bản', icon:'🤖', content:'Mở văn bản → Bấm <b>📊 Phân tích tài liệu</b>. Nên <b>phân tích sâu</b> văn bản quan trọng — đây là nền cho Hỏi đáp và Trợ lý AI/Báo cáo sau này.' },
+            { num:'3', title:'Trợ lý AI', icon:'✨', content:'Nhấn <b>💬 Hỏi đáp tài liệu</b>. <b>1 dự án/gói thầu:</b> khung <b>✨ Trợ lý AI</b> phía dưới. <b>Cả nhóm:</b> bấm tên nhóm ở sidebar. AI trả lời đúng nội dung gốc, không bịa.' },
             { num:'4', title:'Thống kê văn bản', icon:'📥', content:'Vào tab <b>Thống kê văn bản</b> → nhấn <b>📥 Word</b> hoặc <b>📊 Excel</b> để tải danh sách văn bản trong phạm vi đang chọn.' },
             { num:'5', title:'Xuất báo cáo đầu tư', icon:'📄', content:'Mục DỰ ÁN: nhấn <b>ℹ️ Thông tin dự án</b> để nhập/nạp thông tin chung (1 lần) → nhấn <b>📄 Báo cáo đầu tư</b> để AI tự tổng hợp, xuất file Word.' },
             { num:'6', title:'Thông tin chung', icon:'👥', content:'Mọi hoạt động (thêm/sửa/xóa, báo cáo...) đều lưu ở <b>Lịch sử truy cập</b>. <b>Hạn chế xóa nhầm</b> — ảnh hưởng cả nhóm.' },
