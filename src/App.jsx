@@ -215,12 +215,14 @@ const bufToBase64 = (buf) => {
 }
 
 // .doc (OLE binary cũ) — mammoth chỉ đọc được .docx, nên .doc phải xử lý qua
-// server bằng word-extractor (api/extract-doc.js, pure JS, không cần LibreOffice).
+// server bằng word-extractor (api/misc.js action='extract-doc' — gộp chung
+// với lookup-user vào 1 file để không vượt giới hạn 12 Serverless Functions
+// của Vercel Hobby).
 const extractDocViaServer = async (buf) => {
-  const res = await fetch('/api/extract-doc', {
+  const res = await fetch('/api/misc', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base64: bufToBase64(buf) }),
+    body: JSON.stringify({ action: 'extract-doc', base64: bufToBase64(buf) }),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || `Lỗi server (${res.status})`)

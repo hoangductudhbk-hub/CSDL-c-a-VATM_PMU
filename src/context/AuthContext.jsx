@@ -14,20 +14,22 @@ const FAKE_DOMAIN     = '@vatm-pmu.local'
 const toFakeEmail     = (u) => `${u.trim().toLowerCase()}${FAKE_DOMAIN}`
 
 // Tra cứu user theo username/email KHÔNG cần đăng nhập — gọi qua server
-// (api/lookup-user.js, đọc Firestore bằng quyền admin) thay vì getDocs() thẳng
-// từ client. Lý do: rule Firestore /users/{userId} yêu cầu isAuth() để đọc —
-// đúng cho bảo mật — nhưng login bằng email / đăng ký kiểm tra trùng / quên
-// mật khẩu đều cần đọc TRƯỚC khi có auth, nên trước đây bị lỗi
-// "permission-denied" khi gọi getDocs() trực tiếp.
+// (api/misc.js action='lookup-user', đọc Firestore bằng quyền admin) thay vì
+// getDocs() thẳng từ client. Lý do: rule Firestore /users/{userId} yêu cầu
+// isAuth() để đọc — đúng cho bảo mật — nhưng login bằng email / đăng ký kiểm
+// tra trùng / quên mật khẩu đều cần đọc TRƯỚC khi có auth, nên trước đây bị
+// lỗi "permission-denied" khi gọi getDocs() trực tiếp.
+// (Gộp chung 1 file api/misc.js với extract-doc để không vượt giới hạn 12
+// Serverless Functions của Vercel Hobby.)
 // mode='exists': chỉ trả {found}, không lộ thông tin cá nhân người khác (dùng
 // cho register kiểm tra trùng). mode='full' (mặc định): trả thêm uid/username/
 // name/unit/email (dùng cho login bằng email + quên mật khẩu, lúc này đang xác
 // nhận đúng tài khoản của chính người gọi nên cần dữ liệu để tiếp tục xử lý).
 const lookupUser = async (field, value, mode = 'full') => {
-  const res = await fetch('/api/lookup-user', {
+  const res = await fetch('/api/misc', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ field, value, mode }),
+    body:    JSON.stringify({ action: 'lookup-user', field, value, mode }),
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || `Lỗi server (${res.status})`)
