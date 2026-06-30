@@ -204,6 +204,13 @@ export default function DocModal({ doc, onSave, onClose, isProjectCategory = tru
   const [fileQueue, setFQ]  = useState([])
   const [processing, setProc] = useState(false)
   const [pendingFile, setPF]  = useState(null)
+  // File .md ĐÃ ĐƯỢC CHUYỂN SẴN từ bên ngoài (vd qua workspace local Claude
+  // Code) — đính kèm SONG SONG với file gốc (thường là PDF). Khi có file này,
+  // "Phân tích sâu" sẽ ưu tiên đọc TRỰC TIẾP nội dung .md (đường tắt có sẵn
+  // trong useProcessPipeline.js — bỏ qua OCR/AI hoàn toàn, 0 lượt gọi AI free),
+  // còn file gốc vẫn giữ lại để tải về xem bản trực quan đầy đủ (hình ảnh, dấu
+  // mộc, sơ đồ...) khi cần.
+  const [pendingMdFile, setPMF] = useState(null)
   const [extractedText, setExtractedText] = useState('')
   const [orgCustom, setOrgCustom] = useState(false)
 
@@ -226,6 +233,30 @@ export default function DocModal({ doc, onSave, onClose, isProjectCategory = tru
         await new Promise(r => setTimeout(r, 400))
       } catch(e) {
         alert('❌ Upload thất bại: ' + (e.message||'Lỗi không xác định'))
+        setLoad(false)
+        return
+      } finally {
+        setLoad(false)
+      }
+    }
+    if (pendingMdFile) {
+      setSt('⏳ Đang upload bản .md...')
+      setLoad(true)
+      try {
+        const fiMd = await uploadFile(pendingMdFile, pct => setSt(`⏳ Đang upload .md... ${pct}%`))
+        if (!fiMd?.fileUrl) throw new Error('Không nhận được URL cho file .md')
+        final = {
+          ...final,
+          mdFileUrl: fiMd.fileUrl,
+          mdDownloadUrl: fiMd.downloadUrl || fiMd.fileUrl,
+          mdFilePath: fiMd.filePath || fiMd.publicId || '',
+          mdFileName: pendingMdFile.name,
+          mdFileSize: pendingMdFile.size,
+        }
+        setSt('✅ Upload xong!')
+        await new Promise(r => setTimeout(r, 400))
+      } catch(e) {
+        alert('❌ Upload bản .md thất bại: ' + (e.message||'Lỗi không xác định'))
         setLoad(false)
         return
       } finally {
@@ -485,6 +516,22 @@ export default function DocModal({ doc, onSave, onClose, isProjectCategory = tru
                   <input type="file" accept=".pdf,.txt,.md,.csv,.doc,.docx,.xlsx,.xls" onChange={e=>{if(e.target.files[0]) setPF(e.target.files[0])}} style={{display:'none'}}/>
                   <span style={{fontSize:20}}>📎</span>
                   <span style={{fontSize:13,color:'#888'}}>Nhấn để chọn file đính kèm</span>
+                </label>
+              )}
+            </div>
+            <div style={{marginBottom:16}}>
+              <label style={lSt}>📋 (Tùy chọn) Đính kèm bản .md đã chuyển sẵn</label>
+              <p style={{fontSize:11,color:'#9b9b9b',margin:'2px 0 8px'}}>Nếu đã tự chuyển file gốc sang .md từ trước (vd qua workspace local) — đính kèm thêm ở đây để "Phân tích sâu" đọc thẳng bản .md này, nhẹ hơn nhiều cho AI free (không cần OCR). File gốc bên trên vẫn giữ lại để tải về xem bản đầy đủ khi cần.</p>
+              {pendingMdFile ? (
+                <div style={{padding:'10px 12px',borderRadius:8,background:'#f0fdf4',border:'0.5px solid #bbf7d0',fontSize:12,color:'#15803d',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <span>📋 {pendingMdFile.name} ({(pendingMdFile.size/1024).toFixed(0)} KB)</span>
+                  <button onClick={()=>setPMF(null)} style={{background:'none',border:'none',cursor:'pointer',color:'#e53e3e',fontSize:14}}>✕</button>
+                </div>
+              ) : (
+                <label style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',border:'1.5px dashed #ddd',borderRadius:8,cursor:'pointer',background:'#fafaf8'}}>
+                  <input type="file" accept=".md" onChange={e=>{if(e.target.files[0]) setPMF(e.target.files[0])}} style={{display:'none'}}/>
+                  <span style={{fontSize:20}}>📋</span>
+                  <span style={{fontSize:13,color:'#888'}}>Nhấn để chọn file .md</span>
                 </label>
               )}
             </div>

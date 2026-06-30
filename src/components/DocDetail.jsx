@@ -280,6 +280,12 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   const fileSize = doc.fileSize || 0
   const fileUrl  = get(doc, 'fileUrl', 'downloadUrl', 'secureUrl')
   const hasFile  = fileUrl && fileUrl.length > 5
+  // Bản .md đính kèm sẵn (tùy chọn, từ DocModal.jsx) — dùng để Phân tích sâu
+  // nhẹ hơn (xem handleAnalyze) và hiện thêm nút tải riêng bên dưới.
+  const mdFileUrl  = get(doc, 'mdFileUrl')
+  const mdFileName = get(doc, 'mdFileName')
+  const mdFileSize = doc.mdFileSize || 0
+  const hasMdFile  = mdFileUrl && mdFileUrl.length > 5
 
   const SM = {
     done:    { label:'✅ Hoàn thành',     bg:'#f0fdf4', color:'#15803d' },
@@ -309,14 +315,18 @@ export default function DocDetail({ doc, onEdit, onClose }) {
 
   // ── Đọc lại toàn bộ file từ đầu (xóa bộ nhớ cũ, chạy pipeline mới) ──
   const handleForceReAnalyze = async () => {
-    const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
+    const mdUrl = get(doc, 'mdFileUrl')
+    const useMd = Boolean(mdUrl)
+    const fileUrl = useMd ? mdUrl : get(doc, 'fileUrl', 'downloadUrl')
+    const fileNameForPipeline = useMd ? (doc.mdFileName || 'ban-chuyen-doi.md') : (doc.fileName || '')
     if (!fileUrl) { alert('Không có file URL để đọc lại'); return }
     setChat([]); setShowChat(false)
     setMdPreview(null); setMdPreviewOpen(false)
     setAutoPipeStarted(true)
     try {
+      if (useMd) setAnalyzeStep('📋 Đang đọc lại bản .md đính kèm sẵn...')
       await startPipeline({
-        docId: doc.id, fileUrl, fileName: doc.fileName || '',
+        docId: doc.id, fileUrl, fileName: fileNameForPipeline,
         onStatus: setAnalyzeStep, forceRestart: true,
       })
       setShowChat(true)
@@ -325,15 +335,23 @@ export default function DocDetail({ doc, onEdit, onClose }) {
   }
 
   // ── Phân tích sâu & ghi nhớ ──
+  // Nếu văn bản có ĐÍNH KÈM SẴN bản .md (đã chuyển từ trước, vd qua workspace
+  // local) → ưu tiên đọc TRỰC TIẾP file đó thay vì file gốc (PDF/ảnh). Nhẹ hơn
+  // nhiều cho AI free vì useProcessPipeline.js có sẵn "đường tắt" cho .md — bỏ
+  // qua hoàn toàn OCR/AI Vision, lưu thẳng nội dung vào bộ nhớ phân tích sâu.
   const handleAnalyze = async () => {
-    const fileUrl = get(doc, 'fileUrl', 'downloadUrl')
+    const mdUrl = get(doc, 'mdFileUrl')
+    const useMd = Boolean(mdUrl)
+    const fileUrl = useMd ? mdUrl : get(doc, 'fileUrl', 'downloadUrl')
+    const fileNameForPipeline = useMd ? (doc.mdFileName || 'ban-chuyen-doi.md') : (doc.fileName || '')
     if (!fileUrl) { alert('Không có file URL'); return }
     setChat([]); setShowChat(false)
     setAnalyzeError('')
     setAnalyzing(true)
     try {
+      if (useMd) setAnalyzeStep('📋 Đang đọc bản .md đính kèm sẵn (nhẹ, không cần OCR)...')
       await startPipeline({
-        docId: doc.id, fileUrl, fileName: doc.fileName || '',
+        docId: doc.id, fileUrl, fileName: fileNameForPipeline,
         onStatus: setAnalyzeStep,
       })
       setShowChat(true)
@@ -475,7 +493,9 @@ export default function DocDetail({ doc, onEdit, onClose }) {
               {/* File đính kèm */}
               {hasFile ? (
                 <div style={{ marginBottom:12, padding:'14px', borderRadius:10, background:'#f8faff', border:'0.5px solid #c7d7f5' }}>
-                  <div style={{ fontSize:11, color:'#9b9b9b', marginBottom:10 }}>📎 Tài liệu đính kèm</div>
+                  <div style={{ fontSize:11, color:'#9b9b9b', marginBottom:10 }}>
+                    📎 Tài liệu đính kèm{hasMdFile && <span style={{ color:'#15803d', fontWeight:600 }}> · có bản .md nhẹ kèm theo</span>}
+                  </div>
                   <div style={{ display:'flex', alignItems:'center', gap:12 }}>
                     <span style={{ fontSize:28, flexShrink:0 }}>{fIcon(fileName)}</span>
                     <div style={{ flex:1, minWidth:0 }}>
@@ -495,6 +515,26 @@ export default function DocDetail({ doc, onEdit, onClose }) {
                       📥 Tải về
                     </button>
                   </div>
+                  {hasMdFile && (
+                    <div style={{ display:'flex', alignItems:'center', gap:12, marginTop:10, paddingTop:10, borderTop:'0.5px dashed #c7d7f5' }}>
+                      <span style={{ fontSize:24, flexShrink:0 }}>📋</span>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:13, fontWeight:600, color:'#1a1a1a', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{mdFileName || 'ban-chuyen-doi.md'}</div>
+                        {mdFileSize > 0 && <div style={{ fontSize:11, color:'#9b9b9b', marginTop:2 }}>{(mdFileSize/1024).toFixed(0)} KB · dùng để Phân tích sâu</div>}
+                      </div>
+                      <button onClick={async () => {
+                          const a = document.createElement('a')
+                          a.href = `/api/read-file?url=${encodeURIComponent(mdFileUrl)}`
+                          a.download = mdFileName || 'ban-chuyen-doi.md'
+                          document.body.appendChild(a)
+                          a.click()
+                          document.body.removeChild(a)
+                        }}
+                        style={{ padding:'7px 14px', borderRadius:8, fontSize:12, fontWeight:600, background:'#f0fdf4', border:'0.5px solid #bbf7d0', color:'#15803d', cursor:'pointer' }}>
+                        📥 Tải bản .md
+                      </button>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{ marginBottom:12, padding:'12px 14px', borderRadius:10, background:'#fafaf8', border:'0.5px solid #e5e7eb', fontSize:12, color:'#9b9b9b', textAlign:'center' }}>
