@@ -524,15 +524,15 @@ function AppInner() {
   const [search,      setSearch]      = useState('')
   const [searchDebounced, setSearchDebounced] = useState('')
 
-  const handleSearchChange = (val) => {
-    setSearch(val)
-    // Nếu xóa hết → reset ngay
-    if (!val.trim()) setSearchDebounced('')
-  }
+  // Tìm kiếm theo thời gian thực — gõ tới đâu lọc tới đó, không cần bấm Enter
+  // nữa. Vẫn giữ debounce 250ms để không lọc lại danh sách ở MỖI lần gõ 1 ký
+  // tự (mượt hơn khi gõ nhanh, đặc biệt với danh sách dài).
+  useEffect(() => {
+    const t = setTimeout(() => setSearchDebounced(search), 250)
+    return () => clearTimeout(t)
+  }, [search])
 
-  const handleSearchEnter = (e) => {
-    if (e.key === 'Enter') setSearchDebounced(search)
-  }
+  const handleSearchChange = (val) => setSearch(val)
   const [filter,      setFilter]      = useState('all')
   const [modal,       setModal]       = useState(null)
   const [editDoc,     setEditDoc]     = useState(null)
@@ -1194,7 +1194,7 @@ ${fullCtx}`
             <div style={{ padding:'16px 24px 0', display:'flex', gap:10, flexShrink:0 }}>
               <div style={{ flex:1, position:'relative' }}>
                 <span style={{ position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', color:'#aaa' }}>🔍</span>
-                <input value={search} onChange={e => handleSearchChange(e.target.value)} onKeyDown={handleSearchEnter} placeholder="Tìm văn bản..."
+                <input value={search} onChange={e => handleSearchChange(e.target.value)} placeholder="Tìm văn bản..."
                   style={{ width:'100%', padding:'9px 12px 9px 36px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', boxSizing:'border-box' }}/>
               </div>
               {getCategory(proj) === 'project' && (
