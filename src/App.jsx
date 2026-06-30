@@ -533,6 +533,12 @@ function AppInner() {
   }, [search])
 
   const handleSearchChange = (val) => setSearch(val)
+  // Vẫn hỗ trợ bấm Enter cho người quen thao tác cũ — áp dụng NGAY lập tức,
+  // không cần chờ hết 250ms debounce (dù với debounce ngắn thế này thường đã
+  // tự lọc xong trước khi kịp bấm Enter, nhưng giữ lại cho chắc và quen tay).
+  const handleSearchEnter = (e) => {
+    if (e.key === 'Enter') setSearchDebounced(search)
+  }
   const [filter,      setFilter]      = useState('all')
   const [modal,       setModal]       = useState(null)
   const [editDoc,     setEditDoc]     = useState(null)
@@ -1194,7 +1200,7 @@ ${fullCtx}`
             <div style={{ padding:'16px 24px 0', display:'flex', gap:10, flexShrink:0 }}>
               <div style={{ flex:1, position:'relative' }}>
                 <span style={{ position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', color:'#aaa' }}>🔍</span>
-                <input value={search} onChange={e => handleSearchChange(e.target.value)} placeholder="Tìm văn bản..."
+                <input value={search} onChange={e => handleSearchChange(e.target.value)} onKeyDown={handleSearchEnter} placeholder="Tìm văn bản..."
                   style={{ width:'100%', padding:'9px 12px 9px 36px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', boxSizing:'border-box' }}/>
               </div>
               {getCategory(proj) === 'project' && (
