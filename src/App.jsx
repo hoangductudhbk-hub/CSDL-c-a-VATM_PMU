@@ -1075,10 +1075,10 @@ ${fullCtx}`
         })()}
 
         {!proj && !selCategory && tab !== 'history' && tab !== 'guide' && tab !== 'admin' && (
-          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:48, backgroundImage:'url(/vatm-cover.svg)', backgroundSize:'cover', backgroundPosition:'center', position:'relative' }}>
-            <img src="/vatm-logo.png" alt="VATM" style={{ width:200, height:200, borderRadius:'50%', objectFit:'cover', marginBottom:24, background:'#fff', boxShadow:'0 0 0 6px rgba(255,255,255,.12), 0 12px 36px rgba(0,0,0,.45)' }}/>
-            <h2 style={{ fontSize:26, fontWeight:700, color:'#fff', marginBottom:12, textShadow:'0 2px 12px rgba(0,0,0,.55)' }}>Chào mừng đến VATM-PMU</h2>
-            <p style={{ position:'absolute', bottom:16, right:24, fontSize:11, color:'#dce8f7' }}>Mọi ý kiến đóng góp xin gửi về: <a href="mailto:hoangductudhbk@gmail.com" style={{ color:'#fff', textDecoration:'none', fontWeight:600 }}>hoangductudhbk@gmail.com</a></p>
+          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:48, background:'linear-gradient(135deg, #e8f4fd 0%, #bdd9f0 100%)', position:'relative' }}>
+            <img src="/vatm-logo.png" alt="VATM" style={{ width:200, height:200, borderRadius:'50%', objectFit:'cover', marginBottom:24 }}/>
+            <h2 style={{ fontSize:24, fontWeight:700, color:'#0a2342', marginBottom:12 }}>Chào mừng đến VATM-PMU</h2>
+            <p style={{ position:'absolute', bottom:16, right:24, fontSize:11, color:'#333' }}>Mọi ý kiến đóng góp xin gửi về: <a href="mailto:hoangductudhbk@gmail.com" style={{ color:'#0a2342', textDecoration:'none', fontWeight:600 }}>hoangductudhbk@gmail.com</a></p>
           </div>
         )}
 
