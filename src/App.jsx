@@ -1190,25 +1190,28 @@ ${fullCtx}`
             )}
           </div>
 
+          {tab === 'docs' && (
+            <div style={{ padding:'16px 24px 0', display:'flex', gap:10, flexShrink:0 }}>
+              <div style={{ flex:1, position:'relative' }}>
+                <span style={{ position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', color:'#aaa' }}>🔍</span>
+                <input value={search} onChange={e => handleSearchChange(e.target.value)} onKeyDown={handleSearchEnter} placeholder="Tìm văn bản..."
+                  style={{ width:'100%', padding:'9px 12px 9px 36px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', boxSizing:'border-box' }}/>
+              </div>
+              {getCategory(proj) === 'project' && (
+                <select value={filter} onChange={e => setFilter(e.target.value)}
+                  style={{ padding:'9px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', background:'#fff' }}>
+                  <option value="all">Tất cả trạng thái</option>
+                  <option value="done">Hoàn thành</option>
+                  <option value="pending">Đang thực hiện</option>
+                  <option value="prep">Chưa thực hiện</option>
+                </select>
+              )}
+            </div>
+          )}
+
           <div style={{ flex:1, overflowY:'auto', padding:'16px 24px' }}>
             {tab === 'docs' && (
               <div>
-                <div style={{ display:'flex', gap:10, marginBottom:16 }}>
-                  <div style={{ flex:1, position:'relative' }}>
-                    <span style={{ position:'absolute', left:12, top:'50%', transform:'translateY(-50%)', color:'#aaa' }}>🔍</span>
-                    <input value={search} onChange={e => handleSearchChange(e.target.value)} onKeyDown={handleSearchEnter} placeholder="Tìm văn bản..."
-                      style={{ width:'100%', padding:'9px 12px 9px 36px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', boxSizing:'border-box' }}/>
-                  </div>
-                  {getCategory(proj) === 'project' && (
-                    <select value={filter} onChange={e => setFilter(e.target.value)}
-                      style={{ padding:'9px 12px', border:'0.5px solid #ddd', borderRadius:8, fontSize:13, outline:'none', background:'#fff' }}>
-                      <option value="all">Tất cả trạng thái</option>
-                      <option value="done">Hoàn thành</option>
-                      <option value="pending">Đang thực hiện</option>
-                      <option value="prep">Chưa thực hiện</option>
-                    </select>
-                  )}
-                </div>
                 <table style={{ width:'100%', borderCollapse:'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom:'0.5px solid #e5e4e0' }}>
@@ -1216,7 +1219,7 @@ ${fullCtx}`
                         ? ['Số hiệu văn bản','Ngày','Loại','Cơ quan ban hành','Nội dung / Về việc','Trạng thái','']
                         : ['Số hiệu văn bản','Ngày','Loại','Cơ quan ban hành','Nội dung / Về việc','']
                       ).map(h => (
-                        <th key={h} style={{ textAlign:'left', padding:'8px 12px', fontSize:14, color:'#888', fontWeight:500 }}>{h}</th>
+                        <th key={h} style={{ position:'sticky', top:0, zIndex:1, background:'#fff', textAlign:'left', padding:'8px 12px', fontSize:14, color:'#888', fontWeight:500, borderBottom:'0.5px solid #e5e4e0' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
