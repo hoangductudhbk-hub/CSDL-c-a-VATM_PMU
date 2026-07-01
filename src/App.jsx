@@ -559,6 +559,8 @@ function AppInner() {
   const [newPkgName,    setNewPkgName]    = useState('')
   const [projPage,      setProjPage]      = useState(0)
   const chatEndRef = useRef(null)
+  // Cache context per session (in-memory, reset khi F5) — tránh rebuild mỗi lần hỏi
+  const contextCacheRef = useRef({}) // key: cacheId, value: { docIdsSnapshot, memoryIdsSnapshot, docContexts }
 
   useEffect(() => {
     if (user && userDoc && !loggedIn) { logLogin(); setLoggedIn(true) }
@@ -721,10 +723,10 @@ function AppInner() {
     return `=== ${label} (chưa phân tích sâu) ===\n${combined}`
   }
 
-  // buildAndCacheContext — gom context 1 lần, cache vào Firestore collection
-  // "projectContextCache". Các lần hỏi tiếp theo dùng cache luôn, không gom lại.
+  // buildAndCacheContext — gom context 1 lần, lưu Firestore + in-memory.
+  // L1: contextCacheRef (in-memory) — nhanh nhất, dùng trong cùng session.
+  // L2: Firestore projectContextCache — persist qua F5, chỉ fetch 1 lần/session.
   // Chỉ rebuild khi: (1) có văn bản mới, (2) văn bản vừa được phân tích sâu.
-  // Trả về { docContexts } để buildSmartContext dùng tiếp mà không cần Firestore nữa.
   const buildAndCacheContext = async (docsInScope, labelFn, cacheId) => {
     if (!docsInScope.length) return {}
 
@@ -733,31 +735,42 @@ function AppInner() {
       .filter(d => { const m = projMemories[d.id]; return m && (m.summary || m.keyPoints?.length || m.financial?.length || m.legal?.length) })
       .map(d => d.id).sort()
 
-    // Đọc cache từ Firestore
-    let cached = null
+    // L1: kiểm tra in-memory trước (nhanh nhất, không tốn network)
+    const memCached = contextCacheRef.current[cacheId]
+    if (
+      memCached &&
+      JSON.stringify(memCached.docIdsSnapshot) === JSON.stringify(currentDocIds) &&
+      JSON.stringify(memCached.memoryIdsSnapshot) === JSON.stringify(currentMemIds)
+    ) {
+      return memCached.docContexts
+    }
+
+    // L2: đọc từ Firestore (persist qua F5)
+    let fsCached = null
     try {
       const snap = await getDoc(fsDoc(db, 'projectContextCache', cacheId))
-      if (snap.exists()) cached = snap.data()
+      if (snap.exists()) fsCached = snap.data()
     } catch {}
 
-    // Cache hợp lệ → dùng luôn, không gom lại
+    // Nếu Firestore cache hợp lệ → đưa vào memory rồi dùng luôn
     if (
-      cached &&
-      JSON.stringify(cached.docIdsSnapshot) === JSON.stringify(currentDocIds) &&
-      JSON.stringify(cached.memoryIdsSnapshot) === JSON.stringify(currentMemIds)
+      fsCached &&
+      JSON.stringify(fsCached.docIdsSnapshot) === JSON.stringify(currentDocIds) &&
+      JSON.stringify(fsCached.memoryIdsSnapshot) === JSON.stringify(currentMemIds)
     ) {
-      return cached.docContexts || {}
+      contextCacheRef.current[cacheId] = fsCached
+      return fsCached.docContexts
     }
 
     // Rebuild chỉ những doc cần thiết
-    const existingContexts = cached?.docContexts || {}
-    const cachedMemIds = new Set(cached?.memoryIdsSnapshot || [])
+    const existingContexts = fsCached?.docContexts || memCached?.docContexts || {}
+    const cachedMemIds = new Set(fsCached?.memoryIdsSnapshot || memCached?.memoryIdsSnapshot || [])
     const newMemIds = new Set(currentMemIds)
     const updatedContexts = { ...existingContexts }
 
     for (const d of docsInScope) {
-      const isNewDoc      = !existingContexts[d.id]
-      const justAnalyzed  = newMemIds.has(d.id) && !cachedMemIds.has(d.id)
+      const isNewDoc     = !existingContexts[d.id]
+      const justAnalyzed = newMemIds.has(d.id) && !cachedMemIds.has(d.id)
       if (isNewDoc || justAnalyzed) {
         updatedContexts[d.id] = await buildSingleDocCtx(d, labelFn)
       }
@@ -768,16 +781,21 @@ function AppInner() {
       if (!currentDocIds.includes(docId)) delete updatedContexts[docId]
     }
 
-    // Lưu cache mới
+    const newCache = {
+      docIdsSnapshot: currentDocIds,
+      memoryIdsSnapshot: currentMemIds,
+      docContexts: updatedContexts,
+      updatedAt: new Date().toISOString(),
+    }
+
+    // Lưu L1 (memory)
+    contextCacheRef.current[cacheId] = newCache
+
+    // Lưu L2 (Firestore — persist qua F5)
     try {
-      await setDoc(fsDoc(db, 'projectContextCache', cacheId), {
-        docIdsSnapshot: currentDocIds,
-        memoryIdsSnapshot: currentMemIds,
-        docContexts: updatedContexts,
-        updatedAt: new Date().toISOString(),
-      })
+      await setDoc(fsDoc(db, 'projectContextCache', cacheId), newCache)
     } catch (e) {
-      console.warn('[contextCache] Không lưu cache:', e.message)
+      console.warn('[contextCache] Không lưu Firestore:', e.message)
     }
 
     return updatedContexts
