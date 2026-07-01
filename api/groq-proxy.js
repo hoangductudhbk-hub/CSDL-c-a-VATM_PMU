@@ -2,14 +2,15 @@
 // Key KHÔNG bao giờ gửi về browser — chỉ đọc từ process.env trên Vercel.
 // Client gửi: { messages, maxTokens?, vision?: true }
 // Server gọi Groq, trả về: { ok: true, text } hoặc { error }
+//
+// SỬA 1/7/2026: đổi TEXT_MODEL sang qwen/qwen3.6-27b thay thế
+// llama-3.3-70b-versatile (deprecated 27/6/2026, ngừng 17/7/2026).
+// VISION_MODEL: llama-4-scout cũng deprecated 17/7/2026, Groq chưa có
+// model vision free-tier thay thế — giữ nguyên đến 17/7, sau đó
+// pipeline tự fallback về Gemini Vision (đã là lớp ưu tiên số 1).
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions'
-const TEXT_MODEL = 'llama-3.3-70b-versatile'
-// ⚠️ DEPRECATED 27/6/2026, NGỪNG HOẠT ĐỘNG 17/7/2026 (email Groq).
-// Model thay thế Groq đề xuất (GPT-OSS-120B/Qwen3.6-27B) KHÔNG đọc được ảnh —
-// model vision thay thế (Qwen3-VL) chỉ dành Enterprise. Trước 17/7/2026 phải
-// xác nhận lại: nếu Groq chưa có model vision free-tier mới, gỡ nhánh vision
-// này khỏi groq-proxy, chỉ dùng Gemini Vision (useAI.js đã ưu tiên Gemini trước).
+const TEXT_MODEL   = 'qwen/qwen3.6-27b'
 const VISION_MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct'
 
 const getGroqKeys = () => [
@@ -18,9 +19,6 @@ const getGroqKeys = () => [
   process.env.VITE_GROQ_API_KEY_3,
 ].filter(Boolean)
 
-// Mỗi key có timeout riêng 25s, thử tối đa 3 key nối tiếp → tệ nhất 75 giây,
-// vượt xa mức 10s mặc định của Hobby nếu không khai báo riêng → dễ bị Vercel
-// "giết" giữa lúc đang thử, ra lỗi 502 dù bản thân Groq/key không hề lỗi.
 export const config = { maxDuration: 60 }
 
 export default async function handler(req, res) {
@@ -59,13 +57,8 @@ export default async function handler(req, res) {
       const choice = data.choices?.[0]
       const text = choice?.message?.content || ''
       const finishReason = choice?.finish_reason
-      // 'stop' = hoàn thành bình thường. Các finish_reason khác ('length',
-      // 'content_filter'...) có thể trả text không rỗng nhưng bị cắt cụt giữa
-      // câu/giữa field JSON — không coi là thành công, thử key khác (cùng lỗi
-      // đã gặp và sửa ở gemini-proxy.js, vì cả 2 đều chỉ check "text rỗng hay
-      // không" mà bỏ qua finish reason).
       if (text && finishReason && finishReason !== 'stop') {
-        console.warn(`[groq-proxy] Dừng bất thường (finish_reason=${finishReason}) — bỏ qua, thử key khác. Text nhận được (100 ký tự đầu): ${text.slice(0, 100)}`)
+        console.warn(`[groq-proxy] finish_reason=${finishReason} — thử key khác`)
         continue
       }
       if (text) return res.status(200).json({ ok: true, text })
