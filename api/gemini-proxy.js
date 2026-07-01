@@ -1,25 +1,19 @@
 // api/gemini-proxy.js — Cổng trung gian DUY NHẤT cho mọi lệnh gọi Gemini.
-// Lý do tồn tại: Google chặn key dạng "AQ." (Authorization key) gọi trực tiếp
-// từ trình duyệt (CORS/bảo mật) — bắt buộc phải gọi từ server. File này nhận
-// yêu cầu từ client, gọi Gemini ở server, trả kết quả về — không expose key
-// ra trình duyệt nữa (đúng khuyến nghị bảo mật chính thức của Google).
+// Lý do tồn tại: Google chặn key dạng "AQ." gọi trực tiếp từ trình duyệt
+// (CORS/bảo mật) — bắt buộc phải gọi từ server.
 //
-// SỬA 22/6/2026: gemini-2.0-flash và gemini-2.0-flash-lite đã bị Google khai
-// tử 1/6/2026 — mọi request qua model cũ đều lỗi từ đó tới nay. Đổi sang
-// gemini-2.5-flash / gemini-2.5-flash-lite.
+// SỬA 22/6/2026: đổi sang gemini-2.5-flash / gemini-2.5-flash-lite.
+// SỬA 1/7/2026: thêm KEY_4 và KEY_5 — luân phiên 5 key từ 5 Gmail khác nhau,
+// tổng quota ~7500 req/ngày. Key nào 429/lỗi tự chuyển key tiếp theo.
 
 const getGeminiKeys = () => [
   process.env.VITE_GEMINI_API_KEY,
   process.env.VITE_GEMINI_API_KEY_2,
   process.env.VITE_GEMINI_API_KEY_3,
+  process.env.VITE_GEMINI_API_KEY_4,
+  process.env.VITE_GEMINI_API_KEY_5,
 ].filter(Boolean)
 
-// Hobby mặc định CHỈ cho 1 function chạy tối đa 10 giây nếu không khai báo
-// riêng — mà hàm này thử lần lượt 2 model × tối đa 3 key (tới 6 lượt gọi nối
-// tiếp nếu lượt đầu không ra) → dễ bị Vercel "giết" giữa lúc đang thử, ra lỗi
-// 502 dù bản thân Gemini/key không hề lỗi. Khai báo rõ tối đa 60s (giới hạn
-// cao nhất Hobby cho phép) để có đủ thời gian thử hết các phương án trước khi
-// kết luận thất bại.
 export const config = { maxDuration: 60 }
 
 const geminiUrl = (model, key) =>
@@ -40,7 +34,6 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  // Client gửi: { prompt } (text thuần) HOẶC { parts } (mảng part — dùng khi cần gửi PDF/ảnh)
   const { prompt, parts, maxTokens = 1500 } = req.body || {}
   if (!prompt && !parts) return res.status(400).json({ error: 'Thiếu prompt hoặc parts' })
 
@@ -73,14 +66,8 @@ export default async function handler(req, res) {
         const candidate = data.candidates?.[0]
         const text = candidate?.content?.parts?.[0]?.text || ''
         const finishReason = candidate?.finishReason
-        // STOP = model viết xong bình thường. Các finishReason khác (RECITATION
-        // — Google tự chặn khi output "chép" quá giống văn bản huấn luyện, rất
-        // dễ gặp với các cụm cố định trong văn bản hành chính; SAFETY; MAX_TOKENS...)
-        // vẫn có thể có "text" không rỗng nhưng bị CẮT CỤT giữa câu/giữa field
-        // JSON — đã gặp thực tế gây lỗi "Unterminated string" ở client. Không
-        // được coi đây là thành công dù text không rỗng — thử key/model khác.
         if (text && finishReason && finishReason !== 'STOP') {
-          console.warn(`[gemini-proxy] ${model} dừng bất thường (finishReason=${finishReason}) — bỏ qua, thử key/model khác. Text nhận được (100 ký tự đầu): ${text.slice(0, 100)}`)
+          console.warn(`[gemini-proxy] ${model} finishReason=${finishReason} — thử key/model khác`)
           continue
         }
         if (text) return res.status(200).json({ ok: true, text })
@@ -91,5 +78,5 @@ export default async function handler(req, res) {
     }
   }
 
-  return res.status(502).json({ error: 'Tất cả key/model Gemini đều thất bại. Xem log Vercel để biết lỗi cụ thể.' })
+  return res.status(502).json({ error: 'Tất cả key/model Gemini đều thất bại. Xem log Vercel.' })
 }
