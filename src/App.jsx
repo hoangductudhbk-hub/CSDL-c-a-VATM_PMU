@@ -20,7 +20,7 @@ import { useAuth }        from './context/AuthContext'
 import { useProjects }    from './hooks/useProjects'
 import { useDocuments }   from './hooks/useDocuments'
 import { usePackages }    from './hooks/usePackages'
-import { useAI }          from './hooks/useAI'
+import { useAI, findRelevantChunks } from './hooks/useAI'
 import { useMonthlyReport } from './hooks/useMonthlyReport'
 import DocModal           from './components/DocModal'
 import DocDetail          from './components/DocDetail'
@@ -486,7 +486,7 @@ function AppInner() {
 
   const { docs, allDocs, addDocument, updateDocument, deleteDocument } = useDocuments(proj?.id, user?.uid, selPkg)
   const { deleteFile }    = useCloudinaryStorage()
-  const { ask, askRaw } = useAI()
+  const { ask, askRaw, askDeep } = useAI()
   const { generateReport, generating: generatingReport } = useMonthlyReport()
 
   // Load memories của tất cả văn bản trong dự án
@@ -673,14 +673,26 @@ function AppInner() {
   }
 
   // buildSingleDocCtx — build context string cho 1 văn bản.
-  // Nếu đã phân tích sâu → lấy đầy đủ documentMemory.
-  // Chưa phân tích → lấy thông tin cơ bản ngắn (subject/detail/org).
-  const buildSingleDocCtx = (d, labelFn) => {
+  // Luôn lấy rawText từ documentMarkdown + documentMemory (nếu đã phân tích sâu).
+  // Kết quả được lưu vào cache nên chỉ fetch Firestore 1 lần duy nhất.
+  const RAW_TEXT_BUDGET = 8000 // ký tự rawText tối đa mỗi văn bản trong cache
+  const buildSingleDocCtx = async (d, labelFn) => {
     const label = labelFn(d)
     const mem = projMemories[d.id]
     const hasMem = mem && (mem.summary || mem.keyPoints?.length || mem.financial?.length || mem.legal?.length || mem.deadlines?.length)
+
+    // Fetch rawText từ Firestore
+    let rawText = ''
+    try {
+      const snap = await getDoc(fsDoc(db, 'documentMarkdown', d.id))
+      if (snap.exists()) {
+        const data = snap.data()
+        rawText = (data.rawText || data.markdown || '').slice(0, RAW_TEXT_BUDGET)
+      }
+    } catch {}
+
     if (hasMem) {
-      const lines = [
+      const memLines = [
         mem.summary   && `Tóm tắt: ${mem.summary}`,
         mem.keyPoints?.length && `Điểm quan trọng: ${mem.keyPoints.join('; ')}`,
         mem.financial?.length && `Tài chính: ${mem.financial.join('; ')}`,
@@ -690,15 +702,23 @@ function AppInner() {
         mem.requirements      && `Yêu cầu: ${mem.requirements}`,
         mem.risks             && `Rủi ro: ${mem.risks}`,
       ].filter(Boolean).join('\n')
-      return `=== ${label} ===\n${lines}`
+      const combined = rawText
+        ? `${memLines}\n\nNỘI DUNG GỐC:\n${rawText}`
+        : memLines
+      return `=== ${label} ===\n${combined}`
     }
+
+    // Chưa phân tích sâu → dùng rawText + thông tin cơ bản
     const basic = [
       d.subject && `Về việc: ${d.subject}`,
       d.detail  && `Tóm tắt: ${d.detail}`,
       d.org     && `Cơ quan: ${d.org}`,
       d.docType && `Loại: ${d.docType}`,
     ].filter(Boolean).join('\n')
-    return `=== ${label} (chưa phân tích sâu) ===\n${basic || d.subject || ''}`
+    const combined = rawText
+      ? `${basic}\n\nNỘI DUNG GỐC:\n${rawText}`
+      : (basic || d.subject || '')
+    return `=== ${label} (chưa phân tích sâu) ===\n${combined}`
   }
 
   // buildAndCacheContext — gom context 1 lần, cache vào Firestore collection
@@ -739,7 +759,7 @@ function AppInner() {
       const isNewDoc      = !existingContexts[d.id]
       const justAnalyzed  = newMemIds.has(d.id) && !cachedMemIds.has(d.id)
       if (isNewDoc || justAnalyzed) {
-        updatedContexts[d.id] = buildSingleDocCtx(d, labelFn)
+        updatedContexts[d.id] = await buildSingleDocCtx(d, labelFn)
       }
     }
 
@@ -974,48 +994,54 @@ NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
 ${fullCtx || '(chưa có văn bản nào)'}`
         }
       } else {
-        // Cấp 2/3: dùng cache Firestore — gom context 1 lần, tái sử dụng.
-        // Chỉ rebuild doc mới hoặc doc vừa phân tích sâu. Sau đó smart scoring
-        // từ cache (không cần Firestore thêm lần nào nữa).
+        // Cấp 2/3: dùng cache Firestore + askDeep — tương đương hỏi đáp trong lớp văn bản.
+        // (1) buildAndCacheContext: gom rawText + documentMemory, cache Firestore 1 lần
+        // (2) Merge tất cả documentMemory thành 1 memory tổng hợp cho dự án
+        // (3) findRelevantChunks: tìm đoạn liên quan nhất từ toàn bộ rawText đã cache
+        // (4) askDeep: gọi AI với memory + RAG — giống hệt đứng trong lớp văn bản
         const cacheId = `${proj?.id}_${selPkg || 'root'}`
         const labelFn = d => `[${d.code || d.subject || '—'}]`
         const docContexts = await buildAndCacheContext(safeDocs, labelFn, cacheId)
 
-        // Smart scoring từ cache — tìm doc liên quan câu hỏi nhất
-        const qLower = q.toLowerCase()
-        const qWords = qLower.split(/\s+/).filter(w => w.length > 2)
-        const scored = safeDocs.map(d => {
-          let score = 0
+        // Merge documentMemory của tất cả docs thành 1 memory tổng hợp
+        const mergedMemory = {
+          summary: `Dự án: ${proj?.name}${selPkgObj ? ' › ' + selPkgObj.name : ''} — ${stats.total} văn bản`,
+          keyPoints:  [],
+          financial:  [],
+          legal:      [],
+          deadlines:  [],
+          members:    [],
+          technicalSpecs: [],
+          otherData:  [],
+          requirements: '',
+          risks: '',
+        }
+        for (const d of safeDocs) {
           const mem = projMemories[d.id]
-          const text = [d.subject, d.code, d.org, mem?.summary, ...(mem?.keyPoints||[])].filter(Boolean).join(' ').toLowerCase()
-          for (const w of qWords) { if (text.includes(w)) score++ }
-          if (d.code && qLower.includes(d.code.toLowerCase())) score += 10
-          return { d, score }
-        }).sort((a,b) => b.score - a.score)
-
-        const topScore = scored[0]?.score || 0
-        let finalCtx = ''
-
-        if (topScore < 1) {
-          // Câu hỏi chung → ghép tất cả từ cache
-          finalCtx = safeDocs.map(d => docContexts[d.id] || '').filter(Boolean).join('\n\n')
-        } else {
-          // Câu hỏi cụ thể → ưu tiên doc liên quan nhất, còn lại tóm tắt 200 ký tự
-          const focusDocs = scored.filter(s => s.score >= topScore * 0.7).slice(0, 2).map(s => s.d)
-          const restDocs  = scored.filter(s => !focusDocs.includes(s.d)).map(s => s.d)
-          const focusParts = focusDocs.map(d => `=== [TẬP TRUNG] ${labelFn(d)} ===\n${(docContexts[d.id]||'').replace(/^=== .* ===\n/, '')}`)
-          const restParts  = restDocs.map(d => (docContexts[d.id]||'').slice(0, 200)).filter(Boolean)
-          finalCtx = [
-            ...focusParts,
-            restParts.length ? `\n--- Các văn bản khác ---\n${restParts.join('\n')}` : ''
-          ].filter(Boolean).join('\n\n')
+          if (!mem) continue
+          const docLabel = d.code || d.subject || '—'
+          if (mem.keyPoints?.length)     mergedMemory.keyPoints.push(...mem.keyPoints.map(x => `[${docLabel}] ${x}`))
+          if (mem.financial?.length)     mergedMemory.financial.push(...mem.financial.map(x => `[${docLabel}] ${x}`))
+          if (mem.legal?.length)         mergedMemory.legal.push(...mem.legal.map(x => `[${docLabel}] ${x}`))
+          if (mem.deadlines?.length)     mergedMemory.deadlines.push(...mem.deadlines.map(x => `[${docLabel}] ${x}`))
+          if (mem.members?.length)       mergedMemory.members.push(...mem.members.map(x => `[${docLabel}] ${x}`))
+          if (mem.technicalSpecs?.length) mergedMemory.technicalSpecs.push(...mem.technicalSpecs.map(x => `[${docLabel}] ${x}`))
+          if (mem.requirements)          mergedMemory.requirements += `[${docLabel}] ${mem.requirements}\n`
+          if (mem.risks)                 mergedMemory.risks += `[${docLabel}] ${mem.risks}\n`
         }
 
-        ctx = `Dự án: ${proj?.name}${selPkgObj ? ' › ' + selPkgObj.name : ''}
-Tổng: ${stats.total} văn bản | Hoàn thành: ${stats.done} | Đang thực hiện: ${stats.pending}
+        // Gom toàn bộ rawText từ cache → findRelevantChunks RAG
+        const allCachedText = safeDocs
+          .map(d => docContexts[d.id] || '')
+          .filter(Boolean)
+          .join('\n\n')
+        const relevantChunks = findRelevantChunks(allCachedText, q)
+        const relevantText = relevantChunks.map(c => c.text).join('\n---\n').slice(0, 4000)
 
-NỘI DUNG VĂN BẢN:
-${finalCtx}`
+        // Dùng chatHistory hiện tại để giữ ngữ cảnh hội thoại
+        const res = await askDeep(q, mergedMemory, chat, relevantText)
+        setChat(c => [...c, { role:'ai', content: res }])
+        return
       }
       const res = await ask(q, ctx)
       setChat(c => [...c, { role:'ai', content:res }])
