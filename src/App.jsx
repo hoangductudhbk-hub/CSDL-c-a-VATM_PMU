@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import React from 'react'
-import { collection, query, where, getDocs, getDoc, updateDoc, doc as fsDoc } from 'firebase/firestore'
+import { collection, query, where, getDocs, getDoc, updateDoc, setDoc, doc as fsDoc } from 'firebase/firestore'
 import { db } from './firebase'
 import * as XLSX from 'xlsx'
 
@@ -672,6 +672,194 @@ function AppInner() {
     return parts.join('\n\n')
   }
 
+  // buildSingleDocCtx — build context string cho 1 văn bản.
+  // Nếu đã phân tích sâu → lấy đầy đủ documentMemory.
+  // Chưa phân tích → lấy thông tin cơ bản ngắn (subject/detail/org).
+  const buildSingleDocCtx = (d, labelFn) => {
+    const label = labelFn(d)
+    const mem = projMemories[d.id]
+    const hasMem = mem && (mem.summary || mem.keyPoints?.length || mem.financial?.length || mem.legal?.length || mem.deadlines?.length)
+    if (hasMem) {
+      const lines = [
+        mem.summary   && `Tóm tắt: ${mem.summary}`,
+        mem.keyPoints?.length && `Điểm quan trọng: ${mem.keyPoints.join('; ')}`,
+        mem.financial?.length && `Tài chính: ${mem.financial.join('; ')}`,
+        mem.legal?.length     && `Pháp lý: ${mem.legal.join('; ')}`,
+        mem.deadlines?.length && `Tiến độ: ${mem.deadlines.join('; ')}`,
+        mem.members?.length   && `Thành viên: ${mem.members.join('; ')}`,
+        mem.requirements      && `Yêu cầu: ${mem.requirements}`,
+        mem.risks             && `Rủi ro: ${mem.risks}`,
+      ].filter(Boolean).join('\n')
+      return `=== ${label} ===\n${lines}`
+    }
+    const basic = [
+      d.subject && `Về việc: ${d.subject}`,
+      d.detail  && `Tóm tắt: ${d.detail}`,
+      d.org     && `Cơ quan: ${d.org}`,
+      d.docType && `Loại: ${d.docType}`,
+    ].filter(Boolean).join('\n')
+    return `=== ${label} (chưa phân tích sâu) ===\n${basic || d.subject || ''}`
+  }
+
+  // buildAndCacheContext — gom context 1 lần, cache vào Firestore collection
+  // "projectContextCache". Các lần hỏi tiếp theo dùng cache luôn, không gom lại.
+  // Chỉ rebuild khi: (1) có văn bản mới, (2) văn bản vừa được phân tích sâu.
+  // Trả về { docContexts } để buildSmartContext dùng tiếp mà không cần Firestore nữa.
+  const buildAndCacheContext = async (docsInScope, labelFn, cacheId) => {
+    if (!docsInScope.length) return {}
+
+    const currentDocIds = docsInScope.map(d => d.id).sort()
+    const currentMemIds = docsInScope
+      .filter(d => { const m = projMemories[d.id]; return m && (m.summary || m.keyPoints?.length || m.financial?.length || m.legal?.length) })
+      .map(d => d.id).sort()
+
+    // Đọc cache từ Firestore
+    let cached = null
+    try {
+      const snap = await getDoc(fsDoc(db, 'projectContextCache', cacheId))
+      if (snap.exists()) cached = snap.data()
+    } catch {}
+
+    // Cache hợp lệ → dùng luôn, không gom lại
+    if (
+      cached &&
+      JSON.stringify(cached.docIdsSnapshot) === JSON.stringify(currentDocIds) &&
+      JSON.stringify(cached.memoryIdsSnapshot) === JSON.stringify(currentMemIds)
+    ) {
+      return cached.docContexts || {}
+    }
+
+    // Rebuild chỉ những doc cần thiết
+    const existingContexts = cached?.docContexts || {}
+    const cachedMemIds = new Set(cached?.memoryIdsSnapshot || [])
+    const newMemIds = new Set(currentMemIds)
+    const updatedContexts = { ...existingContexts }
+
+    for (const d of docsInScope) {
+      const isNewDoc      = !existingContexts[d.id]
+      const justAnalyzed  = newMemIds.has(d.id) && !cachedMemIds.has(d.id)
+      if (isNewDoc || justAnalyzed) {
+        updatedContexts[d.id] = buildSingleDocCtx(d, labelFn)
+      }
+    }
+
+    // Xóa doc không còn trong scope
+    for (const docId of Object.keys(updatedContexts)) {
+      if (!currentDocIds.includes(docId)) delete updatedContexts[docId]
+    }
+
+    // Lưu cache mới
+    try {
+      await setDoc(fsDoc(db, 'projectContextCache', cacheId), {
+        docIdsSnapshot: currentDocIds,
+        memoryIdsSnapshot: currentMemIds,
+        docContexts: updatedContexts,
+        updatedAt: new Date().toISOString(),
+      })
+    } catch (e) {
+      console.warn('[contextCache] Không lưu cache:', e.message)
+    }
+
+    return updatedContexts
+  }
+
+  // buildSmartContext — dùng cho hỏi đáp ở cấp dự án/gói thầu.
+  // Phát hiện câu hỏi liên quan văn bản nào nhất → cấp full budget cho văn bản đó
+  // (đọc sâu như đang đứng trong lớp văn bản), các văn bản còn lại chỉ tóm tắt ngắn.
+  // Câu hỏi chung chung (không khớp văn bản cụ thể) → fallback về buildFullTextContext.
+  const buildSmartContext = async (docsInScope, labelFn, question) => {
+    if (!docsInScope.length) return ''
+
+    // Tính điểm liên quan cho từng văn bản dựa trên câu hỏi
+    const qLower = question.toLowerCase()
+    const qWords = qLower.split(/\s+/).filter(w => w.length > 2)
+
+    const scoreDoc = (d) => {
+      let score = 0
+      const mem = projMemories[d.id]
+      const searchText = [
+        d.subject, d.code, d.org, d.docType, d.detail, d.note,
+        mem?.summary,
+        ...(mem?.keyPoints || []),
+        ...(mem?.members || []),
+      ].filter(Boolean).join(' ').toLowerCase()
+
+      for (const w of qWords) {
+        if (searchText.includes(w)) score += 1
+      }
+      // Bonus nếu câu hỏi nhắc đúng số hiệu văn bản
+      if (d.code && qLower.includes(d.code.toLowerCase())) score += 10
+      return score
+    }
+
+    const scored = docsInScope.map(d => ({ d, score: scoreDoc(d) }))
+    scored.sort((a, b) => b.score - a.score)
+
+    const topScore = scored[0]?.score || 0
+
+    // Nếu không có văn bản nào khớp rõ → trả về context tổng quan như cũ
+    if (topScore < 1) return buildFullTextContext(docsInScope, labelFn)
+
+    // Văn bản liên quan nhất (tối đa 2 nếu điểm gần nhau) → full budget
+    const FULL_BUDGET = 10000
+    const SHORT_BUDGET = 300
+    const focusDocs = scored.filter(s => s.score >= topScore * 0.7).slice(0, 2).map(s => s.d)
+    const restDocs  = scored.filter(s => !focusDocs.includes(s.d)).map(s => s.d)
+
+    // Lấy full documentMemory + rawText cho văn bản trọng tâm
+    const buildFocusPart = async (d) => {
+      const label = labelFn(d)
+      const mem = projMemories[d.id]
+      const hasMem = mem && (mem.summary || mem.keyPoints?.length || mem.financial?.length || mem.legal?.length)
+      if (hasMem) {
+        const lines = [
+          mem.summary   && `Tóm tắt: ${mem.summary}`,
+          mem.keyPoints?.length && `Điểm quan trọng: ${mem.keyPoints.join('; ')}`,
+          mem.financial?.length && `Tài chính: ${mem.financial.join('; ')}`,
+          mem.legal?.length     && `Pháp lý: ${mem.legal.join('; ')}`,
+          mem.deadlines?.length && `Tiến độ: ${mem.deadlines.join('; ')}`,
+          mem.members?.length   && `Thành viên: ${mem.members.join('; ')}`,
+          mem.requirements      && `Yêu cầu: ${mem.requirements}`,
+          mem.risks             && `Rủi ro: ${mem.risks}`,
+        ].filter(Boolean).join('\n')
+        // Thêm rawText để AI có thể trả lời chi tiết như đứng trong lớp văn bản
+        let raw = ''
+        try {
+          const snap = await getDoc(fsDoc(db, 'documentMarkdown', d.id))
+          if (snap.exists()) {
+            const data = snap.data()
+            raw = (data.rawText || data.markdown || '').slice(0, FULL_BUDGET - lines.length)
+          }
+        } catch {}
+        const combined = raw ? `${lines}\n\nNỘI DUNG GỐC:\n${raw}` : lines
+        return `=== [TẬP TRUNG] ${label} ===\n${combined.slice(0, FULL_BUDGET)}`
+      }
+      // Chưa phân tích sâu → lấy rawText đầy đủ
+      try {
+        const snap = await getDoc(fsDoc(db, 'documentMarkdown', d.id))
+        if (snap.exists()) {
+          const data = snap.data()
+          const full = (data.rawText || data.markdown || '').slice(0, FULL_BUDGET)
+          if (full) return `=== [TẬP TRUNG] ${label} (chưa phân tích sâu) ===\n${full}`
+        }
+      } catch {}
+      return `=== [TẬP TRUNG] ${label} ===\n${d.subject || ''}`
+    }
+
+    // Tóm tắt ngắn cho các văn bản không trọng tâm
+    const buildShortPart = (d) => {
+      const label = labelFn(d)
+      const mem = projMemories[d.id]
+      const summary = mem?.summary || d.subject || d.detail || ''
+      return `=== ${label} ===\n${summary.slice(0, SHORT_BUDGET)}`
+    }
+
+    const focusParts = await Promise.all(focusDocs.map(buildFocusPart))
+    const restParts  = restDocs.map(buildShortPart)
+
+    return [...focusParts, ...(restParts.length ? [`\n--- CÁC VĂN BẢN KHÁC (tóm tắt) ---`, ...restParts] : [])].join('\n\n')
+  }
+
   // Nguồn riêng cho BÁO CÁO THÁNG — lấy bộ nhớ ĐÃ PHÂN TÍCH SÂU (collection
   // documentMemory: summary/keyPoints/financial/legal/deadlines/members/...)
   // làm nguồn CHÍNH, vì các nhóm thông tin đó đã khớp gần như 1:1 với các mục
@@ -786,15 +974,48 @@ NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
 ${fullCtx || '(chưa có văn bản nào)'}`
         }
       } else {
-        // Cấp 2 (dự án/quy định, xem hết các gói thầu) hoặc cấp 3 (1 gói thầu cụ thể)
-        // — đều hiểu sâu TOÀN BỘ văn bản trong đúng phạm vi đang chọn (safeDocs đã tự
-        // lọc theo selPkg nếu có, hoặc cả dự án nếu chưa chọn gói thầu).
-        const fullCtx = await buildFullTextContext(safeDocs, d => `[${d.code || d.subject || '—'}]`)
+        // Cấp 2/3: dùng cache Firestore — gom context 1 lần, tái sử dụng.
+        // Chỉ rebuild doc mới hoặc doc vừa phân tích sâu. Sau đó smart scoring
+        // từ cache (không cần Firestore thêm lần nào nữa).
+        const cacheId = `${proj?.id}_${selPkg || 'root'}`
+        const labelFn = d => `[${d.code || d.subject || '—'}]`
+        const docContexts = await buildAndCacheContext(safeDocs, labelFn, cacheId)
+
+        // Smart scoring từ cache — tìm doc liên quan câu hỏi nhất
+        const qLower = q.toLowerCase()
+        const qWords = qLower.split(/\s+/).filter(w => w.length > 2)
+        const scored = safeDocs.map(d => {
+          let score = 0
+          const mem = projMemories[d.id]
+          const text = [d.subject, d.code, d.org, mem?.summary, ...(mem?.keyPoints||[])].filter(Boolean).join(' ').toLowerCase()
+          for (const w of qWords) { if (text.includes(w)) score++ }
+          if (d.code && qLower.includes(d.code.toLowerCase())) score += 10
+          return { d, score }
+        }).sort((a,b) => b.score - a.score)
+
+        const topScore = scored[0]?.score || 0
+        let finalCtx = ''
+
+        if (topScore < 1) {
+          // Câu hỏi chung → ghép tất cả từ cache
+          finalCtx = safeDocs.map(d => docContexts[d.id] || '').filter(Boolean).join('\n\n')
+        } else {
+          // Câu hỏi cụ thể → ưu tiên doc liên quan nhất, còn lại tóm tắt 200 ký tự
+          const focusDocs = scored.filter(s => s.score >= topScore * 0.7).slice(0, 2).map(s => s.d)
+          const restDocs  = scored.filter(s => !focusDocs.includes(s.d)).map(s => s.d)
+          const focusParts = focusDocs.map(d => `=== [TẬP TRUNG] ${labelFn(d)} ===\n${(docContexts[d.id]||'').replace(/^=== .* ===\n/, '')}`)
+          const restParts  = restDocs.map(d => (docContexts[d.id]||'').slice(0, 200)).filter(Boolean)
+          finalCtx = [
+            ...focusParts,
+            restParts.length ? `\n--- Các văn bản khác ---\n${restParts.join('\n')}` : ''
+          ].filter(Boolean).join('\n\n')
+        }
+
         ctx = `Dự án: ${proj?.name}${selPkgObj ? ' › ' + selPkgObj.name : ''}
 Tổng: ${stats.total} văn bản | Hoàn thành: ${stats.done} | Đang thực hiện: ${stats.pending}
 
-NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
-${fullCtx}`
+NỘI DUNG VĂN BẢN:
+${finalCtx}`
       }
       const res = await ask(q, ctx)
       setChat(c => [...c, { role:'ai', content:res }])
