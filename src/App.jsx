@@ -1012,51 +1012,65 @@ NỘI DUNG ĐẦY ĐỦ TỪNG VĂN BẢN:
 ${fullCtx || '(chưa có văn bản nào)'}`
         }
       } else {
-        // Cấp 2/3: dùng cache Firestore + askDeep — tương đương hỏi đáp trong lớp văn bản.
-        // (1) buildAndCacheContext: gom rawText + documentMemory, cache Firestore 1 lần
-        // (2) Merge tất cả documentMemory thành 1 memory tổng hợp cho dự án
-        // (3) findRelevantChunks: tìm đoạn liên quan nhất từ toàn bộ rawText đã cache
-        // (4) askDeep: gọi AI với memory + RAG — giống hệt đứng trong lớp văn bản
+        // Cấp 2/3: cache context + askDeep thông minh.
+        // Bước 1: buildAndCacheContext — gom rawText + memory, lưu cache 1 lần
+        // Bước 2: smart scoring — tìm docs liên quan câu hỏi nhất
+        // Bước 3: chỉ merge memory của docs liên quan (tránh token limit)
+        // Bước 4: RAG từ toàn bộ cache → lấy đoạn khớp nhất
+        // Bước 5: askDeep với memory gọn + RAG chính xác
         const cacheId = `${proj?.id}_${selPkg || 'root'}`
         const labelFn = d => `[${d.code || d.subject || '—'}]`
         const docContexts = await buildAndCacheContext(safeDocs, labelFn, cacheId)
 
-        // Merge documentMemory của tất cả docs thành 1 memory tổng hợp
+        // Smart scoring — tìm docs liên quan câu hỏi
+        const qLower = q.toLowerCase()
+        const qWords = qLower.split(/\s+/).filter(w => w.length > 2)
+        const scored = safeDocs.map(d => {
+          let score = 0
+          const mem = projMemories[d.id]
+          const text = [d.subject, d.code, d.org, mem?.summary, ...(mem?.keyPoints||[]), ...(mem?.members||[])].filter(Boolean).join(' ').toLowerCase()
+          for (const w of qWords) { if (text.includes(w)) score++ }
+          if (d.code && qLower.includes(d.code.toLowerCase())) score += 10
+          return { d, score }
+        }).sort((a, b) => b.score - a.score)
+
+        const topScore = scored[0]?.score || 0
+
+        // Chọn docs để build memory: nếu có doc liên quan → chỉ dùng top docs
+        // Câu hỏi chung (topScore < 1) → dùng tối đa 3 docs đầu tránh quá lớn
+        const MAX_MEM_DOCS = 3
+        const memDocs = topScore >= 1
+          ? scored.filter(s => s.score >= topScore * 0.6).slice(0, 2).map(s => s.d)
+          : safeDocs.slice(0, MAX_MEM_DOCS)
+
+        // Merge memory CHỈ từ memDocs — kiểm soát kích thước prompt
+        const MAX_ITEMS = 8 // tối đa items mỗi field tránh token limit
         const mergedMemory = {
           summary: `Dự án: ${proj?.name}${selPkgObj ? ' › ' + selPkgObj.name : ''} — ${stats.total} văn bản`,
-          keyPoints:  [],
-          financial:  [],
-          legal:      [],
-          deadlines:  [],
-          members:    [],
-          technicalSpecs: [],
-          otherData:  [],
-          requirements: '',
-          risks: '',
+          keyPoints: [], financial: [], legal: [], deadlines: [],
+          members: [], technicalSpecs: [], otherData: [],
+          requirements: '', risks: '',
         }
-        for (const d of safeDocs) {
+        for (const d of memDocs) {
           const mem = projMemories[d.id]
           if (!mem) continue
-          const docLabel = d.code || d.subject || '—'
-          if (mem.keyPoints?.length)     mergedMemory.keyPoints.push(...mem.keyPoints.map(x => `[${docLabel}] ${x}`))
-          if (mem.financial?.length)     mergedMemory.financial.push(...mem.financial.map(x => `[${docLabel}] ${x}`))
-          if (mem.legal?.length)         mergedMemory.legal.push(...mem.legal.map(x => `[${docLabel}] ${x}`))
-          if (mem.deadlines?.length)     mergedMemory.deadlines.push(...mem.deadlines.map(x => `[${docLabel}] ${x}`))
-          if (mem.members?.length)       mergedMemory.members.push(...mem.members.map(x => `[${docLabel}] ${x}`))
-          if (mem.technicalSpecs?.length) mergedMemory.technicalSpecs.push(...mem.technicalSpecs.map(x => `[${docLabel}] ${x}`))
-          if (mem.requirements)          mergedMemory.requirements += `[${docLabel}] ${mem.requirements}\n`
-          if (mem.risks)                 mergedMemory.risks += `[${docLabel}] ${mem.risks}\n`
+          const lbl = d.code || d.subject || '—'
+          const push = (arr, src) => { if (src?.length) arr.push(...src.slice(0, MAX_ITEMS).map(x => `[${lbl}] ${x}`)) }
+          push(mergedMemory.keyPoints,     mem.keyPoints)
+          push(mergedMemory.financial,     mem.financial)
+          push(mergedMemory.legal,         mem.legal)
+          push(mergedMemory.deadlines,     mem.deadlines)
+          push(mergedMemory.members,       mem.members)
+          push(mergedMemory.technicalSpecs, mem.technicalSpecs)
+          if (mem.requirements) mergedMemory.requirements += `[${lbl}] ${mem.requirements.slice(0, 300)}\n`
+          if (mem.risks)        mergedMemory.risks        += `[${lbl}] ${mem.risks.slice(0, 300)}\n`
         }
 
-        // Gom toàn bộ rawText từ cache → findRelevantChunks RAG
-        const allCachedText = safeDocs
-          .map(d => docContexts[d.id] || '')
-          .filter(Boolean)
-          .join('\n\n')
+        // RAG: tìm đoạn liên quan từ toàn bộ cache (bao gồm cả docs không trong memDocs)
+        const allCachedText = safeDocs.map(d => docContexts[d.id] || '').filter(Boolean).join('\n\n')
         const relevantChunks = findRelevantChunks(allCachedText, q)
         const relevantText = relevantChunks.map(c => c.text).join('\n---\n').slice(0, 4000)
 
-        // Dùng chatHistory hiện tại để giữ ngữ cảnh hội thoại
         const res = await askDeep(q, mergedMemory, chat, relevantText)
         setChat(c => [...c, { role:'ai', content: res }])
         return
